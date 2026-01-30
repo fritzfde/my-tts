@@ -43,43 +43,6 @@ function loadVoices() {
     return allowedLanguages.includes(lang);
   });
   
-  // Add cloned voices first (if any)
-  if (clonedVoices.length > 0) {
-    clonedVoices.forEach(voiceName => {
-      const option = document.createElement('option');
-      option.value = `cloned-${voiceName}`;
-      option.textContent = `🎙️ ${voiceName} (Cloned Voice)`;
-      voiceSelect.appendChild(option);
-    });
-    
-    // Add separator
-    const separator1 = document.createElement('option');
-    separator1.disabled = true;
-    separator1.textContent = '──────────────';
-    voiceSelect.appendChild(separator1);
-  }
-  
-  // Add custom AI voices
-  const customVoices = [
-    { name: '🎭 Elon Musk (AI)', value: 'custom-elon', type: 'custom' },
-    { name: '🎭 Donald Trump (AI)', value: 'custom-trump', type: 'custom' }
-  ];
-  
-  customVoices.forEach(voice => {
-    const option = document.createElement('option');
-    option.value = voice.value;
-    const elevenLabsInput = document.getElementById('elevenLabsKey');
-    const hasKey = elevenLabsInput && elevenLabsInput.value.trim();
-    option.textContent = voice.name + (hasKey ? '' : ' [Simulated]');
-    voiceSelect.appendChild(option);
-  });
-  
-  // Add separator
-  const separator = document.createElement('option');
-  separator.disabled = true;
-  separator.textContent = '──────────────';
-  voiceSelect.appendChild(separator);
-  
   // Group voices by language
   const voicesByLang = {
     'en': [],
@@ -88,7 +51,7 @@ function loadVoices() {
     'uk': [],
     'ru': []
   };
-  
+
   filteredVoices.forEach((voice, originalIndex) => {
     const lang = voice.lang.toLowerCase().substring(0, 2);
     if (voicesByLang[lang]) {
@@ -97,8 +60,8 @@ function loadVoices() {
       voicesByLang[lang].push({ voice, index: globalIndex });
     }
   });
-  
-  // Add voices grouped by language
+
+  // Add SYSTEM voices first grouped by language
   const langNames = {
     'en': '🇺🇸 English',
     'de': '🇩🇪 German',
@@ -106,7 +69,7 @@ function loadVoices() {
     'uk': '🇺🇦 Ukrainian',
     'ru': '🇷🇺 Russian'
   };
-  
+
   allowedLanguages.forEach(langCode => {
     const langVoices = voicesByLang[langCode];
     if (langVoices && langVoices.length > 0) {
@@ -115,7 +78,7 @@ function loadVoices() {
       header.disabled = true;
       header.textContent = `── ${langNames[langCode]} ──`;
       voiceSelect.appendChild(header);
-      
+
       // Add voices for this language
       langVoices.forEach(({ voice, index }) => {
         const option = document.createElement('option');
@@ -125,8 +88,59 @@ function loadVoices() {
       });
     }
   });
-  
+
+  // Add CUSTOM cloned voices LAST (if any)
+  if (clonedVoices.length > 0) {
+    // Add separator before custom voices
+    const separator = document.createElement('option');
+    separator.disabled = true;
+    separator.textContent = '──────────────';
+    voiceSelect.appendChild(separator);
+
+    // Add custom voices header
+    const customHeader = document.createElement('option');
+    customHeader.disabled = true;
+    customHeader.textContent = '── 🎙️ Custom Voices ──';
+    voiceSelect.appendChild(customHeader);
+
+    clonedVoices.forEach(voiceName => {
+      const option = document.createElement('option');
+      option.value = `cloned-${voiceName}`;
+      option.textContent = `  ${voiceName}`;
+      voiceSelect.appendChild(option);
+    });
+  }
+
+  // Load saved voice preference or set first English voice as default
+  const savedVoice = localStorage.getItem('selected_voice');
+  if (savedVoice && Array.from(voiceSelect.options).some(opt => opt.value === savedVoice)) {
+    voiceSelect.value = savedVoice;
+    console.log('Loaded saved voice:', savedVoice);
+  } else {
+    // Set first English system voice as default (NOT custom voice)
+    const firstEnglish = Array.from(voiceSelect.options).find(opt =>
+      opt.value.startsWith('system-')
+    );
+    if (firstEnglish) {
+      voiceSelect.value = firstEnglish.value;
+      console.log('Set default voice:', firstEnglish.value);
+    }
+  }
+
   console.log('Loaded voices:', voiceSelect.options.length, 'including', clonedVoices.length, 'cloned voices');
+}
+
+// Save voice preference when changed
+if (typeof document !== 'undefined') {
+  document.addEventListener('DOMContentLoaded', () => {
+    const voiceSelect = document.getElementById('voiceSelect');
+    if (voiceSelect) {
+      voiceSelect.addEventListener('change', () => {
+        localStorage.setItem('selected_voice', voiceSelect.value);
+        console.log('Saved voice preference:', voiceSelect.value);
+      });
+    }
+  });
 }
 
 // Load voices on page load and when they change
@@ -174,7 +188,7 @@ function loadUserVoices() {
       userVoices = {};
     }
   }
-  
+
   // Load recent users
   const savedRecentUsers = localStorage.getItem('recent_users');
   if (savedRecentUsers) {
@@ -228,7 +242,7 @@ function loadSettings() {
   const savedElevenLabsKey = localStorage.getItem('yt_tts_elevenlabs_key');
   const savedChannelUrl = localStorage.getItem('yt_tts_channel_url');
   const savedStreamUrl = localStorage.getItem('yt_tts_stream_url');
-  
+
   // Pre-fill YouTube API key
   if (savedApiKey) {
     apiKeyInput.value = savedApiKey;
@@ -236,7 +250,7 @@ function loadSettings() {
     // Default API key
     apiKeyInput.value = 'AIzaSyAWVq4gtDP4rYaWKHH_2TvzBjxfRBr6kBE';
   }
-  
+
   // Pre-fill ElevenLabs API key
   if (savedElevenLabsKey) {
     elevenLabsKeyInput.value = savedElevenLabsKey;
@@ -244,7 +258,7 @@ function loadSettings() {
     // Default ElevenLabs key
     elevenLabsKeyInput.value = 'sk_b8531bb9517d1ae50c7f038df6107677f0a945003a99696d';
   }
-  
+
   // Pre-fill Channel URL
   if (savedChannelUrl) {
     channelUrlInput.value = savedChannelUrl;
@@ -252,12 +266,12 @@ function loadSettings() {
     // Default channel URL
     channelUrlInput.value = 'https://www.youtube.com/@TESLAbot-CODM';
   }
-  
+
   // Pre-fill Stream URL if available
   if (savedStreamUrl) {
     streamUrlInput.value = savedStreamUrl;
   }
-  
+
   // Save these defaults
   saveSettings();
 }
@@ -268,19 +282,19 @@ function saveSettings() {
   const elevenLabsKey = elevenLabsKeyInput.value.trim();
   const channelUrl = channelUrlInput.value.trim();
   const streamUrl = streamUrlInput.value.trim();
-  
+
   if (apiKey) {
     localStorage.setItem('yt_tts_api_key', apiKey);
   }
-  
+
   if (elevenLabsKey) {
     localStorage.setItem('yt_tts_elevenlabs_key', elevenLabsKey);
   }
-  
+
   if (channelUrl) {
     localStorage.setItem('yt_tts_channel_url', channelUrl);
   }
-  
+
   if (streamUrl) {
     localStorage.setItem('yt_tts_stream_url', streamUrl);
   }
@@ -298,7 +312,7 @@ function extractChannelId(url) {
     /@([^\/\?]+)/,  // @username
     /channel\/([^\/\?]+)/  // channel/ID
   ];
-  
+
   for (const pattern of patterns) {
     const match = url.match(pattern);
     if (match) return match[1];
@@ -312,7 +326,7 @@ function extractVideoId(url) {
     /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/,
     /youtube\.com\/live\/([^&\n?#]+)/
   ];
-  
+
   for (const pattern of patterns) {
     const match = url.match(pattern);
     if (match) return match[1];
@@ -324,66 +338,66 @@ function extractVideoId(url) {
 async function findLiveStream(apiKey, channelIdentifier) {
   try {
     updateStatus('Searching for live streams...', true);
-    
+
     // First, get the channel ID if we have a username
     let channelId = channelIdentifier;
-    
+
     if (channelIdentifier.startsWith('@')) {
       const username = channelIdentifier.substring(1);
-      
+
       // Try forHandle parameter (newer API)
       let response = await fetch(
         `/api/youtube/channels?part=id&forHandle=${username}&key=${apiKey}`
       );
-      
+
       // If that doesn't work, try forUsername (older API)
       if (!response.ok) {
         response = await fetch(
           `/api/youtube/channels?part=id&forUsername=${username}&key=${apiKey}`
         );
       }
-      
+
       if (!response.ok) {
         throw new Error('Failed to find channel. Check your channel URL.');
       }
-      
+
       const data = await response.json();
       if (!data.items || data.items.length === 0) {
         throw new Error('Channel not found. Make sure the URL is correct.');
       }
-      
+
       channelId = data.items[0].id;
       console.log('Found channel ID:', channelId);
     }
-    
+
     // Search for live streams
     const searchResponse = await fetch(
       `/api/youtube/search?part=snippet&channelId=${channelId}&eventType=live&type=video&key=${apiKey}`
     );
-    
+
     if (!searchResponse.ok) {
       throw new Error('Failed to search for live streams');
     }
-    
+
     const searchData = await searchResponse.json();
-    
+
     if (!searchData.items || searchData.items.length === 0) {
       throw new Error('No live streams found for this channel. Make sure you are currently live.');
     }
-    
+
     // Get the first live stream
     const liveVideo = searchData.items[0];
     const videoId = liveVideo.id.videoId;
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    
+
     streamUrlInput.value = videoUrl;
     saveSettings(); // Save the stream URL immediately
     updateStatus(`✓ Found: ${liveVideo.snippet.title}`, false);
-    
+
     console.log('Found live stream:', videoUrl);
-    
+
     return videoUrl;
-    
+
   } catch (error) {
     console.error('Find stream error:', error);
     updateStatus(`${error.message}`, false, true);
@@ -395,38 +409,38 @@ async function findLiveStream(apiKey, channelIdentifier) {
 findStreamBtn.addEventListener('click', async () => {
   const apiKey = apiKeyInput.value.trim();
   const channelUrl = channelUrlInput.value.trim();
-  
+
   if (!apiKey) {
     updateStatus('Please enter your API key first', false, true);
     return;
   }
-  
+
   if (!channelUrl) {
     updateStatus('Please enter your channel URL first', false, true);
     return;
   }
-  
+
   const channelId = extractChannelId(channelUrl);
   if (!channelId) {
     updateStatus('Invalid channel URL', false, true);
     return;
   }
-  
+
   saveSettings();
-  
+
   try {
     findStreamBtn.disabled = true;
     findStreamBtn.textContent = '🔄 Searching...';
     updateStatus('Looking for live stream...', true);
-    
+
     await findLiveStream(apiKey, channelId);
-    
+
     // Auto-start after finding!
     updateStatus('✓ Stream found! Starting automatically...', false);
     setTimeout(() => {
       startBtn.click();
     }, 1000);
-    
+
   } catch (error) {
     console.error('Error finding stream:', error);
     streamUrlInput.value = ''; // Clear invalid URL
@@ -441,7 +455,7 @@ findStreamBtn.addEventListener('click', async () => {
 // Filter message text based on settings
 function filterMessage(text) {
   let filtered = text;
-  
+
   // Remove emojis if checkbox is unchecked
   if (!readEmojisCheckbox.checked) {
     // Remove emoji characters (basic Unicode ranges)
@@ -455,17 +469,17 @@ function filterMessage(text) {
     filtered = filtered.replace(/[\u{1FA00}-\u{1FA6F}]/gu, ''); // Chess Symbols
     filtered = filtered.replace(/[\u{1FA70}-\u{1FAFF}]/gu, ''); // Symbols and Pictographs Extended-A
   }
-  
+
   // Remove links if checkbox is unchecked
   if (!readLinksCheckbox.checked) {
     // Remove URLs
     filtered = filtered.replace(/https?:\/\/[^\s]+/g, '');
     filtered = filtered.replace(/www\.[^\s]+/g, '');
   }
-  
+
   // Clean up extra spaces
   filtered = filtered.replace(/\s+/g, ' ').trim();
-  
+
   return filtered;
 }
 
@@ -474,7 +488,7 @@ async function speakWithCustomVoice(voiceType, text) {
   // Check if it's a cloned voice
   if (voiceType.startsWith('cloned-')) {
     const voiceName = voiceType.replace('cloned-', '');
-    
+
     try {
       console.log('Using cloned voice:', voiceName);
       const response = await fetch('/api/voice-clone/tts', {
@@ -487,13 +501,13 @@ async function speakWithCustomVoice(voiceType, text) {
           voice_name: voiceName
         })
       });
-      
+
       if (response.ok) {
         const audioBlob = await response.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
         audio.volume = parseFloat(volumeSelect.value);
-        
+
         return {
           audio: audio,
           isCloned: true
@@ -505,14 +519,14 @@ async function speakWithCustomVoice(voiceType, text) {
       console.error('Cloned voice error, falling back to system TTS:', error);
     }
   }
-  
+
   const elevenLabsKey = elevenLabsKeyInput.value.trim();
-  
+
   // If ElevenLabs key is available, use real AI voices
   if (elevenLabsKey && !voiceType.startsWith('cloned-')) {
     try {
       // Get voice IDs from config file (if available)
-      const voiceIds = typeof ELEVENLABS_CONFIG !== 'undefined' 
+      const voiceIds = typeof ELEVENLABS_CONFIG !== 'undefined'
         ? {
             'custom-elon': ELEVENLABS_CONFIG.voices.elon,
             'custom-trump': ELEVENLABS_CONFIG.voices.trump
@@ -522,9 +536,9 @@ async function speakWithCustomVoice(voiceType, text) {
             'custom-elon': 'pNInz6obpgDQGcFmaJgB',
             'custom-trump': 'VR6AewLTigWG4xSOukaG'
           };
-      
+
       const voiceId = voiceIds[voiceType];
-      
+
       const response = await fetch('/api/elevenlabs/tts', {
         method: 'POST',
         headers: {
@@ -536,13 +550,13 @@ async function speakWithCustomVoice(voiceType, text) {
           api_key: elevenLabsKey
         })
       });
-      
+
       if (response.ok) {
         const audioBlob = await response.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
         const audio = new Audio(audioUrl);
         audio.volume = parseFloat(volumeSelect.value);
-        
+
         return {
           audio: audio,
           isElevenLabs: true
@@ -552,17 +566,17 @@ async function speakWithCustomVoice(voiceType, text) {
       console.error('ElevenLabs error, falling back to system TTS:', error);
     }
   }
-  
+
   // Fallback to system TTS with modified parameters
   const utterance = new SpeechSynthesisUtterance(text);
-  
+
   if (voiceType === 'custom-elon') {
     utterance.rate = 0.95;
     utterance.pitch = 1.1;
     utterance.volume = parseFloat(volumeSelect.value);
-    
-    const preferredVoices = voices.filter(v => 
-      v.lang.includes('en-US') && 
+
+    const preferredVoices = voices.filter(v =>
+      v.lang.includes('en-US') &&
       (v.name.includes('Male') || v.name.includes('Daniel') || v.name.includes('David'))
     );
     if (preferredVoices.length > 0) {
@@ -572,16 +586,16 @@ async function speakWithCustomVoice(voiceType, text) {
     utterance.rate = 0.9;
     utterance.pitch = 0.85;
     utterance.volume = parseFloat(volumeSelect.value);
-    
-    const preferredVoices = voices.filter(v => 
-      v.lang.includes('en-US') && 
+
+    const preferredVoices = voices.filter(v =>
+      v.lang.includes('en-US') &&
       (v.name.includes('Male') || v.name.includes('Fred') || v.name.includes('Alex'))
     );
     if (preferredVoices.length > 0) {
       utterance.voice = preferredVoices[0];
     }
   }
-  
+
   return {
     utterance: utterance,
     isElevenLabs: false,
@@ -591,36 +605,36 @@ async function speakWithCustomVoice(voiceType, text) {
 
 function processQueue() {
   if (isSpeaking || messageQueue.length === 0) return;
-  
+
   isSpeaking = true;
   const { author, text, display, voiceOverride } = messageQueue.shift();
-  
+
   // Filter the message text
   const filteredText = filterMessage(text);
-  
+
   // Skip if filtered text is empty
   if (!filteredText.trim()) {
     isSpeaking = false;
     processQueue();
     return;
   }
-  
+
   // Build the speech text
   let speechText = filteredText;
   if (readUsernamesCheckbox.checked) {
     speechText = `${author} says: ${filteredText}`;
   }
-  
+
   // Get voice to use (user-specific or default)
   const selectedVoice = voiceOverride || voiceSelect.value;
-  
+
   // Check if it's a custom voice
   if (selectedVoice.startsWith('custom-') || selectedVoice.startsWith('cloned-')) {
     speakWithCustomVoice(selectedVoice, speechText).then(result => {
       if (display !== false) {
         addChatMessage(author, text, true);
       }
-      
+
       if (result.isElevenLabs || result.isCloned) {
         // Handle ElevenLabs or cloned audio
         result.audio.onended = () => {
@@ -644,7 +658,7 @@ function processQueue() {
   } else {
     // Use system voice
     const utterance = new SpeechSynthesisUtterance(speechText);
-    
+
     // Apply settings
     if (selectedVoice.startsWith('system-')) {
       const voiceIndex = parseInt(selectedVoice.replace('system-', ''));
@@ -652,11 +666,11 @@ function processQueue() {
         utterance.voice = voices[voiceIndex];
       }
     }
-    
+
     utterance.rate = parseFloat(rateSelect.value);
     utterance.pitch = parseFloat(pitchSelect.value);
     utterance.volume = parseFloat(volumeSelect.value);
-    
+
     setupUtteranceHandlers(utterance, author, text);
     if (display !== false) {
       addChatMessage(author, text, true);
@@ -671,7 +685,7 @@ function setupUtteranceHandlers(utterance, author, text) {
     isSpeaking = false;
     processQueue();
   };
-  
+
   utterance.onerror = () => {
     isSpeaking = false;
     processQueue();
@@ -682,7 +696,7 @@ function extractVideoId(url) {
     /(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\n?#]+)/,
     /youtube\.com\/live\/([^&\n?#]+)/
   ];
-  
+
   for (const pattern of patterns) {
     const match = url.match(pattern);
     if (match) return match[1];
@@ -694,9 +708,9 @@ function extractVideoId(url) {
 function updateStatus(message, isActive = false, isError = false) {
   const statusIcon = statusDiv.querySelector('.status-icon');
   const statusText = statusDiv.querySelector('span');
-  
+
   statusText.textContent = message;
-  
+
   statusDiv.classList.remove('active', 'error');
   if (isActive) {
     statusDiv.classList.add('active');
@@ -709,20 +723,20 @@ function updateStatus(message, isActive = false, isError = false) {
 function addChatMessage(author, text, isSpeaking = false) {
   const messageDiv = document.createElement('div');
   messageDiv.className = 'chat-message' + (isSpeaking ? ' speaking' : '');
-  
+
   const timestamp = new Date().toLocaleTimeString();
-  
+
   // Make username clickable for non-system messages
   const authorClass = author !== 'SYSTEM' ? 'chat-author clickable' : 'chat-author';
   const authorClick = author !== 'SYSTEM' ? `onclick="openVoiceAssignment('${author.replace(/'/g, "\\'")}')"` : '';
-  
+
   messageDiv.innerHTML = `
     <div class="chat-author ${authorClass}" ${authorClick}>
       ${author}<span class="timestamp">${timestamp}</span>
     </div>
     <div class="chat-text">${escapeHtml(text)}</div>
   `;
-  
+
   chatFeed.appendChild(messageDiv);
   chatFeed.scrollTop = chatFeed.scrollHeight;
 
@@ -747,7 +761,7 @@ function escapeHtml(text) {
 function speakText(author, text, shouldDisplay = true) {
   // Get user-specific voice or default voice
   const userVoice = getVoiceForUser(author);
-  
+
   if (shouldDisplay) {
     messageQueue.push({ author, text, display: true, voiceOverride: userVoice });
   } else {
@@ -764,24 +778,24 @@ async function getLiveChatId(videoId, apiKey) {
     const response = await fetch(
       `/api/youtube/videos?part=liveStreamingDetails&id=${videoId}&key=${apiKey}`
     );
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error?.message || `API Error: ${response.status} ${response.statusText}`);
     }
-    
+
     const data = await response.json();
-    
+
     if (!data.items || data.items.length === 0) {
       throw new Error('Video not found or not a live stream');
     }
-    
+
     const liveChatId = data.items[0].liveStreamingDetails?.activeLiveChatId;
-    
+
     if (!liveChatId) {
       throw new Error('No active live chat found. Make sure the stream is currently live.');
     }
-    
+
     return liveChatId;
   } catch (error) {
     throw error;
@@ -791,26 +805,26 @@ async function getLiveChatId(videoId, apiKey) {
 // Poll for new chat messages
 async function pollChatMessages(apiKey) {
   if (!isMonitoring || !liveChatId) return;
-  
+
   try {
     let url = `/api/youtube/liveChat/messages?liveChatId=${liveChatId}&part=snippet,authorDetails&key=${apiKey}`;
-    
+
     if (nextPageToken) {
       url += `&pageToken=${nextPageToken}`;
     }
-    
+
     const response = await fetch(url);
-    
+
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error?.message || `API Error: ${response.status}`);
     }
-    
+
     const data = await response.json();
-    
+
     // Update next page token
     nextPageToken = data.nextPageToken;
-    
+
     // Process new messages
     if (data.items) {
       // If this is the first poll, display all but only speak last 2
@@ -818,7 +832,7 @@ async function pollChatMessages(apiKey) {
         const totalMessages = data.items.length;
         const messagesToRead = data.items.slice(-2); // Only last 2 messages to SPEAK
         const messagesToDisplay = data.items.slice(0, -2); // Others just DISPLAY
-        
+
         // Display all old messages without speaking
         messagesToDisplay.forEach(item => {
           seenMessageIds.add(item.id);
@@ -826,23 +840,23 @@ async function pollChatMessages(apiKey) {
           const text = item.snippet.displayMessage;
           addChatMessage(author, text, false); // Display but don't speak
         });
-        
+
         // Display AND speak the last 2 messages
         for (const item of messagesToRead) {
           const messageId = item.id;
-          
+
           if (seenMessageIds.has(messageId)) continue;
-          
+
           seenMessageIds.add(messageId);
-          
+
           const author = item.authorDetails.displayName;
           const text = item.snippet.displayMessage;
-          
+
           speakText(author, text, true); // Speak and display
         }
-        
+
         isFirstPoll = false;
-        
+
         if (messagesToDisplay.length > 0) {
           addChatMessage('SYSTEM', `Loaded ${messagesToDisplay.length} previous messages. Reading last 2...`, false);
         }
@@ -850,25 +864,25 @@ async function pollChatMessages(apiKey) {
         // Normal operation: display AND speak all new messages
         for (const item of data.items) {
           const messageId = item.id;
-          
+
           // Skip if we've already seen this message
           if (seenMessageIds.has(messageId)) continue;
-          
+
           seenMessageIds.add(messageId);
-          
+
           const author = item.authorDetails.displayName;
           const text = item.snippet.displayMessage;
-          
+
           // Speak and display the message
           speakText(author, text, true);
         }
       }
     }
-    
+
     // Schedule next poll based on pollingIntervalMillis
     const pollInterval = data.pollingIntervalMillis || 5000;
     setTimeout(() => pollChatMessages(apiKey), pollInterval);
-    
+
   } catch (error) {
     console.error('Error polling chat:', error);
     updateStatus(`ERROR: ${error.message}`, false, true);
@@ -880,12 +894,12 @@ async function pollChatMessages(apiKey) {
 startBtn.addEventListener('click', async () => {
   const url = streamUrlInput.value.trim();
   const apiKey = apiKeyInput.value.trim();
-  
+
   if (!url) {
     updateStatus('ERROR: PLEASE ENTER A STREAM URL', false, true);
     return;
   }
-  
+
   if (!apiKey) {
     updateStatus('ERROR: PLEASE ENTER YOUR YOUTUBE API KEY', false, true);
     return;
@@ -901,29 +915,29 @@ startBtn.addEventListener('click', async () => {
   startBtn.disabled = true;
   streamUrlInput.disabled = true;
   apiKeyInput.disabled = true;
-  
+
   updateStatus('CONNECTING TO LIVE STREAM...', true);
   chatFeed.innerHTML = '';
-  
+
   try {
     // Get live chat ID
     liveChatId = await getLiveChatId(videoId, apiKey);
-    
+
     // Reset tracking
     nextPageToken = null;
     seenMessageIds.clear();
     isFirstPoll = true; // Reset first poll flag
-    
+
     // Start monitoring
     isMonitoring = true;
     stopBtn.disabled = false;
-    
+
     updateStatus(`MONITORING LIVE CHAT: ${videoId}`, true);
     addChatMessage('SYSTEM', 'Connected to live stream. Reading chat messages...');
-    
+
     // Start polling
     pollChatMessages(apiKey);
-    
+
   } catch (error) {
     updateStatus(`ERROR: ${error.message}`, false, true);
     startBtn.disabled = false;
@@ -941,12 +955,12 @@ function stopMonitoring() {
   stopBtn.disabled = true;
   streamUrlInput.disabled = false;
   apiKeyInput.disabled = false;
-  
+
   // Stop current speech
   synth.cancel();
   messageQueue = [];
   isSpeaking = false;
-  
+
   updateStatus('MONITORING STOPPED');
 }
 
@@ -959,23 +973,23 @@ loadUserVoices(); // Load user voice mappings
 // Voice assignment modal functions
 window.openVoiceAssignment = function(username) {
   const currentVoice = getVoiceForUser(username);
-  
+
   const modal = document.getElementById('voiceModal');
   const list = document.getElementById('userVoiceList');
-  
+
   // Create voice selection for this user
   list.innerHTML = `
     <div class="user-voice-item">
       <div class="username">${username}</div>
       <select id="voiceSelectModal">
-        ${Array.from(voiceSelect.options).map(opt => 
+        ${Array.from(voiceSelect.options).map(opt =>
           `<option value="${opt.value}" ${opt.value === currentVoice ? 'selected' : ''}>${opt.textContent}</option>`
         ).join('')}
       </select>
       <button onclick="assignVoice('${username.replace(/'/g, "\\'")}')">Set Voice</button>
     </div>
   `;
-  
+
   modal.style.display = 'flex';
 };
 
@@ -993,19 +1007,19 @@ window.closeVoiceModal = function() {
 document.getElementById('manageVoicesBtn').addEventListener('click', function() {
   const modal = document.getElementById('voiceModal');
   const list = document.getElementById('userVoiceList');
-  
+
   if (recentUsers.length === 0) {
     list.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No recent users. Users will appear here as they chat.</p>';
   } else {
     list.innerHTML = recentUsers.map(username => {
       const currentVoice = getVoiceForUser(username);
       const voiceName = getVoiceName(currentVoice);
-      
+
       return `
         <div class="user-voice-item">
           <div class="username">${username}</div>
           <select onchange="setVoiceForUser('${username.replace(/'/g, "\\'")}', this.value)">
-            ${Array.from(voiceSelect.options).map(opt => 
+            ${Array.from(voiceSelect.options).map(opt =>
               `<option value="${opt.value}" ${opt.value === currentVoice ? 'selected' : ''}>${opt.textContent}</option>`
             ).join('')}
           </select>
@@ -1014,7 +1028,7 @@ document.getElementById('manageVoicesBtn').addEventListener('click', function() 
       `;
     }).join('');
   }
-  
+
   modal.style.display = 'flex';
 });
 
@@ -1037,42 +1051,42 @@ setTimeout(async () => {
   const apiKey = apiKeyInput.value.trim();
   const channelUrl = channelUrlInput.value.trim();
   const streamUrl = streamUrlInput.value.trim();
-  
+
   console.log('Auto-detect starting...', { apiKey: !!apiKey, channelUrl, streamUrl });
-  
+
   if (!apiKey) {
     updateStatus('Enter your API key to get started');
     return;
   }
-  
+
   let streamIsValid = false;
-  
+
   // If we have a saved stream URL, try to verify it's still valid
   if (streamUrl) {
     updateStatus('Checking saved stream...', true);
     console.log('Checking saved stream:', streamUrl);
-    
+
     try {
       const videoId = extractVideoId(streamUrl);
       console.log('Extracted video ID:', videoId);
-      
+
       if (videoId) {
         // Try to get the live chat ID to verify the stream is still live
         const response = await fetch(
           `/api/youtube/videos?part=liveStreamingDetails&id=${videoId}&key=${apiKey}`
         );
-        
+
         console.log('Stream check response:', response.ok);
-        
+
         if (response.ok) {
           const data = await response.json();
           console.log('Stream data:', data);
-          
+
           if (data.items && data.items.length > 0 && data.items[0].liveStreamingDetails?.activeLiveChatId) {
             updateStatus('✓ Stream is live! Starting automatically...', false);
             console.log('✓ Saved stream is still valid');
             streamIsValid = true;
-            
+
             // Auto-start monitoring!
             setTimeout(() => {
               startBtn.click();
@@ -1093,24 +1107,24 @@ setTimeout(async () => {
       saveSettings();
     }
   }
-  
+
   // If saved stream didn't work or doesn't exist, try to auto-detect
   if (channelUrl && !streamIsValid) {
     const channelId = extractChannelId(channelUrl);
     console.log('Extracted channel ID:', channelId);
-    
+
     if (channelId) {
       updateStatus('Looking for live stream...', true);
       try {
         console.log('Starting auto-detect for channel:', channelId);
         await findLiveStream(apiKey, channelId);
         console.log('✓ Auto-detect successful, auto-starting...');
-        
+
         // Auto-start monitoring after finding stream!
         setTimeout(() => {
           startBtn.click();
         }, 1000);
-        
+
       } catch (error) {
         console.log('❌ Auto-detect error:', error);
         updateStatus('Looks like this channel is not live yet. Go live or paste stream URL manually.', false, true);
