@@ -42,7 +42,44 @@ function loadVoices() {
     const lang = voice.lang.toLowerCase().substring(0, 2);
     return allowedLanguages.includes(lang);
   });
-  
+
+  // Add cloned voices first (if any)
+  if (clonedVoices.length > 0) {
+    clonedVoices.forEach(voiceName => {
+      const option = document.createElement('option');
+      option.value = `cloned-${voiceName}`;
+      option.textContent = `🎙️ ${voiceName} (Cloned Voice)`;
+      voiceSelect.appendChild(option);
+    });
+
+    // Add separator
+    const separator1 = document.createElement('option');
+    separator1.disabled = true;
+    separator1.textContent = '──────────────';
+    voiceSelect.appendChild(separator1);
+  }
+
+  // Add custom AI voices
+  const customVoices = [
+    { name: '🎭 Elon Musk (AI)', value: 'custom-elon', type: 'custom' },
+    { name: '🎭 Donald Trump (AI)', value: 'custom-trump', type: 'custom' }
+  ];
+
+  customVoices.forEach(voice => {
+    const option = document.createElement('option');
+    option.value = voice.value;
+    const elevenLabsInput = document.getElementById('elevenLabsKey');
+    const hasKey = elevenLabsInput && elevenLabsInput.value.trim();
+    option.textContent = voice.name + (hasKey ? '' : ' [Simulated]');
+    voiceSelect.appendChild(option);
+  });
+
+  // Add separator
+  const separator = document.createElement('option');
+  separator.disabled = true;
+  separator.textContent = '──────────────';
+  voiceSelect.appendChild(separator);
+
   // Group voices by language
   const voicesByLang = {
     'en': [],
@@ -61,7 +98,7 @@ function loadVoices() {
     }
   });
 
-  // Add SYSTEM voices first grouped by language
+  // Add voices grouped by language
   const langNames = {
     'en': '🇺🇸 English',
     'de': '🇩🇪 German',
@@ -89,58 +126,7 @@ function loadVoices() {
     }
   });
 
-  // Add CUSTOM cloned voices LAST (if any)
-  if (clonedVoices.length > 0) {
-    // Add separator before custom voices
-    const separator = document.createElement('option');
-    separator.disabled = true;
-    separator.textContent = '──────────────';
-    voiceSelect.appendChild(separator);
-
-    // Add custom voices header
-    const customHeader = document.createElement('option');
-    customHeader.disabled = true;
-    customHeader.textContent = '── 🎙️ Custom Voices ──';
-    voiceSelect.appendChild(customHeader);
-
-    clonedVoices.forEach(voiceName => {
-      const option = document.createElement('option');
-      option.value = `cloned-${voiceName}`;
-      option.textContent = `  ${voiceName}`;
-      voiceSelect.appendChild(option);
-    });
-  }
-
-  // Load saved voice preference or set first English voice as default
-  const savedVoice = localStorage.getItem('selected_voice');
-  if (savedVoice && Array.from(voiceSelect.options).some(opt => opt.value === savedVoice)) {
-    voiceSelect.value = savedVoice;
-    console.log('Loaded saved voice:', savedVoice);
-  } else {
-    // Set first English system voice as default (NOT custom voice)
-    const firstEnglish = Array.from(voiceSelect.options).find(opt =>
-      opt.value.startsWith('system-')
-    );
-    if (firstEnglish) {
-      voiceSelect.value = firstEnglish.value;
-      console.log('Set default voice:', firstEnglish.value);
-    }
-  }
-
   console.log('Loaded voices:', voiceSelect.options.length, 'including', clonedVoices.length, 'cloned voices');
-}
-
-// Save voice preference when changed
-if (typeof document !== 'undefined') {
-  document.addEventListener('DOMContentLoaded', () => {
-    const voiceSelect = document.getElementById('voiceSelect');
-    if (voiceSelect) {
-      voiceSelect.addEventListener('change', () => {
-        localStorage.setItem('selected_voice', voiceSelect.value);
-        console.log('Saved voice preference:', voiceSelect.value);
-      });
-    }
-  });
 }
 
 // Load voices on page load and when they change

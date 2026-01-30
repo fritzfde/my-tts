@@ -21,6 +21,8 @@ app.get('/api/youtube/*', async (req, res) => {
 
     const response = await fetch(url);
     const data = await response.json();
+    const nextWait = data.pollingIntervalMillis || 5000;
+    setTimeout(pollChatMessages, nextWait);
 
     if (!response.ok) {
       return res.status(response.status).json(data);
