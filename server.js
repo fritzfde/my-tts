@@ -6,6 +6,8 @@ const fs = require('fs');
 const app = express();
 const PORT = 3000;
 
+const { WebcastPushConnection } = require('tiktok-live-connector');
+
 app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
@@ -177,3 +179,40 @@ app.listen(PORT, () => {
   console.log(`📁 Voices folder: ${path.resolve(__dirname, 'voices')}\n`);
 });
 
+
+// --- TIKTOK LOGIC START ---
+let tiktokConnection = null;
+let tiktokMessageQueue = [];
+
+app.post('/api/tiktok/connect', (req, res) => {
+    const { username } = req.body;
+
+    if (tiktokConnection) {
+        tiktokConnection.removeAllListeners();
+        tiktokConnection.disconnect();
+    }
+
+    tiktokConnection = new WebcastPushConnection(username);
+
+    tiktokConnection.connect().then(state => {
+        console.log(`✅ SUCCESS: Connected to @${username}`);
+        res.json({ success: true });
+    }).catch(err => {
+        console.error(`❌ FAILURE:`, err.message);
+        res.status(500).json({ error: err.message });
+    });
+
+    // Capture Chat
+    tiktokConnection.on('chat', data => {
+        const msg = { author: data.uniqueId, text: data.comment };
+        console.log(`[Terminal Log] ${msg.author}: ${msg.text}`); // This MUST show in terminal
+        tiktokMessageQueue.push(msg);
+    });
+});
+
+// Separate route for polling
+app.get('/api/tiktok/messages', (req, res) => {
+    res.json(tiktokMessageQueue);
+    tiktokMessageQueue = [];
+});
+// --- TIKTOK LOGIC END ---

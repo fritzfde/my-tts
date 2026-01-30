@@ -164,6 +164,129 @@ let isFirstPoll = true; // Track if this is the first poll
 let userVoices = {}; // User-specific voice assignments
 let recentUsers = []; // Track recent users for quick assignment
 
+
+
+const useYouTubeBtn = document.getElementById('useYouTube');
+const useTikTokBtn = document.getElementById('useTikTok');
+const tiktokGroup = document.getElementById('tiktokInputGroup');
+const youtubeGroup = document.querySelector('.card > div:nth-child(2)'); // YouTube row
+
+let activePlatform = 'youtube';
+
+useTikTokBtn.addEventListener('click', () => {
+    activePlatform = 'tiktok';
+    tiktokGroup.style.display = 'block';
+    youtubeGroup.style.display = 'none';
+    useTikTokBtn.classList.add('active');
+    useYouTubeBtn.classList.remove('active');
+});
+
+useYouTubeBtn.addEventListener('click', () => {
+    activePlatform = 'youtube';
+    tiktokGroup.style.display = 'none';
+    youtubeGroup.style.display = 'grid';
+    useYouTubeBtn.classList.add('active');
+    useTikTokBtn.classList.remove('active');
+});
+
+// Update your Start Button logic
+startBtn.addEventListener('click', () => {
+    if (activePlatform === 'tiktok') {
+        const username = document.getElementById('tiktokUsername').value;
+        connectTikTok(username);
+    } else {
+        // ... existing YouTube start logic
+    }
+});
+
+
+
+let tiktokPollInterval = null;
+
+async function connectTikTok(username) {
+    if (!username) return;
+
+    const statusEl = document.getElementById('status');
+    statusEl.innerHTML = "<span>🔄 Connecting to TikTok...</span>";
+
+    try {
+        const response = await fetch('/api/tiktok/connect', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            statusEl.innerHTML = `<span>🟢 Connected: @${username}</span>`;
+            statusEl.className = "status connected";
+
+            // CRITICAL: Set these so the app knows to process messages
+            isMonitoring = true;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+
+            // Start polling for messages
+            if (tiktokPollInterval) clearInterval(tiktokPollInterval);
+            tiktokPollInterval = setInterval(pollTikTokMessages, 2000);
+
+            addChatMessage('SYSTEM', `Connected to @${username} TikTok chat!`, false);
+        } else {
+            statusEl.innerHTML = `<span>❌ Offline: @${username}</span>`;
+            statusEl.className = "status error";
+        }
+    } catch (err) {
+        console.error("TikTok Connection Error:", err);
+        statusEl.innerHTML = `<span>⚠️ TikTok Server Error</span>`;
+    }
+}
+
+async function pollTikTokMessages() {
+    // Only fetch if we are actually monitoring
+    if (!isMonitoring) return;
+
+    try {
+        const response = await fetch('/api/tiktok/messages');
+        const messages = await response.json();
+
+        if (messages && messages.length > 0) {
+            messages.forEach(msg => {
+                console.log("UI received message:", msg.author, msg.text);
+                // speakText handles both the Speech and adding it to the Chat Box
+                speakText(msg.author, msg.text, true);
+            });
+        }
+    } catch (err) {
+        console.error("Error fetching TikTok messages:", err);
+    }
+}
+
+// Change this logic in your DOMContentLoaded
+document.addEventListener('DOMContentLoaded', () => {
+    loadUserVoices();
+    loadSettings();
+
+    const ttInput = document.getElementById('tiktokUsername');
+    const savedName = localStorage.getItem('tiktok_username_cache') || localStorage.getItem('saved_tiktok_handle');
+
+    if (savedName && ttInput) {
+        ttInput.value = savedName;
+
+        // Switch UI to TikTok mode if we have a saved name
+        activePlatform = 'tiktok';
+        tiktokGroup.style.display = 'block';
+        youtubeGroup.style.display = 'none';
+        useTikTokBtn.classList.add('active');
+        useYouTubeBtn.classList.remove('active');
+
+        setTimeout(() => {
+            console.log("🚀 Attempting auto-connect to:", savedName);
+            connectTikTok(savedName);
+        }, 1000);
+    }
+});
+
 // Load user voice mappings
 function loadUserVoices() {
   const saved = localStorage.getItem('user_voices');
@@ -866,7 +989,7 @@ async function pollChatMessages(apiKey) {
     }
 
     // Schedule next poll based on pollingIntervalMillis
-    const pollInterval = data.pollingIntervalMillis || 5000;
+    const pollInterval = data.pollingIntervalMillis || 10000;
     setTimeout(() => pollChatMessages(apiKey), pollInterval);
 
   } catch (error) {
@@ -1125,3 +1248,4 @@ setTimeout(async () => {
     updateStatus('Enter your channel URL to get started');
   }
 }, 500);
+

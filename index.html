@@ -29,10 +29,30 @@
     <div class="card">
         <!-- API Keys in 2 columns -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+
+            <div class="input-group">
+                <label>Streaming Platform</label>
+                <div style="display: flex; gap: 10px;">
+                    <button id="useYouTube" class="platform-btn active">YouTube</button>
+                    <button id="useTikTok" class="platform-btn">TikTok</button>
+                </div>
+            </div>
+
+            <div id="tiktokInputGroup" class="input-group" style="display: block;">
+                <label>TikTok Username (@)</label>
+                <input
+                        type="text"
+                        id="tiktokUsername"
+                        placeholder="e.g. username_handle"
+                        value=""
+                >
+            </div>
+
+
             <div class="input-group" style="margin-bottom: 0;">
                 <label>YouTube API Key</label>
                 <input
-                        type="password"
+                        type="text"
                         id="apiKey"
                         placeholder="Your API key..."
                 >
@@ -41,11 +61,12 @@
             <div class="input-group" style="margin-bottom: 0;">
                 <label>ElevenLabs API Key (Optional)</label>
                 <input
-                        type="password"
+                        type="text"
                         id="elevenLabsKey"
                         placeholder="For realistic AI voices..."
                 >
             </div>
+
         </div>
 
         <!-- Channel and Stream URLs in 2 columns -->
