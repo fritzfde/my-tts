@@ -52,7 +52,7 @@ npm start
 The server will start at: http://localhost:3000
 
 ### 6. Open the App
-Open your browser and go to: http://localhost:3000/yt-chat-tts.html
+Open your browser and go to: http://localhost:3000/index.html
 
 ## How to Use
 
@@ -96,7 +96,7 @@ Without ElevenLabs API key, these use simulated voices with modified pitch/rate.
 
 ### "Failed to fetch" error
 - Make sure the Node.js server is running (`npm start`)
-- Check that you're accessing http://localhost:3000/yt-chat-tts.html
+- Check that you're accessing http://localhost:3000/index.html
 
 ### "No live streams found"
 - Make sure you have an active live stream running on your channel

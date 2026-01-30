@@ -101,7 +101,7 @@ app.post('/api/voice-clone/tts', async (req, res) => {
     // ALEX'S EXACT PATHS
     const PYTHON_VENV = '/Users/alex/Projects/voice-clone/myenv/bin/python3';
     const PYTHON_SCRIPT = '/Users/alex/Projects/voice-clone/tts_cli.py';
-    const VOICE_DIR = path.join(__dirname, 'voices');
+    const VOICE_DIR = path.join(__dirname, 'custom-voices');  // Changed to custom-voices
 
     const voiceFile = path.join(VOICE_DIR, `${voice_name}.wav`);
     const outputFile = path.join(__dirname, 'temp', `output_${Date.now()}.wav`);
@@ -180,21 +180,29 @@ app.post('/api/voice-clone/tts', async (req, res) => {
       res.setHeader('Content-Length', fileSize);
 
       const fileStream = fs.createReadStream(outputFile);
+
+      // Handle stream errors
+      fileStream.on('error', (err) => {
+        console.error('❌ File stream error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to stream audio file' });
+        }
+      });
+
       fileStream.pipe(res);
 
       // Clean up after sending
-      fileStream.on('end', () => {
-        fs.unlink(outputFile, (err) => {
-          if (err) {
-            console.error('⚠️ Failed to delete temp file:', err.message);
-          } else {
-            console.log('🧹 Cleaned up temp file\n');
-          }
-        });
-      });
-
-      fileStream.on('error', (err) => {
-        console.error('❌ File stream error:', err);
+      res.on('finish', () => {
+        // Delete temp file after response is sent
+        setTimeout(() => {
+          fs.unlink(outputFile, (err) => {
+            if (err) {
+              console.error('⚠️ Failed to delete temp file:', err.message);
+            } else {
+              console.log('🧹 Cleaned up temp file\n');
+            }
+          });
+        }, 1000); // Wait 1 second to ensure file was fully sent
       });
     });
 
@@ -207,10 +215,10 @@ app.post('/api/voice-clone/tts', async (req, res) => {
 // Get available cloned voices
 app.get('/api/voice-clone/voices', (req, res) => {
   try {
-    const voicesDir = path.join(__dirname, 'voices');
+    const voicesDir = path.join(__dirname, 'custom-voices');  // Changed to custom-voices
 
     if (!fs.existsSync(voicesDir)) {
-      console.log('No voices directory found, creating...');
+      console.log('No custom-voices directory found, creating...');
       fs.mkdirSync(voicesDir);
       return res.json({ voices: [] });
     }
@@ -233,6 +241,6 @@ app.listen(PORT, () => {
   console.log(`📺 Open: http://localhost:${PORT}/yt-chat-tts.html`);
   console.log(`🎙️ Voice cloning: ENABLED`);
   console.log(`📁 Python app: /Users/alex/Projects/voice-clone/`);
-  console.log(`📁 Voices folder: ${path.join(__dirname, 'voices')}`);
+  console.log(`📁 Custom voices: ${path.join(__dirname, 'custom-voices')}`);
   console.log('');
 });

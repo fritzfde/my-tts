@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Chat TTS</title>
+
+    <!-- External Stylesheets -->
+    <link rel="stylesheet" href="assets/css/styles.css">
+
+    <!-- External Scripts -->
+    <script src="elevenlabs-config.js"></script>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>YouTube Chat TTS</h1>
+        <div class="subtitle">AI-powered live stream chat reader</div>
+    </div>
+
+    <div class="info-banner">
+        <div class="info-banner-icon">💡</div>
+        <div class="info-banner-content">
+            <div class="info-banner-title">Auto-Detection Enabled</div>
+            <div class="info-banner-text">Your settings are saved automatically. Stream URL auto-detects when you're live.</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <!-- API Keys in 2 columns -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>YouTube API Key</label>
+                <input
+                        type="password"
+                        id="apiKey"
+                        placeholder="Your API key..."
+                >
+            </div>
+
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>ElevenLabs API Key (Optional)</label>
+                <input
+                        type="password"
+                        id="elevenLabsKey"
+                        placeholder="For realistic AI voices..."
+                >
+            </div>
+        </div>
+
+        <!-- Channel and Stream URLs in 2 columns -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>Channel URL</label>
+                <div style="display: flex; gap: 8px;">
+                    <input
+                            type="text"
+                            id="channelUrl"
+                            placeholder="https://www.youtube.com/@YourChannel"
+                            style="flex: 1;"
+                    >
+                    <button id="findStreamBtn" class="secondary" style="flex: 0 0 auto; padding: 8px 16px; font-size: 0.75rem; white-space: nowrap;">🔍 Find Livestream</button>
+                </div>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>Live Stream URL</label>
+                <input
+                        type="text"
+                        id="streamUrl"
+                        placeholder="Auto-filled or paste manually..."
+                >
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>Voice</label>
+                <select id="voiceSelect">
+                    <option value="">Loading voices...</option>
+                </select>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>Rate</label>
+                <select id="rateSelect">
+                    <option value="0.8">0.8x</option>
+                    <option value="1.0" selected>1.0x</option>
+                    <option value="1.2">1.2x</option>
+                    <option value="1.5">1.5x</option>
+                </select>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>Pitch</label>
+                <select id="pitchSelect">
+                    <option value="0.8">Low</option>
+                    <option value="1.0" selected>Normal</option>
+                    <option value="1.2">High</option>
+                </select>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>Volume</label>
+                <select id="volumeSelect">
+                    <option value="0.5">50%</option>
+                    <option value="0.7">70%</option>
+                    <option value="1.0" selected>100%</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="input-group">
+            <label>Reading Options</label>
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <label class="checkbox-label" style="padding: 0; margin: 0;">
+                    <input type="checkbox" id="readUsernames">
+                    <span>Read usernames</span>
+                </label>
+                <label class="checkbox-label" style="padding: 0; margin: 0;">
+                    <input type="checkbox" id="readEmojis">
+                    <span>Read emojis</span>
+                </label>
+                <label class="checkbox-label" style="padding: 0; margin: 0;">
+                    <input type="checkbox" id="readLinks">
+                    <span>Read links</span>
+                </label>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 12px; margin-top: 20px;">
+            <button id="startBtn" style="flex: 2;">▶ Start Reading Chat</button>
+            <button id="stopBtn" class="stop" disabled style="flex: 1;">⏹ Stop</button>
+            <button id="manageVoicesBtn" class="secondary" style="flex: 1;">👤 User Voices</button>
+        </div>
+
+        <div id="status" class="status">
+            <div class="status-icon"></div>
+            <span>Ready to connect...</span>
+        </div>
+    </div>
+
+    <div class="chat-feed" id="chatFeed">
+        <div class="empty-state">
+            <div class="empty-state-icon">💬</div>
+            <div>No active stream. Start monitoring to see chat messages.</div>
+        </div>
+    </div>
+
+    <!-- User Voice Assignment Modal -->
+    <div id="voiceModal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <button class="modal-close" onclick="closeVoiceModal()">&times;</button>
+            <h3>Manage User Voices</h3>
+            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 16px;">
+                Assign specific voices to users. Click on a username in chat to quickly assign.
+            </p>
+            <div id="userVoiceList" class="user-voice-list"></div>
+        </div>
+    </div>
+</div>
+
+<!-- External JavaScript will go here -->
+<script src="assets/js/app.js"></script>
+</body>
+</html>
