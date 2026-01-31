@@ -513,3 +513,52 @@ button.secondary:hover:not(:disabled) {
 .chat-author.clickable:hover {
   color: var(--accent-hover);
 }
+
+/* Platform toggle buttons */
+.platform-btn {
+  flex: 1;
+  padding: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.platform-btn:hover {
+  background: var(--bg-secondary);
+  border-color: var(--accent);
+}
+
+.platform-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* TikTok input group - hide by default */
+#tiktokInputGroup {
+  display: none;
+}
+
+
+/* Platform badges */
+.platform-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  margin-right: 8px;
+}
+.platform-badge.youtube {
+  background: #ff0000;
+  color: white;
+}
+.platform-badge.tiktok {
+  background: #00f2ea;
+  color: #000;
+}

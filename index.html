@@ -3,156 +3,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube Chat TTS</title>
-
-    <!-- External Stylesheets -->
+    <title>Multi-Platform Chat TTS</title>
     <link rel="stylesheet" href="assets/css/styles.css">
-
-    <!-- External Scripts -->
     <script src="elevenlabs-config.js"></script>
 </head>
 <body>
 <div class="container">
     <div class="header">
-        <h1>YouTube Chat TTS</h1>
-        <div class="subtitle">AI-powered live stream chat reader</div>
-    </div>
-
-    <div class="info-banner">
-        <div class="info-banner-icon">💡</div>
-        <div class="info-banner-content">
-            <div class="info-banner-title">Auto-Detection Enabled</div>
-            <div class="info-banner-text">Your settings are saved automatically. Stream URL auto-detects when you're live.</div>
-        </div>
+        <h1>Multi-Platform Chat TTS</h1>
+        <div class="subtitle">Read YouTube & TikTok chats simultaneously</div>
     </div>
 
     <div class="card">
-        <!-- API Keys in 2 columns -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+        <!-- YouTube Section -->
+        <div style="margin-bottom: 24px;">
+            <h3 style="color: var(--text-primary); font-size: 0.875rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                <span style="color: #ff0000;">●</span> YouTube Live Chat
+            </h3>
 
-            <div class="input-group">
-                <label>Streaming Platform</label>
-                <div style="display: flex; gap: 10px;">
-                    <button id="useYouTube" class="platform-btn active">YouTube</button>
-                    <button id="useTikTok" class="platform-btn">TikTok</button>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; margin-bottom: 12px;">
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>YouTube API Key</label>
+                    <input type="text" id="apiKey" placeholder="Your API key...">
+                </div>
+
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Channel URL</label>
+                    <input type="text" id="channelUrl" placeholder="@YourChannel">
+                </div>
+
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Stream URL</label>
+                    <input type="text" id="streamUrl" placeholder="Auto-filled...">
+                </div>
+
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>&nbsp;</label>
+                    <button id="findStreamBtn" class="secondary" style="white-space: nowrap; padding: 8px 16px;">🔍 Find</button>
                 </div>
             </div>
 
-            <div id="tiktokInputGroup" class="input-group" style="display: block;">
-                <label>TikTok Username (@)</label>
-                <input
-                        type="text"
-                        id="tiktokUsername"
-                        placeholder="e.g. username_handle"
-                        value=""
-                >
+            <div style="display: flex; gap: 12px;">
+                <button id="connectYouTubeBtn" style="flex: 1; background: #ff0000;">▶ Connect YouTube</button>
+                <button id="disconnectYouTubeBtn" class="stop" disabled style="flex: 1;">⏹ Disconnect YouTube</button>
             </div>
-
-
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>YouTube API Key</label>
-                <input
-                        type="text"
-                        id="apiKey"
-                        placeholder="Your API key..."
-                >
-            </div>
-
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>ElevenLabs API Key (Optional)</label>
-                <input
-                        type="text"
-                        id="elevenLabsKey"
-                        placeholder="For realistic AI voices..."
-                >
-            </div>
-
         </div>
 
-        <!-- Channel and Stream URLs in 2 columns -->
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>Channel URL</label>
-                <div style="display: flex; gap: 8px;">
-                    <input
-                            type="text"
-                            id="channelUrl"
-                            placeholder="https://www.youtube.com/@YourChannel"
-                            style="flex: 1;"
-                    >
-                    <button id="findStreamBtn" class="secondary" style="flex: 0 0 auto; padding: 8px 16px; font-size: 0.75rem; white-space: nowrap;">🔍 Find Livestream</button>
+        <!-- TikTok Section -->
+        <div style="margin-bottom: 24px; padding-top: 24px; border-top: 1px solid var(--border);">
+            <h3 style="color: var(--text-primary); font-size: 0.875rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                <span style="color: #00f2ea;">●</span> TikTok Live Chat
+            </h3>
+
+            <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 12px;">
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>TikTok Username</label>
+                    <input type="text" id="tiktokUsername" placeholder="username_handle">
+                </div>
+
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>&nbsp;</label>
+                    <button id="connectTikTokBtn" style="white-space: nowrap; background: #00f2ea; color: #000;">▶ Connect TikTok</button>
+                </div>
+
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>&nbsp;</label>
+                    <button id="disconnectTikTokBtn" class="stop" disabled style="white-space: nowrap;">⏹ Disconnect TikTok</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Voice Settings -->
+        <div style="padding-top: 24px; border-top: 1px solid var(--border);">
+            <h3 style="color: var(--text-primary); font-size: 0.875rem; margin-bottom: 12px;">Voice Settings</h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Default Voice (YouTube)</label>
+                    <select id="voiceSelectYouTube">
+                        <option value="">Loading voices...</option>
+                    </select>
+                </div>
+
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Default Voice (TikTok)</label>
+                    <select id="voiceSelectTikTok">
+                        <option value="">Loading voices...</option>
+                    </select>
                 </div>
             </div>
 
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>Live Stream URL</label>
-                <input
-                        type="text"
-                        id="streamUrl"
-                        placeholder="Auto-filled or paste manually..."
-                >
-            </div>
-        </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Rate</label>
+                    <select id="rateSelect">
+                        <option value="0.8">0.8x</option>
+                        <option value="1.0" selected>1.0x</option>
+                        <option value="1.2">1.2x</option>
+                        <option value="1.5">1.5x</option>
+                    </select>
+                </div>
 
-        <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px;">
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>Voice</label>
-                <select id="voiceSelect">
-                    <option value="">Loading voices...</option>
-                </select>
-            </div>
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Pitch</label>
+                    <select id="pitchSelect">
+                        <option value="0.8">Low</option>
+                        <option value="1.0" selected>Normal</option>
+                        <option value="1.2">High</option>
+                    </select>
+                </div>
 
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>Rate</label>
-                <select id="rateSelect">
-                    <option value="0.8">0.8x</option>
-                    <option value="1.0" selected>1.0x</option>
-                    <option value="1.2">1.2x</option>
-                    <option value="1.5">1.5x</option>
-                </select>
-            </div>
-
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>Pitch</label>
-                <select id="pitchSelect">
-                    <option value="0.8">Low</option>
-                    <option value="1.0" selected>Normal</option>
-                    <option value="1.2">High</option>
-                </select>
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Volume</label>
+                    <select id="volumeSelect">
+                        <option value="0.5">50%</option>
+                        <option value="0.7">70%</option>
+                        <option value="1.0" selected>100%</option>
+                    </select>
+                </div>
             </div>
 
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>Volume</label>
-                <select id="volumeSelect">
-                    <option value="0.5">50%</option>
-                    <option value="0.7">70%</option>
-                    <option value="1.0" selected>100%</option>
-                </select>
+            <div class="input-group" style="margin-bottom: 12px;">
+                <label>Reading Options</label>
+                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                    <label class="checkbox-label" style="padding: 0; margin: 0;">
+                        <input type="checkbox" id="readUsernames">
+                        <span>Read usernames</span>
+                    </label>
+                    <label class="checkbox-label" style="padding: 0; margin: 0;">
+                        <input type="checkbox" id="readEmojis">
+                        <span>Read emojis</span>
+                    </label>
+                    <label class="checkbox-label" style="padding: 0; margin: 0;">
+                        <input type="checkbox" id="readLinks">
+                        <span>Read links</span>
+                    </label>
+                </div>
             </div>
-        </div>
 
-        <div class="input-group">
-            <label>Reading Options</label>
-            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
-                <label class="checkbox-label" style="padding: 0; margin: 0;">
-                    <input type="checkbox" id="readUsernames">
-                    <span>Read usernames</span>
-                </label>
-                <label class="checkbox-label" style="padding: 0; margin: 0;">
-                    <input type="checkbox" id="readEmojis">
-                    <span>Read emojis</span>
-                </label>
-                <label class="checkbox-label" style="padding: 0; margin: 0;">
-                    <input type="checkbox" id="readLinks">
-                    <span>Read links</span>
-                </label>
+            <div style="display: flex; gap: 12px;">
+                <div class="input-group" style="margin-bottom: 0; flex: 1;">
+                    <label>ElevenLabs API Key (Optional)</label>
+                    <input type="text" id="elevenLabsKey" placeholder="For AI voices...">
+                </div>
+                <div style="flex: 0 0 auto; display: flex; align-items: flex-end;">
+                    <button id="manageVoicesBtn" class="secondary">👤 User Voices</button>
+                </div>
             </div>
-        </div>
-
-        <div style="display: flex; gap: 12px; margin-top: 20px;">
-            <button id="startBtn" style="flex: 2;">▶ Start Reading Chat</button>
-            <button id="stopBtn" class="stop" disabled style="flex: 1;">⏹ Stop</button>
-            <button id="manageVoicesBtn" class="secondary" style="flex: 1;">👤 User Voices</button>
         </div>
 
         <div id="status" class="status">
@@ -164,7 +161,7 @@
     <div class="chat-feed" id="chatFeed">
         <div class="empty-state">
             <div class="empty-state-icon">💬</div>
-            <div>No active stream. Start monitoring to see chat messages.</div>
+            <div>No active streams. Connect to YouTube or TikTok to see messages.</div>
         </div>
     </div>
 
@@ -174,14 +171,13 @@
             <button class="modal-close" onclick="closeVoiceModal()">&times;</button>
             <h3>Manage User Voices</h3>
             <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 16px;">
-                Assign specific voices to users. Click on a username in chat to quickly assign.
+                Assign specific voices to users from any platform.
             </p>
             <div id="userVoiceList" class="user-voice-list"></div>
         </div>
     </div>
 </div>
 
-<!-- External JavaScript will go here -->
 <script src="assets/js/app.js"></script>
 </body>
 </html>

@@ -114,9 +114,9 @@ app.post('/api/voice-clone/tts', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         voice: voiceFile,
-        text: text
+        text: text,
+        language: req.body.language || 'en'
       }),
-      // Set a long timeout for TTS generation (XTTS can take a few seconds)
       signal: AbortSignal.timeout(60000)
     });
 
