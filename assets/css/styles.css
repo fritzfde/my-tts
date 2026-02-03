@@ -273,19 +273,23 @@ button.secondary:hover:not(:disabled) {
 }
 
 .chat-message {
-  margin-bottom: 16px;
-  padding: 16px;
+  margin-bottom: 2px;
+  padding: 5px 10px;
   background: var(--bg-tertiary);
-  border-radius: 12px;
+  border-radius: 6px;
   border-left: 3px solid transparent;
-  transition: all 0.3s ease;
-  animation: slideIn 0.3s ease-out;
+  transition: background 0.3s ease, border-color 0.3s ease;
+  animation: slideIn 0.2s ease-out;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  line-height: 1.8;
 }
 
 @keyframes slideIn {
   from {
     opacity: 0;
-    transform: translateX(-10px);
+    transform: translateX(-6px);
   }
   to {
     opacity: 1;
@@ -296,27 +300,34 @@ button.secondary:hover:not(:disabled) {
 .chat-message.speaking {
   border-left-color: var(--accent);
   background: rgba(59, 130, 246, 0.1);
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.2);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.15);
+}
+
+.chat-message.gift {
+  background: rgba(255, 170, 0, 0.08);
+  border-left-color: #ffaa00;
 }
 
 .chat-author {
   color: var(--accent);
   font-weight: 600;
-  margin-bottom: 6px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .chat-text {
   color: var(--text-primary);
-  line-height: 1.5;
+  flex: 1;
+  min-width: 0;
 }
 
 .timestamp {
   color: var(--text-tertiary);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   font-weight: 400;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* Empty State */
@@ -561,4 +572,55 @@ button.secondary:hover:not(:disabled) {
 .platform-badge.tiktok {
   background: #00f2ea;
   color: #000;
+}
+
+/* API key tags */
+.api-key-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+.api-key-tag .key-text {
+  font-family: monospace;
+  opacity: 0.7;
+}
+.api-key-tag .key-remove {
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1;
+  border: none;
+  background: none;
+  padding: 0;
+  flex: none;
+  transition: color 0.15s;
+}
+.api-key-tag .key-remove:hover {
+  color: #ff5555;
+  transform: none;
+  box-shadow: none;
+}
+
+/* Volume slider cursor */
+input[type="range"] {
+  cursor: pointer;
+}
+
+/* Pulse highlight animation for duplicate key notification */
+@keyframes pulse-highlight {
+  0%, 100% {
+    background: rgba(255,255,255,0.08);
+    border-color: var(--border);
+  }
+  50% {
+    background: rgba(255, 170, 0, 0.3);
+    border-color: #ffaa00;
+  }
 }

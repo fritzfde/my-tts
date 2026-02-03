@@ -204,8 +204,23 @@ app.post('/api/tiktok/connect', (req, res) => {
 
     // Capture Chat
     tiktokConnection.on('chat', data => {
-        const msg = { author: data.uniqueId, text: data.comment };
-        console.log(`[Terminal Log] ${msg.author}: ${msg.text}`); // This MUST show in terminal
+        const msg = { type: 'chat', author: data.uniqueId, text: data.comment };
+        console.log(`💬 [Chat] ${msg.author}: ${msg.text}`);
+        tiktokMessageQueue.push(msg);
+    });
+
+    // Capture Gifts
+    tiktokConnection.on('gift', data => {
+        const count = data.repeatCount || 1;
+        const diamonds = (data.diamondCount || 0) * count;
+        const msg = {
+            type: 'gift',
+            author: data.userName || data.uniqueId,
+            giftName: data.giftName,
+            repeatCount: count,
+            diamondCount: diamonds
+        };
+        console.log(`🎁 [Gift] ${msg.author}: ${msg.giftName} x${count} (${diamonds} diamonds)`);
         tiktokMessageQueue.push(msg);
     });
 });
