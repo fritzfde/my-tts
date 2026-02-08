@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Top Likers Overlay</title>
+    <style>
+        body {
+            margin: 0;
+            background: transparent;
+            font-family: 'Inter', Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        .leaderboard-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(20, 20, 20, 0.95);
+            border: 2px solid #00f2ea;
+            border-radius: 16px;
+            padding: 20px;
+            min-width: 280px;
+            box-shadow: 0 8px 32px rgba(0, 242, 234, 0.3);
+            backdrop-filter: blur(10px);
+        }
+
+        .leaderboard-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #00f2ea;
+        }
+
+        .leaderboard-icon {
+            font-size: 28px;
+        }
+
+        .leaderboard-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #00f2ea;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .leaderboard-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .liker-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            transition: all 0.3s ease;
+            animation: slideInRight 0.3s ease;
+        }
+
+        .liker-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            transform: translateX(-4px);
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid #00f2ea;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+
+        .avatar-placeholder {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #00f2ea 0%, #0080ff 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: 700;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .rank {
+            font-size: 18px;
+            font-weight: 700;
+            min-width: 30px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .rank.gold {
+            color: #ffd700;
+            text-shadow: 0 0 10px #ffd700;
+        }
+
+        .rank.silver {
+            color: #c0c0c0;
+        }
+
+        .rank.bronze {
+            color: #cd7f32;
+        }
+
+        .rank.other {
+            color: #a0a0a0;
+        }
+
+        .username {
+            flex: 1;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .like-count {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: linear-gradient(135deg, #ff0050 0%, #ff4d8f 100%);
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 13px;
+            color: white;
+        }
+
+        .like-icon {
+            font-size: 14px;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 30px 20px;
+            color: #a0a0a0;
+            font-size: 14px;
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            opacity: 0.5;
+            margin-bottom: 8px;
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(100px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.2);
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="leaderboard-container">
+    <div class="leaderboard-header">
+        <div class="leaderboard-icon">❤️</div>
+        <div class="leaderboard-title">Top Likers</div>
+    </div>
+    <div class="leaderboard-list" id="leaderboardList">
+        <div class="empty-state">
+            <div class="empty-icon">👥</div>
+            <div>Waiting for likes...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const leaderboardList = document.getElementById('leaderboardList');
+    const eventSource = new EventSource('/overlay/likers/stream');
+
+    eventSource.onmessage = (event) => {
+        const likers = JSON.parse(event.data);
+        updateLeaderboard(likers);
+    };
+
+    function updateLeaderboard(likers) {
+        if (!likers || likers.length === 0) {
+            leaderboardList.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon">👥</div>
+                    <div>Waiting for likes...</div>
+                </div>
+            `;
+            return;
+        }
+
+        leaderboardList.innerHTML = likers.map((liker, index) => {
+            const rank = index + 1;
+            let rankClass = 'other';
+            let rankEmoji = `${rank}.`;
+
+            if (rank === 1) {
+                rankClass = 'gold';
+                rankEmoji = '🥇';
+            } else if (rank === 2) {
+                rankClass = 'silver';
+                rankEmoji = '🥈';
+            } else if (rank === 3) {
+                rankClass = 'bronze';
+                rankEmoji = '🥉';
+            }
+
+            // Avatar or placeholder
+            const avatarHtml = liker.avatar
+                ? `<img src="${liker.avatar}" alt="${escapeHtml(liker.nickname)}" class="avatar">`
+                : `<div class="avatar-placeholder">${liker.nickname.charAt(0).toUpperCase()}</div>`;
+
+            return `
+                <div class="liker-item">
+                    <div class="rank ${rankClass}">${rankEmoji}</div>
+                    ${avatarHtml}
+                    <div class="username">${escapeHtml(liker.nickname)}</div>
+                    <div class="like-count">
+                        <span class="like-icon">❤️</span>
+                        <span>${formatNumber(liker.count)}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function formatNumber(num) {
+        if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+        if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+        return num.toString();
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    eventSource.onerror = (err) => {
+        console.error('SSE connection error:', err);
+    };
+</script>
+</body>
+</html>

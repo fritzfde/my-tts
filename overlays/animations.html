@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Animation Overlay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: transparent;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        .animation-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        canvas.animation {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            max-width: 90%;
+            max-height: 90%;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        canvas.animation.playing {
+            opacity: 1;
+        }
+
+        /* Debug overlay */
+        .debug-info {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-family: monospace;
+            display: none;
+        }
+
+        .debug-info.visible {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<div class="animation-container" id="animationContainer"></div>
+
+<div class="debug-info" id="debugInfo">
+    <div>Animations Enabled: <span id="debugEnabled">false</span></div>
+    <div>Green Threshold: <span id="debugThreshold">100</span></div>
+    <div>Tolerance: <span id="debugTolerance">50</span></div>
+    <div>Playing: <span id="debugPlaying">none</span></div>
+    <div>Cooldown Queue: <span id="debugQueue">0</span></div>
+</div>
+
+<script>
+    // ── Configuration (sync with UI settings) ──────────────────────
+
+    let animationsEnabled = true;
+    let animationMappings = {}; // trigger → filename
+    let chromaKeySettings = {
+        greenThreshold: 100,  // How green is "green enough"
+        tolerance: 50,        // Tolerance for non-pure greens
+        spillReduction: 0.5   // Remove green spill on edges
+    };
+
+    // ── State Management ────────────────────────────────────────────
+
+    const playingAnimations = new Set();
+    const recentlyPlayed = new Map();
+    const COOLDOWN_MS = 5000; // 5 second cooldown per animation type
+
+    // ── Load Settings from localStorage ────────────────────────────
+
+    function loadSettings() {
+        try {
+            const enabled = localStorage.getItem('animations_enabled');
+            if (enabled !== null) {
+                animationsEnabled = enabled === 'true';
+            }
+
+            const mappings = localStorage.getItem('animation_mappings');
+            if (mappings) {
+                animationMappings = JSON.parse(mappings);
+            }
+
+            const chromaSettings = localStorage.getItem('chroma_key_settings');
+            if (chromaSettings) {
+                chromaKeySettings = JSON.parse(chromaSettings);
+            }
+
+            console.log('✓ Animation settings loaded:', {
+                enabled: animationsEnabled,
+                mappings: Object.keys(animationMappings).length,
+                chroma: chromaKeySettings
+            });
+
+            updateDebugInfo();
+        } catch (e) {
+            console.error('Error loading animation settings:', e);
+        }
+    }
+
+    // ── SSE Connection ──────────────────────────────────────────────
+
+    const eventSource = new EventSource('/overlay/animations/stream');
+
+    eventSource.onopen = () => {
+        console.log('🎬 Animation overlay connected');
+    };
+
+    eventSource.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            console.log('🎬 Received animation event:', data);
+
+            if (!animationsEnabled) {
+                console.log('⏸️ Animations disabled, ignoring');
+                return;
+            }
+
+            handleAnimationEvent(data);
+        } catch (e) {
+            console.error('Error parsing animation event:', e);
+        }
+    };
+
+    eventSource.onerror = (error) => {
+        console.error('SSE error:', error);
+    };
+
+    // ── Event Handler ───────────────────────────────────────────────
+
+    function handleAnimationEvent(data) {
+        const { type, platform, trigger } = data;
+
+        // Get animation file for this trigger
+        const animationFile = animationMappings[trigger];
+
+        if (!animationFile) {
+            console.log(`No animation mapped for trigger: ${trigger}`);
+            return;
+        }
+
+        playAnimation(animationFile, trigger);
+    }
+
+    // ── Animation Playback ──────────────────────────────────────────
+
+    function playAnimation(filename, triggerName) {
+        // Check cooldown
+        const lastPlayed = recentlyPlayed.get(triggerName);
+        if (lastPlayed && Date.now() - lastPlayed < COOLDOWN_MS) {
+            console.log(`⏸️ Animation "${triggerName}" on cooldown`);
+            return;
+        }
+
+        // Check if already playing
+        if (playingAnimations.has(triggerName)) {
+            console.log(`⏸️ Animation "${triggerName}" already playing`);
+            return;
+        }
+
+        console.log(`🎬 Playing animation: ${filename} (trigger: ${triggerName})`);
+
+        // Create video element
+        const video = document.createElement('video');
+        video.src = `/animations/${filename}`;
+        video.muted = false;
+        video.volume = 0.7;
+        video.preload = 'auto';
+
+        // Create canvas for chroma keying
+        const canvas = document.createElement('canvas');
+        canvas.className = 'animation';
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        // Add to container
+        document.getElementById('animationContainer').appendChild(canvas);
+
+        // Mark as playing
+        playingAnimations.add(triggerName);
+        recentlyPlayed.set(triggerName, Date.now());
+        updateDebugInfo();
+
+        // Wait for video metadata
+        video.addEventListener('loadedmetadata', () => {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // Start playback
+            video.play().then(() => {
+                canvas.classList.add('playing');
+                processVideoFrame(video, canvas, ctx);
+            }).catch(err => {
+                console.error('Video play error:', err);
+                cleanup();
+            });
+        });
+
+        // Cleanup when done
+        video.addEventListener('ended', cleanup);
+        video.addEventListener('error', (e) => {
+            console.error('Video error:', e);
+            cleanup();
+        });
+
+        function cleanup() {
+            canvas.classList.remove('playing');
+            setTimeout(() => {
+                canvas.remove();
+                video.remove();
+                playingAnimations.delete(triggerName);
+                updateDebugInfo();
+            }, 300);
+        }
+    }
+
+    // ── Advanced Chroma Key (Green Screen Removal) ─────────────────
+
+    function processVideoFrame(video, canvas, ctx) {
+        if (video.paused || video.ended) return;
+
+        // Draw video frame
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Get image data
+        const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = frame.data;
+
+        const { greenThreshold, tolerance, spillReduction } = chromaKeySettings;
+
+        // Process each pixel
+        for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+
+            // Calculate how "green" this pixel is
+            const greenness = g - Math.max(r, b);
+
+            // Is this pixel green enough to remove?
+            if (greenness > greenThreshold) {
+                // Calculate how confident we are (for edge feathering)
+                const confidence = Math.min(1, greenness / (greenThreshold + tolerance));
+
+                // Make pixel transparent (with smooth edges)
+                data[i + 3] = Math.floor((1 - confidence) * 255);
+            }
+            // Remove green spill on edges
+            else if (greenness > 0) {
+                const spill = greenness * spillReduction;
+                data[i + 1] = Math.max(0, g - spill); // Reduce green channel
+            }
+        }
+
+        // Put processed frame back
+        ctx.putImageData(frame, 0, 0);
+
+        // Continue processing
+        requestAnimationFrame(() => processVideoFrame(video, canvas, ctx));
+    }
+
+    // ── Debug Info ──────────────────────────────────────────────────
+
+    function updateDebugInfo() {
+        document.getElementById('debugEnabled').textContent = animationsEnabled;
+        document.getElementById('debugThreshold').textContent = chromaKeySettings.greenThreshold;
+        document.getElementById('debugTolerance').textContent = chromaKeySettings.tolerance;
+        document.getElementById('debugPlaying').textContent = playingAnimations.size > 0
+            ? Array.from(playingAnimations).join(', ')
+            : 'none';
+        document.getElementById('debugQueue').textContent = recentlyPlayed.size;
+    }
+
+    // Show debug info with D key
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'd' || e.key === 'D') {
+            document.getElementById('debugInfo').classList.toggle('visible');
+        }
+    });
+
+    // Reload settings when window gains focus (user changed settings)
+    window.addEventListener('focus', loadSettings);
+
+    // Listen for settings updates from main app
+    window.addEventListener('message', (event) => {
+        if (event.data.type === 'updateAnimationSettings') {
+            console.log('📡 Received settings update from main app');
+            loadSettings();
+        }
+    });
+
+    // Initial load
+    loadSettings();
+
+    console.log('🎬 Animation overlay ready!');
+    console.log('Press D to toggle debug info');
+</script>
+</body>
+</html>

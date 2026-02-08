@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>TikTok Gifts Overlay</title>
+    <style>
+        body {
+            margin: 0;
+            background: transparent;
+            font-family: 'Inter', Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        .gift-container {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            align-items: flex-end;
+        }
+
+        .gift-notification {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 16px;
+            padding: 16px 24px;
+            min-width: 300px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            animation: slideInRight 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .gift-notification::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent 30%, rgba(255, 255, 255, 0.1) 50%, transparent 70%);
+            animation: shimmer 2s infinite;
+        }
+
+        .gift-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .gift-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .gift-icon {
+            font-size: 32px;
+            animation: bounce 0.6s ease-in-out infinite;
+        }
+
+        .gift-username {
+            font-weight: 700;
+            font-size: 18px;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        .gift-details {
+            color: rgba(255, 255, 255, 0.95);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .gift-name {
+            font-weight: 600;
+            color: #ffd700;
+        }
+
+        .gift-count {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-left: 6px;
+        }
+
+        .diamonds {
+            color: #00d4ff;
+            font-weight: 600;
+        }
+
+        @keyframes slideInRight {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOutRight {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-8px);
+            }
+        }
+
+        @keyframes shimmer {
+            0% {
+                transform: translateX(-100%);
+            }
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        .gift-notification.fade-out {
+            animation: slideOutRight 0.3s ease forwards;
+        }
+    </style>
+</head>
+<body>
+<div class="gift-container" id="giftContainer"></div>
+
+<script>
+    const giftContainer = document.getElementById('giftContainer');
+    const eventSource = new EventSource('/overlay/gifts/stream');
+
+    // Gift icon mapping
+    const giftIcons = {
+        'Rose': '🌹',
+        'TikTok': '🎵',
+        'Heart': '❤️',
+        'Diamond': '💎',
+        'Crown': '👑',
+        'Fire': '🔥',
+        'Star': '⭐',
+        'default': '🎁'
+    };
+
+    eventSource.onmessage = (event) => {
+        const gift = JSON.parse(event.data);
+        showGiftNotification(gift);
+        playSound();
+    };
+
+    function showGiftNotification(gift) {
+        const notification = document.createElement('div');
+        notification.className = 'gift-notification';
+
+        // Find matching icon
+        const icon = Object.keys(giftIcons).find(key =>
+            gift.giftName.toLowerCase().includes(key.toLowerCase())
+        ) || 'default';
+
+        // Avatar or placeholder
+        const avatarHtml = gift.authorAvatar
+            ? `<img src="${gift.authorAvatar}" alt="${escapeHtml(gift.authorName || gift.author)}" style="width: 32px; height: 32px; border-radius: 50%; margin-right: 8px; object-fit: cover;">`
+            : `<div style="width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; margin-right: 8px; font-size: 16px; font-weight: 700;">${(gift.authorName || gift.author).charAt(0).toUpperCase()}</div>`;
+
+        notification.innerHTML = `
+            <div class="gift-content">
+                <div class="gift-header">
+                    ${avatarHtml}
+                    <div class="gift-icon">${giftIcons[icon]}</div>
+                    <div class="gift-username">${escapeHtml(gift.authorName || gift.author)}</div>
+                </div>
+                <div class="gift-details">
+                    Sent <span class="gift-name">${escapeHtml(gift.giftName)}</span>
+                    ${gift.repeatCount > 1 ? `<span class="gift-count">x${gift.repeatCount}</span>` : ''}
+                    <br>
+                    <span class="diamonds">${gift.diamondCount} 💎</span>
+                </div>
+            </div>
+        `;
+
+        giftContainer.appendChild(notification);
+
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+            notification.classList.add('fade-out');
+            setTimeout(() => notification.remove(), 300);
+        }, 5000);
+    }
+
+    function playSound() {
+        // Sound will be played by main app
+        // This overlay just shows visual notification
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    eventSource.onerror = (err) => {
+        console.error('SSE connection error:', err);
+    };
+</script>
+</body>
+</html>
