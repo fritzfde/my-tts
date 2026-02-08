@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Multi-Platform Chat TTS</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="alternate icon" type="image/png" href="/favicon.png">
     <link rel="stylesheet" href="assets/css/styles.css">
     <script src="elevenlabs-config.js"></script>
 </head>
@@ -173,13 +175,199 @@
                 </div>
             </div>
 
+            <!-- AI Gender Detection -->
+            <div class="input-group" style="margin-bottom: 12px;">
+                <label>
+                    <input type="checkbox" id="autoGenderDetection" style="width: auto; margin-right: 8px;">
+                    🤖 Auto-detect user gender (AI-powered voice assignment)
+                </label>
+                <div style="margin-top: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+                    Uses local LLM to detect gender from usernames (e.g., "xXS4r4hXx" → Sarah → female voice). Results are cached for instant future assignments. Requires Ollama running locally.
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Default Male Voice 🧑</label>
+                    <select id="maleVoiceSelect">
+                        <option value="">Loading voices...</option>
+                    </select>
+                </div>
+
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Default Female Voice 👩</label>
+                    <select id="femaleVoiceSelect">
+                        <option value="">Loading voices...</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Voice Filter & Preview -->
+            <div class="input-group" style="margin-bottom: 0;">
+                <button id="toggleVoiceFilter" class="secondary" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <span>🎛️ Voice Filter & Preview</span>
+                    <span id="voiceFilterIcon" style="transform: rotate(0deg); transition: transform 0.3s;">▼</span>
+                </button>
+
+                <div id="voiceFilterPanel" style="display: none; margin-top: 12px; padding: 16px; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">
+                    <div style="margin-bottom: 12px;">
+                        <label style="text-transform: none; font-size: 0.875rem; color: var(--text-secondary);">
+                            Filter by language (shows only selected voices in dropdowns above):
+                        </label>
+                        <div style="display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap;">
+                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                                <input type="checkbox" class="lang-filter" data-lang="en" checked>
+                                <span>🇺🇸 English</span>
+                            </label>
+                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                                <input type="checkbox" class="lang-filter" data-lang="de" checked>
+                                <span>🇩🇪 German</span>
+                            </label>
+                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                                <input type="checkbox" class="lang-filter" data-lang="es" checked>
+                                <span>🇪🇸 Spanish</span>
+                            </label>
+                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                                <input type="checkbox" class="lang-filter" data-lang="uk" checked>
+                                <span>🇺🇦 Ukrainian</span>
+                            </label>
+                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
+                                <input type="checkbox" class="lang-filter" data-lang="ru" checked>
+                                <span>🇷🇺 Russian</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <label style="text-transform: none; font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px; display: block;">
+                            Preview test message:
+                        </label>
+                        <input type="text" id="voicePreviewText" value="Hello! This is a test of the voice." style="width: 100%;">
+                    </div>
+
+                    <div id="voicePreviewList" style="max-height: 300px; overflow-y: auto;">
+                        <!-- Voice list will be populated here -->
+                    </div>
+                </div>
+            </div>
+
             <div style="display: flex; gap: 12px;">
+                <!-- ElevenLabs field hidden - not currently used
                 <div class="input-group" style="margin-bottom: 0; flex: 1;">
                     <label>ElevenLabs API Key (Optional)</label>
                     <input type="text" id="elevenLabsKey" placeholder="For AI voices...">
                 </div>
+                -->
+                <div style="flex: 1;"></div>
                 <div style="flex: 0 0 auto; display: flex; align-items: flex-end;">
                     <button id="manageVoicesBtn" class="secondary">👤 User Voices</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- TikTok Overlays & Sounds -->
+        <div style="padding-top: 24px; border-top: 1px solid var(--border);">
+            <h3 style="color: var(--text-primary); font-size: 0.875rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+                <span style="color: #00f2ea;">🎁</span> TikTok Gifts & Overlays
+            </h3>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Gift Sound Effect</label>
+                    <select id="giftSoundSelect">
+                        <option value="">🔇 No Sound</option>
+                        <optgroup label="Classic">
+                            <option value="ding">🔔 Ding</option>
+                            <option value="coin">💰 Coin Drop</option>
+                            <option value="chime">🎵 Chime</option>
+                            <option value="applause">👏 Applause</option>
+                        </optgroup>
+                        <optgroup label="Anime">
+                            <option value="anime-sparkle">✨ Anime Sparkle</option>
+                            <option value="anime-powerup">⚡ Power-Up</option>
+                            <option value="anime-notification">📢 Notification Beep</option>
+                            <option value="anime-coin">🪙 Mario Coin</option>
+                            <option value="anime-victory">🎊 Victory Jingle</option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Upload Custom Sound</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="file" id="customSoundUpload" accept=".mp3,.wav,.ogg" style="flex: 1; font-size: 0.75rem; padding: 6px;">
+                        <button id="uploadSoundBtn" class="secondary" style="flex: none; padding: 8px 16px; font-size: 0.8125rem;">Upload</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>OBS Overlay URLs <span style="color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: normal;">(Add these as Browser Source in OBS)</span></label>
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px;">
+                    <input type="text" id="giftOverlayUrl" readonly value="http://localhost:3000/overlay/gifts" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
+                    <button class="secondary copy-btn" data-target="giftOverlayUrl" style="flex: none; padding: 8px 16px;">📋 Copy</button>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px;">
+                    <input type="text" id="likerOverlayUrl" readonly value="http://localhost:3000/overlay/likers" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
+                    <button class="secondary copy-btn" data-target="likerOverlayUrl" style="flex: none; padding: 8px 16px;">📋 Copy</button>
+                </div>
+                <div style="margin-top: 8px; padding: 10px; background: rgba(0, 242, 234, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+                    <strong style="color: #00f2ea;">💡 Setup:</strong> Copy URL → OBS → Add Browser Source → Paste URL → Width: 1920, Height: 300 (gifts) or 400 (likers)
+                </div>
+            </div>
+        </div>
+
+        <!-- Animation Overlay Settings -->
+        <div style="padding-top: 24px; border-top: 1px solid var(--border);">
+            <h3 style="color: var(--text-primary); font-size: 0.875rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; justify-content: space-between;">
+                <span><span style="color: #ff6b6b;">🎬</span> Animation Overlay (YouTube & TikTok)</span>
+                <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,107,107,0.1); border-radius: 6px;">
+                    <input type="checkbox" id="animationsEnabled" checked>
+                    <span style="font-size: 0.75rem;">Enable Animations</span>
+                </label>
+            </h3>
+
+            <div class="input-group" style="margin-bottom: 12px;">
+                <label>Animation Trigger Mappings</label>
+                <div style="margin-bottom: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+                    Map emojis/stickers to .MOV files. For YouTube, uses LLM to detect emotions. For TikTok, uses actual emote names.
+                </div>
+                <div id="animationMappingsList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+                    <!-- Mapping items will be added here dynamically -->
+                </div>
+                <button id="addAnimationMappingBtn" class="secondary" style="width: 100%; margin-top: 8px;">+ Add Mapping</button>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 12px;">
+                <label>Chroma Key Settings (Green Screen Removal)</label>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div>
+                        <label style="text-transform: none; font-size: 0.75rem; color: var(--text-secondary);">Green Threshold: <span id="greenThresholdValue">100</span></label>
+                        <input type="range" id="greenThreshold" min="50" max="150" value="100" style="width: 100%;">
+                        <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px;">Higher = stricter green detection</div>
+                    </div>
+                    <div>
+                        <label style="text-transform: none; font-size: 0.75rem; color: var(--text-secondary);">Tolerance: <span id="chromaToleranceValue">50</span></label>
+                        <input type="range" id="chromaTolerance" min="10" max="100" value="50" style="width: 100%;">
+                        <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px;">Higher = accepts non-pure greens</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-group" style="margin-bottom: 0;">
+                <label>Animation Overlay URL</label>
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px;">
+                    <input type="text" id="animationOverlayUrl" readonly value="http://localhost:3000/overlay/animations" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
+                    <button class="secondary copy-btn" data-target="animationOverlayUrl">📋 Copy</button>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px;">
+                    <select id="testAnimationSelect" style="font-size: 0.875rem; padding: 8px;">
+                        <option value="">Select animation to test...</option>
+                    </select>
+                    <button id="testAnimationBtn" class="secondary" style="padding: 8px 20px;">🎬 Test</button>
+                </div>
+                <div style="margin-top: 8px; padding: 10px; background: rgba(255,107,107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+                    <strong style="color: #ff6b6b;">💡 Setup:</strong> OBS → Add Browser Source → Paste URL → Width: 1920, Height: 1080 → Press D in preview to see debug info
                 </div>
             </div>
         </div>

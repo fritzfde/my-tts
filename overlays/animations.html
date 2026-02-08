@@ -70,9 +70,77 @@
     <div>Tolerance: <span id="debugTolerance">50</span></div>
     <div>Playing: <span id="debugPlaying">none</span></div>
     <div>Cooldown Queue: <span id="debugQueue">0</span></div>
+    <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.2);">
+        SSE: <span id="debugSSE" style="color: #ff6b6b;">disconnected</span>
+    </div>
+    <div>Mappings: <span id="debugMappings">0</span></div>
 </div>
 
 <script>
+    // ── Audio Autoplay Unlock (AGGRESSIVE) ─────────────────────────
+
+    let audioUnlocked = false;
+
+    function unlockAudio() {
+        if (audioUnlocked) return;
+
+        const silentAudio = new Audio();
+        silentAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+        silentAudio.volume = 0.01;
+
+        silentAudio.play().then(() => {
+            audioUnlocked = true;
+            console.log('✓ Audio autoplay unlocked');
+        }).catch(() => {
+            console.log('⏳ Click page to unlock audio...');
+        });
+    }
+
+    // IMMEDIATE unlock attempts
+    unlockAudio();
+    setTimeout(unlockAudio, 100);
+    setTimeout(unlockAudio, 500);
+    setTimeout(unlockAudio, 1000);
+    setTimeout(unlockAudio, 2000);
+
+    // Unlock on any interaction
+    document.addEventListener('click', unlockAudio);
+    document.addEventListener('keydown', unlockAudio);
+    document.addEventListener('touchstart', unlockAudio);
+
+    // Show big "Click to Enable" overlay if not unlocked after 3 seconds
+    setTimeout(() => {
+        if (!audioUnlocked) {
+            const overlay = document.createElement('div');
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                background: rgba(0,0,0,0.8);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 99999;
+                cursor: pointer;
+                font-family: Arial, sans-serif;
+            `;
+            overlay.innerHTML = `
+                <div style="text-align: center; color: white;">
+                    <div style="font-size: 48px; margin-bottom: 20px;">🔊</div>
+                    <div style="font-size: 24px; margin-bottom: 10px;">Click Anywhere to Enable Audio</div>
+                    <div style="font-size: 14px; color: rgba(255,255,255,0.7);">Browser requires user interaction</div>
+                </div>
+            `;
+            overlay.addEventListener('click', () => {
+                unlockAudio();
+                overlay.remove();
+            });
+            document.body.appendChild(overlay);
+        }
+    }, 3000);
+
     // ── Configuration (sync with UI settings) ──────────────────────
 
     let animationsEnabled = true;
@@ -126,6 +194,9 @@
 
     eventSource.onopen = () => {
         console.log('🎬 Animation overlay connected');
+        document.getElementById('debugSSE').textContent = 'connected';
+        document.getElementById('debugSSE').style.color = '#00f2ea';
+        updateDebugInfo();
     };
 
     eventSource.onmessage = (event) => {
@@ -146,6 +217,9 @@
 
     eventSource.onerror = (error) => {
         console.error('SSE error:', error);
+        document.getElementById('debugSSE').textContent = 'error';
+        document.getElementById('debugSSE').style.color = '#ff6b6b';
+        updateDebugInfo();
     };
 
     // ── Event Handler ───────────────────────────────────────────────
@@ -213,6 +287,8 @@
                 processVideoFrame(video, canvas, ctx);
             }).catch(err => {
                 console.error('Video play error:', err);
+                console.warn('⏸️ Click page to enable autoplay');
+                unlockAudio(); // Try to unlock
                 cleanup();
             });
         });
@@ -255,16 +331,30 @@
             const g = data[i + 1];
             const b = data[i + 2];
 
-            // Calculate how "green" this pixel is
+            // Method 1: Calculate how "green" this pixel is
             const greenness = g - Math.max(r, b);
 
-            // Is this pixel green enough to remove?
-            if (greenness > greenThreshold) {
-                // Calculate how confident we are (for edge feathering)
-                const confidence = Math.min(1, greenness / (greenThreshold + tolerance));
+            // Method 2: Also check if green is dominant channel
+            const isGreenDominant = g > r && g > b;
 
-                // Make pixel transparent (with smooth edges)
-                data[i + 3] = Math.floor((1 - confidence) * 255);
+            // Method 3: Check green ratio (for colors like #4E9074)
+            const greenRatio = g / (r + g + b + 1); // +1 to avoid division by zero
+
+            // Combined detection: pixel is green if ANY method matches
+            // Lowered from 0.38 to 0.33 to be more aggressive
+            const isGreen = (greenness > greenThreshold) ||
+                           (isGreenDominant && greenRatio > 0.33);
+
+            if (isGreen) {
+                // Full transparency for green pixels
+                // If using ratio method, make fully transparent
+                if (isGreenDominant && greenRatio > 0.33) {
+                    data[i + 3] = 0; // Fully transparent
+                } else {
+                    // Calculate confidence for edge feathering
+                    const confidence = Math.min(1, greenness / (greenThreshold + tolerance));
+                    data[i + 3] = Math.floor((1 - confidence) * 255);
+                }
             }
             // Remove green spill on edges
             else if (greenness > 0) {
@@ -290,6 +380,7 @@
             ? Array.from(playingAnimations).join(', ')
             : 'none';
         document.getElementById('debugQueue').textContent = recentlyPlayed.size;
+        document.getElementById('debugMappings').textContent = Object.keys(animationMappings).length;
     }
 
     // Show debug info with D key

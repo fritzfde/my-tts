@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head><title>Favicon Generator</title></head>
+<body>
+<canvas id="canvas" width="32" height="32"></canvas>
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Background
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, 32, 32);
+
+    // Circle
+    ctx.fillStyle = '#0f3460';
+    ctx.beginPath();
+    ctx.arc(16, 16, 12, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Play button
+    ctx.fillStyle = '#00f2ea';
+    ctx.beginPath();
+    ctx.moveTo(10, 16);
+    ctx.lineTo(14, 12);
+    ctx.lineTo(14, 20);
+    ctx.closePath();
+    ctx.fill();
+
+    // Dot
+    ctx.fillStyle = '#ff6b6b';
+    ctx.beginPath();
+    ctx.arc(20, 16, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Text
+    ctx.fillStyle = '#00f2ea';
+    ctx.font = 'bold 8px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('TTS', 16, 28);
+
+    // Convert to data URL
+    const dataURL = canvas.toDataURL('image/png');
+    console.log('Favicon ready! Right-click canvas and "Save As" → favicon.png');
+    console.log('Or copy this data URL:', dataURL);
+</script>
+<p>Right-click the canvas above and "Save As" → favicon.png</p>
+<p>Then convert to .ico at: <a href="https://convertio.co/png-ico/" target="_blank">convertio.co/png-ico/</a></p>
+</body>
+</html>

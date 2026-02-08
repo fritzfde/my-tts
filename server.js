@@ -183,6 +183,11 @@ app.listen(PORT, () => {
 // --- TIKTOK LOGIC START ---
 let tiktokConnection = null;
 let tiktokMessageQueue = [];
+let giftOverlayClients = [];
+let likerLeaderboard = new Map(); // username → like count
+let likerUserInfo = new Map(); // username → { nickname, avatar }
+let likerLeaderboardClients = [];
+let animationOverlayClients = []; // SSE clients for animation overlay
 
 app.post('/api/tiktok/connect', (req, res) => {
     const { username } = req.body;
@@ -191,6 +196,9 @@ app.post('/api/tiktok/connect', (req, res) => {
         tiktokConnection.removeAllListeners();
         tiktokConnection.disconnect();
     }
+
+    // Reset leaderboard on new connection
+    likerLeaderboard.clear();
 
     tiktokConnection = new WebcastPushConnection(username);
 
@@ -204,8 +212,14 @@ app.post('/api/tiktok/connect', (req, res) => {
 
     // Capture Chat
     tiktokConnection.on('chat', data => {
-        const msg = { type: 'chat', author: data.uniqueId, text: data.comment };
-        console.log(`💬 [Chat] ${msg.author}: ${msg.text}`);
+        const msg = {
+            type: 'chat',
+            author: data.uniqueId,
+            authorName: data.nickname || data.uniqueId,
+            authorAvatar: data.profilePictureUrl || null,
+            text: data.comment
+        };
+        console.log(`💬 [Chat] ${msg.authorName} (@${msg.author}): ${msg.text}`);
         tiktokMessageQueue.push(msg);
     });
 
@@ -215,13 +229,92 @@ app.post('/api/tiktok/connect', (req, res) => {
         const diamonds = (data.diamondCount || 0) * count;
         const msg = {
             type: 'gift',
-            author: data.userName || data.uniqueId,
+            author: data.uniqueId,
+            authorName: data.nickname || data.userName || data.uniqueId,
+            authorAvatar: data.profilePictureUrl || null,
             giftName: data.giftName,
+            giftPictureUrl: data.giftPictureUrl || data.gift?.image?.url_list?.[0] || null,
             repeatCount: count,
-            diamondCount: diamonds
+            diamondCount: diamonds,
+            timestamp: Date.now()
         };
-        console.log(`🎁 [Gift] ${msg.author}: ${msg.giftName} x${count} (${diamonds} diamonds)`);
+        console.log(`🎁 [Gift] ${msg.authorName} (@${msg.author}): ${msg.giftName} x${count} (${diamonds} diamonds)`);
         tiktokMessageQueue.push(msg);
+
+        // Broadcast to gift overlay
+        broadcastToGiftOverlay(msg);
+    });
+
+    // Capture Follows
+    tiktokConnection.on('follow', data => {
+        const msg = {
+            type: 'follow',
+            author: data.uniqueId,
+            authorName: data.nickname || data.uniqueId,
+            authorAvatar: data.profilePictureUrl || null,
+            timestamp: Date.now()
+        };
+        console.log(`👤 [Follow] ${msg.authorName} (@${msg.author}) followed!`);
+        tiktokMessageQueue.push(msg);
+    });
+
+    // Capture Shares
+    tiktokConnection.on('share', data => {
+        const msg = {
+            type: 'share',
+            author: data.uniqueId,
+            authorName: data.nickname || data.uniqueId,
+            authorAvatar: data.profilePictureUrl || null,
+            timestamp: Date.now()
+        };
+        console.log(`📤 [Share] ${msg.authorName} (@${msg.author}) shared the stream!`);
+        tiktokMessageQueue.push(msg);
+    });
+
+    // Capture Emotes (free stickers/reactions)
+    tiktokConnection.on('emote', data => {
+        const msg = {
+            type: 'emote',
+            author: data.uniqueId,
+            authorName: data.nickname || data.uniqueId,
+            emoteId: data.emoteId || (data.emote && data.emote.emoteId),
+            emoteName: (data.emote && data.emote.emoteName) || 'unknown',
+            emoteImage: (data.emote && data.emote.image && data.emote.image.url) || null,
+            timestamp: Date.now()
+        };
+        console.log(`😂 [Emote] ${msg.authorName} sent ${msg.emoteName} (ID: ${msg.emoteId})`);
+
+        // Broadcast to animation overlay
+        broadcastToAnimationOverlay({
+            type: 'emote',
+            platform: 'tiktok',
+            trigger: msg.emoteName,
+            emoteId: msg.emoteId,
+            author: msg.authorName
+        });
+    });
+
+    // Capture Likes
+    tiktokConnection.on('like', data => {
+        const author = data.uniqueId;
+        const count = data.likeCount || 1;
+
+        // Update leaderboard
+        const currentCount = likerLeaderboard.get(author) || 0;
+        likerLeaderboard.set(author, currentCount + count);
+
+        // Store user info for leaderboard
+        if (!likerUserInfo.has(author)) {
+            likerUserInfo.set(author, {
+                nickname: data.nickname || author,
+                avatar: data.profilePictureUrl || null
+            });
+        }
+
+        console.log(`❤️ [Like] ${data.nickname || author} sent ${count} likes (total: ${currentCount + count})`);
+
+        // Broadcast updated leaderboard
+        broadcastLeaderboard();
     });
 });
 
@@ -230,4 +323,231 @@ app.get('/api/tiktok/messages', (req, res) => {
     res.json(tiktokMessageQueue);
     tiktokMessageQueue = [];
 });
+
+// SSE endpoint for gift overlay
+app.get('/overlay/gifts/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    giftOverlayClients.push(res);
+
+    req.on('close', () => {
+        const index = giftOverlayClients.indexOf(res);
+        if (index > -1) giftOverlayClients.splice(index, 1);
+    });
+});
+
+// SSE endpoint for liker leaderboard
+app.get('/overlay/likers/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    likerLeaderboardClients.push(res);
+
+    // Send current leaderboard immediately
+    const leaderboard = getTopLikers();
+    res.write(`data: ${JSON.stringify(leaderboard)}\n\n`);
+
+    req.on('close', () => {
+        const index = likerLeaderboardClients.indexOf(res);
+        if (index > -1) likerLeaderboardClients.splice(index, 1);
+    });
+});
+
+// Helper functions
+function broadcastToGiftOverlay(giftData) {
+    const data = JSON.stringify(giftData);
+    giftOverlayClients.forEach(client => {
+        try {
+            client.write(`data: ${data}\n\n`);
+        } catch (err) {
+            console.error('Gift overlay broadcast error:', err);
+        }
+    });
+}
+
+function broadcastLeaderboard() {
+    const leaderboard = getTopLikers();
+    const data = JSON.stringify(leaderboard);
+
+    likerLeaderboardClients.forEach(client => {
+        try {
+            client.write(`data: ${data}\n\n`);
+        } catch (err) {
+            console.error('Leaderboard broadcast error:', err);
+        }
+    });
+}
+
+function getTopLikers(limit = 10) {
+    return Array.from(likerLeaderboard.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, limit)
+        .map(([username, count]) => {
+            const userInfo = likerUserInfo.get(username) || {};
+            return {
+                username,
+                count,
+                nickname: userInfo.nickname || username,
+                avatar: userInfo.avatar || null
+            };
+        });
+}
+
+// Serve overlay HTML files
+app.get('/overlay/gifts', (req, res) => {
+    res.sendFile(path.join(__dirname, 'overlays', 'gifts.html'));
+});
+
+app.get('/overlay/likers', (req, res) => {
+    res.sendFile(path.join(__dirname, 'overlays', 'likers.html'));
+});
+
+// Sound effects management
+app.use('/sounds', express.static(path.join(__dirname, 'sounds')));
+
+// Upload custom sound
+const multer = require('multer');
+const soundStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const soundsDir = path.join(__dirname, 'sounds', 'custom');
+        if (!fs.existsSync(soundsDir)) {
+            fs.mkdirSync(soundsDir, { recursive: true });
+        }
+        cb(null, soundsDir);
+    },
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        const name = path.basename(file.originalname, ext);
+        cb(null, `${name}-${Date.now()}${ext}`);
+    }
+});
+
+const upload = multer({
+    storage: soundStorage,
+    fileFilter: (req, file, cb) => {
+        const allowed = ['.mp3', '.wav', '.ogg'];
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (allowed.includes(ext)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only audio files (.mp3, .wav, .ogg) are allowed'));
+        }
+    },
+    limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
+});
+
+app.post('/api/sounds/upload', upload.single('sound'), (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    res.json({
+        success: true,
+        filename: req.file.filename,
+        path: `/sounds/custom/${req.file.filename}`
+    });
+});
+
+// Get available sounds
+app.get('/api/sounds/list', (req, res) => {
+    const soundsDir = path.join(__dirname, 'sounds');
+    const customDir = path.join(soundsDir, 'custom');
+
+    const builtIn = fs.existsSync(soundsDir)
+        ? fs.readdirSync(soundsDir).filter(f => f.match(/\.(mp3|wav|ogg)$/i))
+        : [];
+
+    const custom = fs.existsSync(customDir)
+        ? fs.readdirSync(customDir).filter(f => f.match(/\.(mp3|wav|ogg)$/i))
+        : [];
+
+    res.json({
+        builtIn: builtIn.map(f => ({ name: f, path: `/sounds/${f}` })),
+        custom: custom.map(f => ({ name: f, path: `/sounds/custom/${f}` }))
+    });
+});
+
+// ─── ANIMATION OVERLAY ENDPOINTS ────────────────────────────────────
+
+// SSE endpoint for animation overlay
+app.get('/overlay/animations/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    animationOverlayClients.push(res);
+    console.log(`🎬 Animation overlay client connected (${animationOverlayClients.length} total)`);
+
+    req.on('close', () => {
+        const index = animationOverlayClients.indexOf(res);
+        if (index > -1) {
+            animationOverlayClients.splice(index, 1);
+            console.log(`🎬 Animation overlay client disconnected (${animationOverlayClients.length} remaining)`);
+        }
+    });
+});
+
+// Serve animation overlay HTML
+app.get('/overlay/animations', (req, res) => {
+    res.sendFile(path.join(__dirname, 'overlays', 'animations.html'));
+});
+
+// Get available animation files
+app.get('/api/animations/list', (req, res) => {
+    const animationsDir = path.join(__dirname, 'animations');
+
+    if (!fs.existsSync(animationsDir)) {
+        fs.mkdirSync(animationsDir, { recursive: true });
+    }
+
+    const files = fs.readdirSync(animationsDir).filter(f =>
+        f.match(/\.(mov|mp4|webm)$/i)
+    );
+
+    res.json({
+        animations: files.map(f => ({
+            name: f.replace(/\.(mov|mp4|webm)$/i, ''),
+            filename: f,
+            path: `/animations/${f}`
+        }))
+    });
+});
+
+// Serve animation files
+app.use('/animations', express.static(path.join(__dirname, 'animations')));
+
+// Broadcast animation event to all connected overlay clients
+function broadcastToAnimationOverlay(data) {
+    const payload = `data: ${JSON.stringify(data)}\n\n`;
+
+    animationOverlayClients.forEach(client => {
+        try {
+            client.write(payload);
+        } catch (err) {
+            console.error('Animation overlay broadcast error:', err);
+        }
+    });
+}
+
+// API endpoint to manually trigger animations (for testing)
+app.post('/api/animations/trigger', (req, res) => {
+    const { type, trigger, platform } = req.body;
+
+    broadcastToAnimationOverlay({
+        type: type || 'manual',
+        platform: platform || 'test',
+        trigger: trigger,
+        author: 'Manual Trigger'
+    });
+
+    res.json({ success: true, message: `Triggered animation: ${trigger}` });
+});
+
+// ─── END ANIMATION OVERLAY ──────────────────────────────────────────
+
 // --- TIKTOK LOGIC END ---
+

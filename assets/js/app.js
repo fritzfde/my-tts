@@ -55,6 +55,33 @@ function ensureAudioContext() {
   return audioContext;
 }
 
+// Audio Autoplay Unlock (browsers block autoplay until user interaction)
+let audioUnlocked = false;
+
+function unlockAudio() {
+  if (audioUnlocked) return;
+
+  // Create and play silent audio to unlock autoplay
+  const silentAudio = new Audio();
+  silentAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+  silentAudio.volume = 0.01;
+
+  silentAudio.play().then(() => {
+    audioUnlocked = true;
+    console.log('✓ Audio autoplay unlocked');
+  }).catch(err => {
+    // Still locked, will retry on next interaction
+    console.log('⏳ Waiting for user interaction to unlock audio...');
+  });
+
+  // Also resume AudioContext
+  ensureAudioContext();
+}
+
+// Unlock on any user interaction (click or keypress)
+document.addEventListener('click', unlockAudio);
+document.addEventListener('keydown', unlockAudio);
+
 // Platform-specific state
 let youtubeConnected = false;
 let tiktokConnected = false;
@@ -78,7 +105,6 @@ let voiceSelectYouTube = null;
 let voiceSelectTikTok = null;
 
 // UI Elements
-const elevenLabsKeyInput = document.getElementById('elevenLabsKey');
 const channelUrlInput = document.getElementById('channelUrl');
 const streamUrlInput = document.getElementById('streamUrl');
 const findStreamBtn = document.getElementById('findStreamBtn');
@@ -197,12 +223,29 @@ apiKeyTagsContainer.addEventListener('click', (e) => {
   if (btn) removeApiKey(Number(btn.dataset.index));
 });
 
-// Round-robin through keys
+// Time-based key rotation (stick with one key until quota exhausted)
+let keyStartTime = Date.now();
+const KEY_ROTATION_INTERVAL = 3 * 60 * 60 * 1000; // 3 hours per key
+
 function getNextApiKey() {
   if (apiKeys.length === 0) return '';
-  const key = apiKeys[currentKeyIndex];
+
+  // Auto-rotate key every 3 hours (before quota exhaustion)
+  const now = Date.now();
+  if (now - keyStartTime > KEY_ROTATION_INTERVAL) {
+    currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
+    keyStartTime = now;
+    console.log(`⏰ Auto-rotating to key ${currentKeyIndex + 1}/${apiKeys.length} after 3 hours`);
+  }
+
+  return apiKeys[currentKeyIndex];
+}
+
+// Force rotate to next key (called on quota errors)
+function rotateToNextKey() {
   currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
-  return key;
+  keyStartTime = Date.now(); // Reset timer
+  console.log(`🔑 Forced rotation to key ${currentKeyIndex + 1}/${apiKeys.length}`);
 }
 // ─── end API key manager ────────────────────────────────────────────
 
@@ -326,6 +369,11 @@ function loadVoices() {
   }
 
   console.log('Loaded voices for both platforms');
+
+  // Also populate gender voice selects
+  if (typeof populateGenderVoiceSelects === 'function') {
+    populateGenderVoiceSelects();
+  }
 }
 
 // Load voices on page load
@@ -440,9 +488,6 @@ function loadSettings() {
   }
   renderApiKeyTags();
 
-  const savedElevenLabsKey = localStorage.getItem('yt_tts_elevenlabs_key');
-  elevenLabsKeyInput.value = savedElevenLabsKey || 'sk_b8531bb9517d1ae50c7f038df6107677f0a945003a99696d';
-
   const savedChannelUrl = localStorage.getItem('yt_tts_channel_url');
   channelUrlInput.value = savedChannelUrl || 'https://www.youtube.com/@TESLAbot-CODM';
 
@@ -463,16 +508,13 @@ function loadSettings() {
 // Save settings
 function saveSettings() {
   localStorage.setItem('yt_tts_api_keys', JSON.stringify(apiKeys));
-  const elevenLabsKey = elevenLabsKeyInput.value.trim();
   const channelUrl    = channelUrlInput.value.trim();
   const streamUrl     = streamUrlInput.value.trim();
-  if (elevenLabsKey) localStorage.setItem('yt_tts_elevenlabs_key', elevenLabsKey);
   if (channelUrl)    localStorage.setItem('yt_tts_channel_url', channelUrl);
   if (streamUrl)     localStorage.setItem('yt_tts_stream_url', streamUrl);
 }
 
 // Auto-save when fields change
-elevenLabsKeyInput.addEventListener('change', saveSettings);
 channelUrlInput.addEventListener('change', saveSettings);
 streamUrlInput.addEventListener('change', saveSettings);
 
@@ -747,7 +789,10 @@ function processQueue() {
           isSpeaking = false;
           processQueue();
         };
-        result.audio.play();
+        result.audio.play().catch(err => {
+          console.warn('⏸️ Audio autoplay blocked. Click page to enable audio.');
+          unlockAudio();
+        });
       } else {
         const utterance = result.utterance;
         setupUtteranceHandlers(utterance);
@@ -915,142 +960,10 @@ async function getLiveChatId(videoId, apiKey) {
 }
 
 // Poll YouTube messages
-async function pollYouTubeMessages(isReconnect = false) {
-  if (!youtubeConnected || !youtubeLiveChatId) return;
-
-  const apiKey = getNextApiKey(); // rotate every poll
-
-  try {
-    let url = `/api/youtube/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails&key=${apiKey}`;
-
-    if (youtubeNextPageToken) {
-      url += `&pageToken=${youtubeNextPageToken}`;
-    }
-
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      const message = errorData.error?.message || '';
-
-      // Quota exceeded — back off and retry with next key, don't disconnect
-      if (response.status === 403 && message.toLowerCase().includes('quota')) {
-        console.warn(`⚠️ Quota hit on key, rotating… (${apiKeys.length} keys available)`);
-        // Back off longer when quota is hit
-        const backoff = apiKeys.length > 1 ? 5000 : 30000;
-        setTimeout(() => pollYouTubeMessages(false), backoff);
-        return;
-      }
-
-      throw new Error(message || `API Error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    youtubeNextPageToken = data.nextPageToken;
-    youtubeLastPollTime = Date.now();
-
-    if (data.items) {
-      if (youtubeIsFirstPoll) {
-        // First poll after connect/reconnect.
-        // Show all messages silently. Speak only the very last one,
-        // and only if it arrived within the last 2 minutes.
-        const items = data.items;
-        const twoMinAgo = Date.now() - 120000;
-
-        items.forEach((item, idx) => {
-          youtubeSeenMessages.add(item.id);
-
-          if (idx === items.length - 1) {
-            // Last message — speak it only if recent
-            const publishedAt = new Date(item.snippet.publishedAt).getTime();
-            if (publishedAt >= twoMinAgo) {
-              speakText(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', true);
-            } else {
-              addChatMessage(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', false);
-            }
-          } else {
-            addChatMessage(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', false);
-          }
-        });
-
-        youtubeIsFirstPoll = false;
-      } else {
-        // Normal poll — speak everything new
-        data.items.forEach(item => {
-          if (!youtubeSeenMessages.has(item.id)) {
-            youtubeSeenMessages.add(item.id);
-            speakText(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', true);
-          }
-        });
-      }
-    }
-
-    const pollInterval = data.pollingIntervalMillis || 5000;
-    setTimeout(() => pollYouTubeMessages(false), pollInterval);
-
-  } catch (error) {
-    console.error('YouTube polling error:', error);
-    updateStatus(`YouTube error: ${error.message}`, false, true);
-    disconnectYouTube();
-  }
-}
 
 // Poll TikTok messages (chat + gifts)
 let tiktokIsFirstPoll = true;
 
-async function pollTikTokMessages() {
-  if (!tiktokConnected) return;
-
-  try {
-    const response = await fetch('/api/tiktok/messages');
-    const messages = await response.json();
-
-    tiktokLastPollTime = Date.now();
-
-    if (!messages || messages.length === 0) return;
-
-    if (tiktokIsFirstPoll) {
-      // First poll after connect — show everything silently,
-      // speak only the very last chat message and only if recent.
-      tiktokIsFirstPoll = false;
-      const twoMinAgo = Date.now() - 120000;
-      // Server doesn't send timestamps, so we only have "now".
-      // On a fresh connect the queue was just cleared by the server,
-      // so anything in it arrived in the last ~2s poll window — it IS recent.
-      // Show all silently except the last chat message which we speak.
-      let lastChatIndex = -1;
-      messages.forEach((msg, i) => { if (msg.type !== 'gift') lastChatIndex = i; });
-
-      messages.forEach((msg, i) => {
-        if (msg.type === 'gift') {
-          const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
-          console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
-          addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
-        } else if (i === lastChatIndex) {
-          // Last chat message — speak it
-          speakText(msg.author, msg.text, 'tiktok', true);
-        } else {
-          // Older chat — display only
-          addChatMessage(msg.author, msg.text, 'tiktok', false);
-        }
-      });
-      return;
-    }
-
-    // Normal poll — speak everything
-    messages.forEach(msg => {
-      if (msg.type === 'gift') {
-        const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
-        console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
-        addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
-      } else {
-        speakText(msg.author, msg.text, 'tiktok', true);
-      }
-    });
-  } catch (err) {
-    console.error('TikTok polling error:', err);
-  }
-}
 
 // YouTube Connect
 document.getElementById('connectYouTubeBtn').addEventListener('click', async () => {
@@ -1310,7 +1223,10 @@ testVoiceYouTubeBtn.addEventListener('click', () => {
   if (voiceId.startsWith('cloned-')) {
     speakWithCustomVoice(voiceId, testMsg).then(result => {
       if (result.isCloned) {
-        result.audio.play();
+        result.audio.play().catch(err => {
+          console.warn('⏸️ Test voice blocked. Click page first.');
+          unlockAudio();
+        });
       } else {
         synth.speak(result.utterance);
       }
@@ -1343,7 +1259,10 @@ testVoiceTikTokBtn.addEventListener('click', () => {
   if (voiceId.startsWith('cloned-')) {
     speakWithCustomVoice(voiceId, testMsg).then(result => {
       if (result.isCloned) {
-        result.audio.play();
+        result.audio.play().catch(err => {
+          console.warn('⏸️ Test voice blocked. Click page first.');
+          unlockAudio();
+        });
       } else {
         synth.speak(result.utterance);
       }
@@ -1444,3 +1363,1302 @@ setTimeout(async () => {
     }, 1500);
   }
 }, 1500);
+
+// ─── Gift Sound Effects & Overlays ───────────────────────────────────
+
+// Sound effects system
+const giftSoundSelect = document.getElementById('giftSoundSelect');
+const customSoundUpload = document.getElementById('customSoundUpload');
+const uploadSoundBtn = document.getElementById('uploadSoundBtn');
+
+// Play gift sound when gifts are received
+function playGiftSound() {
+  const selectedSound = giftSoundSelect ? giftSoundSelect.value : '';
+
+  if (!selectedSound) return; // No sound selected
+
+  if (selectedSound.startsWith('custom-')) {
+    // Play custom uploaded sound
+    const soundPath = selectedSound.replace('custom-', '');
+    const audio = new Audio(soundPath);
+    audio.volume = volumeSlider.value / 100;
+    audio.play().catch(err => console.error('Sound play error:', err));
+  } else {
+    // Play built-in synthesized sound
+    playBuiltInSound(selectedSound);
+  }
+}
+
+function playBuiltInSound(type) {
+  const ctx = ensureAudioContext();
+  const now = ctx.currentTime;
+  const oscillator = ctx.createOscillator();
+  const gainNode = ctx.createGain();
+
+  oscillator.connect(gainNode);
+  gainNode.connect(ctx.destination);
+
+  const volume = (volumeSlider.value / 100) * 0.3; // Max 30% volume
+
+  switch(type) {
+    case 'ding':
+      oscillator.frequency.setValueAtTime(800, now);
+      gainNode.gain.setValueAtTime(volume, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      oscillator.start(now);
+      oscillator.stop(now + 0.3);
+      break;
+
+    case 'coin':
+      oscillator.frequency.setValueAtTime(400, now);
+      oscillator.frequency.exponentialRampToValueAtTime(600, now + 0.1);
+      gainNode.gain.setValueAtTime(volume, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      oscillator.start(now);
+      oscillator.stop(now + 0.2);
+      break;
+
+    case 'chime':
+      oscillator.frequency.setValueAtTime(523, now);
+      oscillator.frequency.setValueAtTime(659, now + 0.15);
+      gainNode.gain.setValueAtTime(volume, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      oscillator.start(now);
+      oscillator.stop(now + 0.4);
+      break;
+
+    case 'applause':
+      const bufferSize = ctx.sampleRate * 0.5;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.2));
+      }
+
+      const noiseSource = ctx.createBufferSource();
+      noiseSource.buffer = buffer;
+      noiseSource.connect(gainNode);
+      gainNode.gain.setValueAtTime(volume * 0.5, now);
+      noiseSource.start(now);
+      break;
+
+    // ── Anime Sounds ──
+    case 'anime-sparkle':
+      // Ascending sparkle sound
+      oscillator.frequency.setValueAtTime(1200, now);
+      oscillator.frequency.exponentialRampToValueAtTime(2400, now + 0.15);
+      gainNode.gain.setValueAtTime(volume * 0.8, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      oscillator.start(now);
+      oscillator.stop(now + 0.3);
+      break;
+
+    case 'anime-powerup':
+      // Power-up sound (fast ascending)
+      oscillator.frequency.setValueAtTime(220, now);
+      oscillator.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+      oscillator.frequency.exponentialRampToValueAtTime(1760, now + 0.16);
+      gainNode.gain.setValueAtTime(volume, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
+      oscillator.start(now);
+      oscillator.stop(now + 0.25);
+      break;
+
+    case 'anime-notification':
+      // Triple beep notification
+      const beep1 = ctx.createOscillator();
+      const beep2 = ctx.createOscillator();
+      const beep3 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      const gain2 = ctx.createGain();
+      const gain3 = ctx.createGain();
+
+      [beep1, beep2, beep3].forEach((osc, i) => {
+        const g = [gain1, gain2, gain3][i];
+        osc.connect(g);
+        g.connect(ctx.destination);
+        osc.frequency.value = 1000;
+        g.gain.setValueAtTime(volume * 0.6, now + i * 0.12);
+        g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.12 + 0.1);
+        osc.start(now + i * 0.12);
+        osc.stop(now + i * 0.12 + 0.1);
+      });
+      return; // Skip default oscillator cleanup
+
+    case 'anime-coin':
+      // Mario-style coin
+      oscillator.frequency.setValueAtTime(988, now);     // B5
+      oscillator.frequency.setValueAtTime(1319, now + 0.1); // E6
+      gainNode.gain.setValueAtTime(volume, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      oscillator.start(now);
+      oscillator.stop(now + 0.3);
+      break;
+
+    case 'anime-victory':
+      // Victory jingle (do-mi-so-do)
+      const v1 = ctx.createOscillator();
+      const v2 = ctx.createOscillator();
+      const v3 = ctx.createOscillator();
+      const v4 = ctx.createOscillator();
+      const vg1 = ctx.createGain();
+      const vg2 = ctx.createGain();
+      const vg3 = ctx.createGain();
+      const vg4 = ctx.createGain();
+
+      const notes = [
+        { osc: v1, gain: vg1, freq: 523, start: 0 },    // C
+        { osc: v2, gain: vg2, freq: 659, start: 0.1 },  // E
+        { osc: v3, gain: vg3, freq: 784, start: 0.2 },  // G
+        { osc: v4, gain: vg4, freq: 1047, start: 0.3 }  // C
+      ];
+
+      notes.forEach(({ osc, gain, freq, start }) => {
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(volume * 0.7, now + start);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + start + 0.2);
+        osc.start(now + start);
+        osc.stop(now + start + 0.2);
+      });
+      return; // Skip default oscillator cleanup
+  }
+}
+
+// Upload custom sound
+if (uploadSoundBtn) {
+  uploadSoundBtn.addEventListener('click', async () => {
+    const file = customSoundUpload.files[0];
+
+    if (!file) {
+      updateStatus('Please select a sound file first', false, true);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('sound', file);
+
+    try {
+      uploadSoundBtn.disabled = true;
+      uploadSoundBtn.textContent = 'Uploading...';
+
+      const response = await fetch('/api/sounds/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        const option = document.createElement('option');
+        option.value = `custom-${data.path}`;
+        option.textContent = `🎵 ${data.filename}`;
+        giftSoundSelect.appendChild(option);
+        giftSoundSelect.value = option.value;
+
+        localStorage.setItem('gift_sound_preference', option.value);
+
+        updateStatus(`✓ Sound uploaded: ${data.filename}`, false);
+        customSoundUpload.value = '';
+
+      } else {
+        throw new Error(data.error || 'Upload failed');
+      }
+
+    } catch (error) {
+      console.error('Upload error:', error);
+      updateStatus(`Upload failed: ${error.message}`, false, true);
+    } finally {
+      uploadSoundBtn.disabled = false;
+      uploadSoundBtn.textContent = 'Upload';
+    }
+  });
+}
+
+// Load available custom sounds
+async function loadCustomSounds() {
+  try {
+    const response = await fetch('/api/sounds/list');
+    const data = await response.json();
+
+    if (giftSoundSelect && data.custom && data.custom.length > 0) {
+      data.custom.forEach(sound => {
+        const option = document.createElement('option');
+        option.value = `custom-${sound.path}`;
+        option.textContent = `🎵 ${sound.name}`;
+        giftSoundSelect.appendChild(option);
+      });
+    }
+
+    const savedSound = localStorage.getItem('gift_sound_preference');
+    if (giftSoundSelect && savedSound) {
+      const hasOption = Array.from(giftSoundSelect.options).some(opt => opt.value === savedSound);
+      if (hasOption) giftSoundSelect.value = savedSound;
+    }
+
+  } catch (error) {
+    console.error('Error loading custom sounds:', error);
+  }
+}
+
+// Save sound preference
+if (giftSoundSelect) {
+  giftSoundSelect.addEventListener('change', () => {
+    localStorage.setItem('gift_sound_preference', giftSoundSelect.value);
+  });
+}
+
+// Copy overlay URL buttons
+document.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const targetId = btn.dataset.target;
+    const input = document.getElementById(targetId);
+
+    if (!input) return;
+
+    input.select();
+    input.setSelectionRange(0, 99999);
+
+    navigator.clipboard.writeText(input.value).then(() => {
+      const originalText = btn.textContent;
+      btn.textContent = '✓ Copied!';
+      btn.style.background = 'var(--success)';
+
+      setTimeout(() => {
+        btn.textContent = originalText;
+        btn.style.background = '';
+      }, 2000);
+    }).catch(err => {
+      console.error('Copy failed:', err);
+      updateStatus('Copy failed - please copy manually', false, true);
+    });
+  });
+});
+
+// Initialize
+loadCustomSounds();
+
+// Make playGiftSound available globally so pollTikTokMessages can call it
+window.playGiftSound = playGiftSound;
+
+// ─── AI-Powered Gender Detection & Voice Assignment ─────────────────
+
+// UI Elements
+const autoGenderDetectionCheckbox = document.getElementById('autoGenderDetection');
+const maleVoiceSelect = document.getElementById('maleVoiceSelect');
+const femaleVoiceSelect = document.getElementById('femaleVoiceSelect');
+
+// Gender cache (persistent across sessions)
+let genderCache = {};
+
+// Load gender cache from localStorage
+function loadGenderCache() {
+  try {
+    const saved = localStorage.getItem('gender_cache');
+    if (saved) genderCache = JSON.parse(saved);
+  } catch (e) {
+    console.error('Error loading gender cache:', e);
+    genderCache = {};
+  }
+}
+
+// Save gender cache to localStorage
+function saveGenderCache() {
+  try {
+    localStorage.setItem('gender_cache', JSON.stringify(genderCache));
+  } catch (e) {
+    console.error('Error saving gender cache:', e);
+  }
+}
+
+// Populate male/female voice selectors
+function populateGenderVoiceSelects() {
+  if (!maleVoiceSelect || !femaleVoiceSelect) return;
+
+  // Clear existing options
+  maleVoiceSelect.innerHTML = '';
+  femaleVoiceSelect.innerHTML = '';
+
+  // Get all system voices
+  const systemVoices = voices.map((voice, index) => ({
+    value: `system-${index}`,
+    name: voice.name,
+    lang: voice.lang,
+    voice: voice
+  }));
+
+  // Add cloned voices
+  const allVoices = [
+    ...clonedVoices.map(name => ({
+      value: `cloned-${name}`,
+      name: name,
+      lang: 'custom',
+      isCloned: true
+    })),
+    ...systemVoices
+  ];
+
+  // Populate both selects
+  [maleVoiceSelect, femaleVoiceSelect].forEach(select => {
+    allVoices.forEach(v => {
+      const option = document.createElement('option');
+      option.value = v.value;
+      option.textContent = v.isCloned ? `🎙️ ${v.name}` : v.name;
+      select.appendChild(option);
+    });
+  });
+
+  // Try to auto-select appropriate voices
+  const maleVoice = systemVoices.find(v =>
+    /male|man|boy|david|mark|george|daniel|thomas/i.test(v.name)
+  );
+  const femaleVoice = systemVoices.find(v =>
+    /female|woman|girl|samantha|victoria|zira|anna|karen|moira/i.test(v.name)
+  );
+
+  // Restore saved preferences or use auto-detected
+  const savedMale = localStorage.getItem('default_male_voice');
+  const savedFemale = localStorage.getItem('default_female_voice');
+
+  if (savedMale && Array.from(maleVoiceSelect.options).some(opt => opt.value === savedMale)) {
+    maleVoiceSelect.value = savedMale;
+  } else if (maleVoice) {
+    maleVoiceSelect.value = maleVoice.value;
+  }
+
+  if (savedFemale && Array.from(femaleVoiceSelect.options).some(opt => opt.value === savedFemale)) {
+    femaleVoiceSelect.value = savedFemale;
+  } else if (femaleVoice) {
+    femaleVoiceSelect.value = femaleVoice.value;
+  }
+
+  console.log('✓ Gender voice selects populated');
+}
+
+// Save preferences when changed
+if (maleVoiceSelect) {
+  maleVoiceSelect.addEventListener('change', () => {
+    localStorage.setItem('default_male_voice', maleVoiceSelect.value);
+    console.log('Saved default male voice:', maleVoiceSelect.value);
+  });
+}
+
+if (femaleVoiceSelect) {
+  femaleVoiceSelect.addEventListener('change', () => {
+    localStorage.setItem('default_female_voice', femaleVoiceSelect.value);
+    console.log('Saved default female voice:', femaleVoiceSelect.value);
+  });
+}
+
+// Detect gender using LLM (Ollama)
+async function detectGenderWithLLM(username) {
+  const prompt = `Username: "${username}"
+
+Task: Predict user's gender based on this username. Consider:
+- Names hidden in leet speak (e.g., "3m1ly" = Emily, "D4N13L" = Daniel)
+- Decorations like xX, _, numbers, special characters
+- Keywords like "girl", "boy", "queen", "king", "princess", "lord"
+- International names and unicode characters
+- Gaming culture naming patterns
+
+Respond with ONLY ONE WORD (lowercase):
+male
+female
+neutral
+
+Answer:`;
+
+  try {
+    const response = await fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'llama3:8b',
+        prompt: prompt,
+        stream: false,
+        options: {
+          temperature: 0.1,  // Low temp for consistency
+          num_predict: 5     // Only need 1 word
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const answer = data.response.trim().toLowerCase();
+
+    // Validate response
+    if (['male', 'female', 'neutral'].includes(answer)) {
+      console.log(`🤖 LLM detected: ${username} → ${answer}`);
+      return answer;
+    }
+
+    console.warn(`⚠️ Invalid LLM response for ${username}: "${answer}"`);
+    return 'neutral';
+
+  } catch (error) {
+    console.error('❌ LLM gender detection error:', error.message);
+    // Fallback to pattern matching
+    return quickPatternCheck(username);
+  }
+}
+
+// Quick pattern check (fallback when LLM is offline)
+function quickPatternCheck(username) {
+  const lower = username.toLowerCase().replace(/[^a-z]/g, '');
+
+  // Very obvious female patterns
+  if (/girl|queen|princess|lady|miss|goddess|waifu/.test(lower)) return 'female';
+
+  // Very obvious male patterns
+  if (/boy|king|lord|dude|bro|master|emperor/.test(lower)) return 'male';
+
+  return 'neutral';
+}
+
+// Main gender detection (with caching)
+async function detectGender(username) {
+  const cacheKey = username.toLowerCase();
+
+  // Check cache first
+  if (genderCache[cacheKey]) {
+    console.log(`💾 Cached gender for ${username}: ${genderCache[cacheKey]}`);
+    return genderCache[cacheKey];
+  }
+
+  // Detect with LLM
+  const gender = await detectGenderWithLLM(username);
+
+  // Cache result
+  genderCache[cacheKey] = gender;
+  saveGenderCache();
+
+  return gender;
+}
+
+// Auto-assign voice based on detected gender
+async function autoAssignVoiceIfNeeded(author, platform) {
+  const userKey = `${platform}:${author}`;
+
+  // Skip if already has assigned voice
+  if (userVoices[userKey]) return;
+
+  // Skip if auto-detection disabled
+  if (!autoGenderDetectionCheckbox || !autoGenderDetectionCheckbox.checked) return;
+
+  // Skip if gender voice selects aren't populated yet
+  if (!maleVoiceSelect || !femaleVoiceSelect) return;
+
+  try {
+    // Detect gender (cached if seen before)
+    const gender = await detectGender(author);
+
+    let assignedVoice = null;
+
+    if (gender === 'male') {
+      assignedVoice = maleVoiceSelect.value;
+    } else if (gender === 'female') {
+      assignedVoice = femaleVoiceSelect.value;
+    }
+
+    // Assign voice
+    if (assignedVoice && gender !== 'neutral') {
+      userVoices[userKey] = assignedVoice;
+      saveUserVoices();
+
+      const voiceName = getVoiceName(assignedVoice);
+      console.log(`✨ Auto-assigned ${gender} voice to ${author}: ${voiceName}`);
+
+      // Optional: Show notification in chat (can be disabled if too noisy)
+      // addChatMessage('SYSTEM', `🤖 Auto-assigned ${gender} voice to ${author}`, 'SYSTEM', false);
+    }
+
+  } catch (error) {
+    console.error('Auto-assign voice error:', error);
+  }
+}
+
+// Hook into existing polling functions
+// We'll override the existing pollTikTokMessages to add auto-assignment
+
+const originalPollTikTok = pollTikTokMessages;
+
+async function pollTikTokMessages() {
+  if (!tiktokConnected) return;
+
+  try {
+    const response = await fetch('/api/tiktok/messages');
+    const messages = await response.json();
+
+    tiktokLastPollTime = Date.now();
+
+    if (!messages || messages.length === 0) return;
+
+    if (tiktokIsFirstPoll) {
+      tiktokIsFirstPoll = false;
+      let lastChatIndex = -1;
+      messages.forEach((msg, i) => { if (msg.type !== 'gift') lastChatIndex = i; });
+
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+
+        if (msg.type === 'gift') {
+          const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
+          console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
+          addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
+          if (window.playGiftSound) window.playGiftSound();
+        } else {
+          // Auto-assign voice before speaking
+          await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
+
+          if (i === lastChatIndex) {
+            speakText(msg.author, msg.text, 'tiktok', true);
+          } else {
+            addChatMessage(msg.author, msg.text, 'tiktok', false);
+          }
+        }
+      }
+      return;
+    }
+
+    // Normal poll
+    for (const msg of messages) {
+      if (msg.type === 'gift') {
+        const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
+        console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
+        addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
+        if (window.playGiftSound) window.playGiftSound();
+      } else {
+        // Auto-assign voice before speaking
+        await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
+        speakText(msg.author, msg.text, 'tiktok', true);
+      }
+    }
+
+  } catch (err) {
+    console.error('TikTok polling error:', err);
+  } finally {
+    // CRITICAL: Schedule next poll (2 seconds)
+    if (tiktokConnected) {
+      setTimeout(pollTikTokMessages, 2000);
+    }
+  }
+}
+
+// Also hook into YouTube polling
+const originalPollYouTube = pollYouTubeMessages;
+
+async function pollYouTubeMessages(isReconnect = false) {
+  if (!youtubeConnected || !youtubeLiveChatId) return;
+
+  const apiKey = getNextApiKey();
+
+  try {
+    let url = `/api/youtube/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails&key=${apiKey}`;
+
+    if (youtubeNextPageToken) {
+      url += `&pageToken=${youtubeNextPageToken}`;
+    }
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      const message = errorData.error?.message || '';
+
+      if (response.status === 403 && message.toLowerCase().includes('quota')) {
+        console.warn(`⚠️ Quota hit on key ${currentKeyIndex + 1}, rotating… (${apiKeys.length} keys available)`);
+        rotateToNextKey(); // Force rotate to next key
+        const backoff = apiKeys.length > 1 ? 5000 : 30000;
+        setTimeout(() => pollYouTubeMessages(false), backoff);
+        return;
+      }
+
+      throw new Error(message || `API Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    youtubeNextPageToken = data.nextPageToken;
+    youtubeLastPollTime = Date.now();
+
+    if (data.items) {
+      if (youtubeIsFirstPoll) {
+        const items = data.items;
+        const twoMinAgo = Date.now() - 120000;
+
+        for (let idx = 0; idx < items.length; idx++) {
+          const item = items[idx];
+          youtubeSeenMessages.add(item.id);
+
+          // Auto-assign voice
+          await autoAssignVoiceIfNeeded(item.authorDetails.displayName, 'youtube');
+
+          if (idx === items.length - 1) {
+            const publishedAt = new Date(item.snippet.publishedAt).getTime();
+            if (publishedAt >= twoMinAgo) {
+              speakText(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', true);
+            } else {
+              addChatMessage(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', false);
+            }
+          } else {
+            addChatMessage(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', false);
+          }
+        }
+
+        youtubeIsFirstPoll = false;
+      } else {
+        for (const item of data.items) {
+          if (!youtubeSeenMessages.has(item.id)) {
+            youtubeSeenMessages.add(item.id);
+
+            // Auto-assign voice
+            await autoAssignVoiceIfNeeded(item.authorDetails.displayName, 'youtube');
+
+            speakText(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', true);
+
+            // Check for animation triggers
+            analyzeMessageForAnimation(item.snippet.displayMessage, item.authorDetails.displayName, 'youtube');
+          }
+        }
+      }
+    }
+
+    const pollInterval = data.pollingIntervalMillis || 5000;
+    setTimeout(() => pollYouTubeMessages(false), pollInterval);
+
+  } catch (error) {
+    console.error('YouTube polling error:', error);
+    updateStatus(`YouTube error: ${error.message}`, false, true);
+    disconnectYouTube();
+  }
+}
+
+// Initialize on page load
+loadGenderCache();
+
+// Populate gender voice selects after voices are loaded
+if (speechSynthesis.onvoiceschanged !== undefined) {
+  const originalVoicesChanged = speechSynthesis.onvoiceschanged;
+  speechSynthesis.onvoiceschanged = () => {
+    if (originalVoicesChanged) originalVoicesChanged();
+    loadVoices();
+    populateGenderVoiceSelects();
+  };
+} else {
+  // Fallback: populate after a delay
+  setTimeout(populateGenderVoiceSelects, 1000);
+}
+
+// Save auto-detection preference
+if (autoGenderDetectionCheckbox) {
+  // Load saved preference
+  const savedPref = localStorage.getItem('auto_gender_detection');
+  if (savedPref === 'true') {
+    autoGenderDetectionCheckbox.checked = true;
+  }
+
+  autoGenderDetectionCheckbox.addEventListener('change', () => {
+    localStorage.setItem('auto_gender_detection', autoGenderDetectionCheckbox.checked);
+    console.log('Auto gender detection:', autoGenderDetectionCheckbox.checked ? 'enabled' : 'disabled');
+  });
+}
+
+// ─── Gift Thank You System with Batching ────────────────────────────
+
+let giftBatch = new Map(); // giftName → { users: Set(), count: number }
+let giftBatchTimer = null;
+
+function addGiftToBatch(giftName, authorName) {
+  if (!giftBatch.has(giftName)) {
+    giftBatch.set(giftName, { users: new Set(), count: 0 });
+  }
+
+  const batch = giftBatch.get(giftName);
+  batch.users.add(authorName);
+  batch.count++;
+
+  // Reset timer
+  if (giftBatchTimer) clearTimeout(giftBatchTimer);
+
+  // Wait 3 seconds for more gifts, then announce
+  giftBatchTimer = setTimeout(() => {
+    announceGiftBatch();
+  }, 3000);
+}
+
+function announceGiftBatch() {
+  if (giftBatch.size === 0) return;
+
+  giftBatch.forEach((batch, giftName) => {
+    const userList = Array.from(batch.users);
+    let thankYouMessage = '';
+
+    if (userList.length === 1) {
+      // Single user
+      if (batch.count === 1) {
+        thankYouMessage = `Hey ${userList[0]}, thank you for the ${giftName}!`;
+      } else {
+        thankYouMessage = `Hey ${userList[0]}, thank you for ${batch.count} ${giftName} gifts!`;
+      }
+    } else if (userList.length === 2) {
+      // Two users
+      thankYouMessage = `Hey ${userList[0]} and ${userList[1]}, thank you for the ${giftName} gifts!`;
+    } else {
+      // Multiple users
+      thankYouMessage = `Thank you ${userList[0]}, ${userList[1]} and ${userList.length - 2} others for ${batch.count} ${giftName} gifts!`;
+    }
+
+    // Speak the thank you message
+    addChatMessage('SYSTEM', thankYouMessage, 'SYSTEM', false);
+    speakText('System', thankYouMessage, 'tiktok', false);
+  });
+
+  // Clear batch
+  giftBatch.clear();
+}
+
+// ─── Animation Overlay Settings ─────────────────────────────────────
+
+let animationMappings = {}; // trigger → filename
+let availableAnimations = []; // List of .MOV files
+
+// Load animation mappings from localStorage
+function loadAnimationMappings() {
+  const saved = localStorage.getItem('animation_mappings');
+  if (saved) {
+    try {
+      animationMappings = JSON.parse(saved);
+      console.log('✓ Loaded animation mappings:', Object.keys(animationMappings).length);
+      renderAnimationMappings();
+    } catch (e) {
+      console.error('Error loading animation mappings:', e);
+    }
+  }
+}
+
+// Save animation mappings to localStorage
+function saveAnimationMappings() {
+  localStorage.setItem('animation_mappings', JSON.stringify(animationMappings));
+  console.log('✓ Saved animation mappings');
+
+  // Settings will auto-reload when overlay gains focus (no need for postMessage)
+}
+
+// Fetch available animation files from server
+async function loadAvailableAnimations() {
+  try {
+    const response = await fetch('/api/animations/list');
+    const data = await response.json();
+    availableAnimations = data.animations;
+    console.log(`✓ Loaded ${availableAnimations.length} animation files`);
+    renderAnimationMappings();
+  } catch (e) {
+    console.error('Error loading animations:', e);
+    availableAnimations = [];
+  }
+}
+
+// Render animation mappings list
+function renderAnimationMappings() {
+  const list = document.getElementById('animationMappingsList');
+  if (!list) return;
+
+  if (availableAnimations.length === 0) {
+    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No .MOV files found in /animations folder. Add some animation files first!</div>';
+    return;
+  }
+
+  if (Object.keys(animationMappings).length === 0) {
+    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No mappings yet. Click "+ Add Mapping" to create one.</div>';
+    return;
+  }
+
+  list.innerHTML = Object.entries(animationMappings).map(([trigger, filename]) => `
+    <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+      <input type="text" value="${trigger}" data-trigger="${trigger}" class="mapping-trigger" placeholder="Trigger (e.g., laugh, fire)" style="font-size: 0.875rem; padding: 8px;">
+      <select data-trigger="${trigger}" class="mapping-file" style="font-size: 0.875rem; padding: 8px;">
+        ${availableAnimations.map(anim =>
+          `<option value="${anim.filename}" ${anim.filename === filename ? 'selected' : ''}>${anim.name}</option>`
+        ).join('')}
+      </select>
+      <button class="secondary remove-mapping-btn" data-trigger="${trigger}" style="padding: 8px 16px; font-size: 0.75rem;">🗑️</button>
+    </div>
+  `).join('');
+
+  // Add event listeners
+  list.querySelectorAll('.mapping-trigger').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const oldTrigger = e.target.dataset.trigger;
+      const newTrigger = e.target.value.trim().toLowerCase();
+
+      if (newTrigger && newTrigger !== oldTrigger) {
+        const filename = animationMappings[oldTrigger];
+        delete animationMappings[oldTrigger];
+        animationMappings[newTrigger] = filename;
+        saveAnimationMappings();
+        renderAnimationMappings();
+      }
+    });
+  });
+
+  list.querySelectorAll('.mapping-file').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const trigger = e.target.dataset.trigger;
+      animationMappings[trigger] = e.target.value;
+      saveAnimationMappings();
+      populateTestAnimationDropdown(); // Update test dropdown
+      console.log(`✓ Updated mapping: ${trigger} → ${e.target.value}`);
+    });
+  });
+
+  list.querySelectorAll('.remove-mapping-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const trigger = e.target.dataset.trigger;
+      delete animationMappings[trigger];
+      saveAnimationMappings();
+      renderAnimationMappings();
+    });
+  });
+
+  // Update test animation dropdown
+  populateTestAnimationDropdown();
+}
+
+// Populate test animation dropdown
+function populateTestAnimationDropdown() {
+  const select = document.getElementById('testAnimationSelect');
+  if (!select) return;
+
+  // Remember current selection
+  const currentSelection = select.value;
+
+  select.innerHTML = '<option value="">Select animation to test...</option>';
+
+  Object.entries(animationMappings).forEach(([trigger, filename]) => {
+    const option = document.createElement('option');
+    option.value = trigger;
+    // Show only trigger in dropdown, filename in gray
+    const fileShort = filename.length > 30 ? filename.substring(0, 27) + '...' : filename;
+    option.textContent = trigger;
+    option.setAttribute('data-file', fileShort); // Store for later if needed
+    select.appendChild(option);
+  });
+
+  // Restore selection if it still exists
+  if (currentSelection && animationMappings[currentSelection]) {
+    select.value = currentSelection;
+  }
+}
+
+// Add new mapping button
+const addAnimationMappingBtn = document.getElementById('addAnimationMappingBtn');
+if (addAnimationMappingBtn) {
+  addAnimationMappingBtn.addEventListener('click', () => {
+    if (availableAnimations.length === 0) {
+      alert('No animation files found!\n\nPlease add .MOV files to the /animations folder first.');
+      return;
+    }
+
+    const trigger = prompt('Enter trigger word (e.g., laugh, fire, wow, heart):');
+    if (trigger && trigger.trim()) {
+      const triggerLower = trigger.trim().toLowerCase();
+      animationMappings[triggerLower] = availableAnimations[0].filename;
+      saveAnimationMappings();
+      renderAnimationMappings();
+    }
+  });
+}
+
+// Animations enabled checkbox
+const animationsEnabledCheckbox = document.getElementById('animationsEnabled');
+if (animationsEnabledCheckbox) {
+  // Load saved state
+  const saved = localStorage.getItem('animations_enabled');
+  if (saved !== null) {
+    animationsEnabledCheckbox.checked = saved === 'true';
+  }
+
+  animationsEnabledCheckbox.addEventListener('change', () => {
+    localStorage.setItem('animations_enabled', animationsEnabledCheckbox.checked);
+    console.log('Animations:', animationsEnabledCheckbox.checked ? 'enabled ✅' : 'disabled ❌');
+  });
+}
+
+// Chroma key sliders
+const greenThresholdSlider = document.getElementById('greenThreshold');
+const chromaToleranceSlider = document.getElementById('chromaTolerance');
+
+if (greenThresholdSlider && chromaToleranceSlider) {
+  // Load saved values
+  const savedChroma = localStorage.getItem('chroma_key_settings');
+  if (savedChroma) {
+    try {
+      const settings = JSON.parse(savedChroma);
+      greenThresholdSlider.value = settings.greenThreshold || 100;
+      chromaToleranceSlider.value = settings.tolerance || 50;
+      document.getElementById('greenThresholdValue').textContent = greenThresholdSlider.value;
+      document.getElementById('chromaToleranceValue').textContent = chromaToleranceSlider.value;
+    } catch (e) {
+      console.error('Error loading chroma settings:', e);
+    }
+  }
+
+  // Update value displays
+  greenThresholdSlider.addEventListener('input', () => {
+    document.getElementById('greenThresholdValue').textContent = greenThresholdSlider.value;
+  });
+
+  chromaToleranceSlider.addEventListener('input', () => {
+    document.getElementById('chromaToleranceValue').textContent = chromaToleranceSlider.value;
+  });
+
+  // Save on change
+  function saveChromaSettings() {
+    const settings = {
+      greenThreshold: parseInt(greenThresholdSlider.value),
+      tolerance: parseInt(chromaToleranceSlider.value),
+      spillReduction: 0.5
+    };
+    localStorage.setItem('chroma_key_settings', JSON.stringify(settings));
+    console.log('✓ Chroma key settings saved:', settings);
+  }
+
+  greenThresholdSlider.addEventListener('change', saveChromaSettings);
+  chromaToleranceSlider.addEventListener('change', saveChromaSettings);
+}
+
+// Test animation button
+const testAnimationBtn = document.getElementById('testAnimationBtn');
+const testAnimationSelect = document.getElementById('testAnimationSelect');
+
+if (testAnimationBtn && testAnimationSelect) {
+  testAnimationBtn.addEventListener('click', async () => {
+    const selectedTrigger = testAnimationSelect.value;
+
+    if (!selectedTrigger) {
+      alert('⚠️ Please select an animation from the dropdown first!');
+      return;
+    }
+
+    const filename = animationMappings[selectedTrigger];
+    console.log(`🎬 Testing animation: ${selectedTrigger} → ${filename}`);
+
+    try {
+      const response = await fetch('/api/animations/trigger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'test',
+          trigger: selectedTrigger,
+          platform: 'manual'
+        })
+      });
+
+      if (response.ok) {
+        console.log(`✅ Triggered: ${selectedTrigger} → ${filename}`);
+        // Don't show alert, just log it
+      } else {
+        alert('❌ Failed to trigger animation. Check console for errors.');
+      }
+    } catch (err) {
+      console.error('Test animation error:', err);
+      alert('❌ Error: ' + err.message);
+    }
+  });
+}
+
+// YouTube Chat Emotion Detection with LLM
+async function analyzeMessageForAnimation(message, author, platform) {
+  console.log(`🎬 [ANIMATION] Analyzing message: "${message}" from ${author} on ${platform}`);
+
+  // Skip if animations disabled
+  const animationsEnabledCheckbox = document.getElementById('animationsEnabled');
+  if (!animationsEnabledCheckbox) {
+    console.error('❌ [ANIMATION] animationsEnabled checkbox not found in DOM!');
+    return;
+  }
+
+  if (!animationsEnabledCheckbox.checked) {
+    console.log('⏸️ [ANIMATION] Animations disabled (checkbox unchecked)');
+    return;
+  }
+
+  console.log('✅ [ANIMATION] Animations enabled!');
+
+  // Skip if no mappings configured
+  const mappingCount = Object.keys(animationMappings).length;
+  if (mappingCount === 0) {
+    console.log('⏸️ [ANIMATION] No animation mappings configured');
+    return;
+  }
+
+  console.log(`✅ [ANIMATION] ${mappingCount} mappings available:`, Object.keys(animationMappings));
+
+  // Cache common phrases - map to ACTUAL trigger words you configured
+  const phraseCache = {
+    'lol': 'lol',
+    'lmao': 'lol',
+    'haha': 'lol',
+    'lmfao': 'lol',
+    'omg': 'wow',
+    'wtf': 'wow',
+    'wow': 'wow',
+    'no way': 'wow',
+    'lets go': 'hype',
+    "let's go": 'hype',
+    'fire': 'fire',
+    'sick': 'fire',
+    '❤️': 'heart',
+    '💖': 'heart',
+    '🔥': 'fire',
+    '😂': 'laugh',
+    '🤣': 'laugh',
+    '😮': 'wow',
+    '😱': 'wow'
+  };
+
+  const lowerMsg = message.toLowerCase();
+  console.log(`🔍 [ANIMATION] Searching in: "${lowerMsg}"`);
+
+  // Quick emoji/phrase match
+  for (const [phrase, emotion] of Object.entries(phraseCache)) {
+    if (lowerMsg.includes(phrase)) {
+      console.log(`✅ [ANIMATION] Phrase match: "${phrase}" → ${emotion}`);
+
+      // Check if we have a mapping for this emotion
+      if (animationMappings[emotion]) {
+        console.log(`✅ [ANIMATION] Mapping found: ${emotion} → ${animationMappings[emotion]}`);
+        triggerAnimation(emotion, platform, author);
+        return;
+      } else {
+        console.warn(`⚠️ [ANIMATION] No mapping for emotion: ${emotion}`);
+        console.log(`Available mappings:`, Object.keys(animationMappings));
+      }
+    }
+  }
+
+  console.log(`ℹ️ [ANIMATION] No phrase match found in cache`);
+
+  // Use LLM for complex messages (optional)
+  // Skipping LLM if no cache match to avoid spam
+}
+
+function triggerAnimation(trigger, platform, author) {
+  console.log(`🎯 triggerAnimation called: trigger="${trigger}", platform="${platform}", author="${author}"`);
+  console.log(`Available mappings:`, Object.keys(animationMappings));
+
+  // Check if we have a mapping for this trigger
+  if (!animationMappings[trigger]) {
+    console.warn(`❌ No animation mapped for trigger: "${trigger}"`);
+    console.log(`Available triggers:`, Object.keys(animationMappings).join(', '));
+    return;
+  }
+
+  const filename = animationMappings[trigger];
+  console.log(`✅ Found mapping: ${trigger} → ${filename}`);
+
+  // Send to server to broadcast to overlay
+  console.log(`📡 Sending to server: POST /api/animations/trigger`);
+  fetch('/api/animations/trigger', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      type: 'emotion',
+      trigger: trigger,
+      platform: platform,
+      author: author
+    })
+  })
+  .then(response => {
+    if (response.ok) {
+      console.log(`✅ Animation trigger sent successfully: ${trigger}`);
+    } else {
+      console.error(`❌ Server returned error:`, response.status);
+    }
+  })
+  .catch(err => console.error('❌ Animation trigger error:', err));
+}
+
+// Initialize animation system
+loadAvailableAnimations();
+loadAnimationMappings();
+
+console.log('🎬 Animation system initialized');
+
+// ─── Voice Filter & Preview System ──────────────────────────────────
+
+const toggleVoiceFilterBtn = document.getElementById('toggleVoiceFilter');
+const voiceFilterPanel = document.getElementById('voiceFilterPanel');
+const voiceFilterIcon = document.getElementById('voiceFilterIcon');
+const voicePreviewList = document.getElementById('voicePreviewList');
+const voicePreviewText = document.getElementById('voicePreviewText');
+
+// Toggle voice filter panel
+if (toggleVoiceFilterBtn && voiceFilterPanel) {
+  toggleVoiceFilterBtn.addEventListener('click', () => {
+    const isOpen = voiceFilterPanel.style.display !== 'none';
+    voiceFilterPanel.style.display = isOpen ? 'none' : 'block';
+    if (voiceFilterIcon) {
+      voiceFilterIcon.style.transform = isOpen ? 'rotate(0deg)' : 'rotate(180deg)';
+    }
+
+    if (!isOpen) {
+      // Populate voice list when opening
+      populateVoicePreviewList();
+    }
+  });
+}
+
+// Populate voice preview list
+function populateVoicePreviewList() {
+  if (!voicePreviewList) return;
+
+  const allVoices = [];
+
+  // Add cloned voices
+  clonedVoices.forEach(name => {
+    allVoices.push({
+      value: `cloned-${name}`,
+      name: name,
+      lang: 'custom',
+      isCloned: true
+    });
+  });
+
+  // Add system voices
+  voices.forEach((voice, index) => {
+    const lang = voice.lang.toLowerCase().substring(0, 2);
+    if (enabledLanguages.has(lang)) {
+      allVoices.push({
+        value: `system-${index}`,
+        name: voice.name,
+        lang: voice.lang,
+        voice: voice
+      });
+    }
+  });
+
+  if (allVoices.length === 0) {
+    voicePreviewList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">No voices available</div>';
+    return;
+  }
+
+  // Generate HTML
+  voicePreviewList.innerHTML = allVoices.map(v => {
+    const langFlag = {
+      'en': '🇺🇸',
+      'de': '🇩🇪',
+      'es': '🇪🇸',
+      'uk': '🇺🇦',
+      'ru': '🇷🇺',
+      'custom': '🎙️'
+    }[v.lang.substring(0, 2)] || '🌐';
+
+    return `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 6px;">
+        <span style="font-size: 1.2rem;">${langFlag}</span>
+        <span style="flex: 1; color: var(--text-primary); font-size: 0.875rem;">${v.name}</span>
+        <button class="secondary preview-voice-btn" data-voice="${v.value}" style="padding: 4px 12px; font-size: 0.75rem;">
+          🔊 Preview
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  // Add preview button handlers
+  document.querySelectorAll('.preview-voice-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const voiceId = btn.dataset.voice;
+      previewVoice(voiceId);
+    });
+  });
+}
+
+// Preview a voice
+function previewVoice(voiceId) {
+  const testMsg = (voicePreviewText && voicePreviewText.value) || 'Hello! This is a test of the voice.';
+
+  if (voiceId.startsWith('cloned-')) {
+    // Preview cloned voice
+    speakWithCustomVoice(voiceId, testMsg).then(result => {
+      if (result.isCloned) {
+        result.audio.play().catch(err => {
+          console.warn('Audio preview blocked:', err);
+          unlockAudio();
+        });
+      } else {
+        synth.speak(result.utterance);
+      }
+    });
+  } else if (voiceId.startsWith('system-')) {
+    // Preview system voice
+    const voiceIndex = parseInt(voiceId.replace('system-', ''));
+    const utterance = new SpeechSynthesisUtterance(testMsg);
+
+    if (voices[voiceIndex]) {
+      utterance.voice = voices[voiceIndex];
+    }
+
+    utterance.rate = parseFloat(rateSelect.value);
+    utterance.pitch = parseFloat(pitchSelect.value);
+    utterance.volume = volumeSlider.value / 100;
+
+    synth.speak(utterance);
+  }
+}
+
+console.log('✓ Voice filter & preview system initialized');
+
+// ─── Language Filter Checkboxes ─────────────────────────────────────
+
+// Language filter checkboxes
+document.querySelectorAll('.lang-filter').forEach(checkbox => {
+  checkbox.addEventListener('change', (e) => {
+    const lang = e.target.dataset.lang;
+
+    if (e.target.checked) {
+      enabledLanguages.add(lang);
+    } else {
+      enabledLanguages.delete(lang);
+    }
+
+    // Save to localStorage
+    localStorage.setItem('enabled_languages', JSON.stringify(Array.from(enabledLanguages)));
+
+    console.log(`✓ Language filter updated: ${lang} ${e.target.checked ? 'enabled' : 'disabled'}`);
+
+    // Refresh all voice dropdowns
+    loadVoices();
+  });
+});
+
+// Load saved language filters
+function loadLanguageFilters() {
+  const saved = localStorage.getItem('enabled_languages');
+  if (saved) {
+    try {
+      const langs = JSON.parse(saved);
+      enabledLanguages = new Set(langs);
+
+      // Update checkboxes to match saved state
+      document.querySelectorAll('.lang-filter').forEach(checkbox => {
+        checkbox.checked = enabledLanguages.has(checkbox.dataset.lang);
+      });
+
+      console.log('✓ Loaded language filters:', Array.from(enabledLanguages));
+    } catch (e) {
+      console.error('Error loading language filters:', e);
+    }
+  }
+}
+
+// Load filters on startup
+loadLanguageFilters();
+
+console.log('✓ Language filter system initialized');
