@@ -205,36 +205,17 @@
             <!-- Voice Filter & Preview -->
             <div class="input-group" style="margin-bottom: 0;">
                 <button id="toggleVoiceFilter" class="secondary" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <span>🎛️ Voice Filter & Preview</span>
+                    <span>🎤 Manage Voices (Show/Hide Individual Voices)</span>
                     <span id="voiceFilterIcon" style="transform: rotate(0deg); transition: transform 0.3s;">▼</span>
                 </button>
 
                 <div id="voiceFilterPanel" style="display: none; margin-top: 12px; padding: 16px; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">
                     <div style="margin-bottom: 12px;">
-                        <label style="text-transform: none; font-size: 0.875rem; color: var(--text-secondary);">
-                            Filter by language (shows only selected voices in dropdowns above):
-                        </label>
-                        <div style="display: flex; gap: 12px; margin-top: 8px; flex-wrap: wrap;">
-                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
-                                <input type="checkbox" class="lang-filter" data-lang="en" checked>
-                                <span>🇺🇸 English</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <label style="text-transform: none; font-size: 0.875rem; color: var(--text-secondary);">
+                                Click ❌ to hide voices from all dropdowns. Hidden voices can be restored below.
                             </label>
-                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
-                                <input type="checkbox" class="lang-filter" data-lang="de" checked>
-                                <span>🇩🇪 German</span>
-                            </label>
-                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
-                                <input type="checkbox" class="lang-filter" data-lang="es" checked>
-                                <span>🇪🇸 Spanish</span>
-                            </label>
-                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
-                                <input type="checkbox" class="lang-filter" data-lang="uk" checked>
-                                <span>🇺🇦 Ukrainian</span>
-                            </label>
-                            <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,255,255,0.05); border-radius: 6px;">
-                                <input type="checkbox" class="lang-filter" data-lang="ru" checked>
-                                <span>🇷🇺 Russian</span>
-                            </label>
+                            <button id="showAllVoicesBtn" class="secondary" style="padding: 4px 12px; font-size: 0.75rem;">Show All</button>
                         </div>
                     </div>
 
@@ -247,6 +228,15 @@
 
                     <div id="voicePreviewList" style="max-height: 300px; overflow-y: auto;">
                         <!-- Voice list will be populated here -->
+                    </div>
+
+                    <div id="hiddenVoicesList" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: none;">
+                        <label style="text-transform: none; font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px; display: block;">
+                            Hidden Voices (click to restore):
+                        </label>
+                        <div id="hiddenVoicesContainer" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                            <!-- Hidden voices will appear here -->
+                        </div>
                     </div>
                 </div>
             </div>

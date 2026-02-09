@@ -337,8 +337,12 @@ function loadVoices() {
       select.appendChild(header);
 
       langVoices.forEach(({ voice, index }) => {
+        const voiceId = `system-${index}`;
+        // Skip hidden voices
+        if (hiddenVoices && hiddenVoices.has(voiceId)) return;
+
         const option = document.createElement('option');
-        option.value = `system-${index}`;
+        option.value = voiceId;
         option.textContent = `  ${voice.name}`;
         select.appendChild(option);
       });
@@ -2040,6 +2044,7 @@ async function pollYouTubeMessages(isReconnect = false) {
 
 // Initialize on page load
 loadGenderCache();
+loadHiddenVoices(); // Load hidden voices list
 
 // Populate gender voice selects after voices are loaded
 if (speechSynthesis.onvoiceschanged !== undefined) {
@@ -2490,13 +2495,38 @@ loadAnimationMappings();
 
 console.log('🎬 Animation system initialized');
 
-// ─── Voice Filter & Preview System ──────────────────────────────────
+// ─── Individual Voice Management System ─────────────────────────────
 
 const toggleVoiceFilterBtn = document.getElementById('toggleVoiceFilter');
 const voiceFilterPanel = document.getElementById('voiceFilterPanel');
 const voiceFilterIcon = document.getElementById('voiceFilterIcon');
 const voicePreviewList = document.getElementById('voicePreviewList');
 const voicePreviewText = document.getElementById('voicePreviewText');
+const showAllVoicesBtn = document.getElementById('showAllVoicesBtn');
+const hiddenVoicesContainer = document.getElementById('hiddenVoicesContainer');
+const hiddenVoicesList = document.getElementById('hiddenVoicesList');
+
+// Track hidden voices
+let hiddenVoices = new Set();
+
+// Load hidden voices from localStorage
+function loadHiddenVoices() {
+  const saved = localStorage.getItem('hidden_voices');
+  if (saved) {
+    try {
+      hiddenVoices = new Set(JSON.parse(saved));
+      console.log(`✓ Loaded ${hiddenVoices.size} hidden voices`);
+    } catch (e) {
+      console.error('Error loading hidden voices:', e);
+    }
+  }
+}
+
+// Save hidden voices to localStorage
+function saveHiddenVoices() {
+  localStorage.setItem('hidden_voices', JSON.stringify(Array.from(hiddenVoices)));
+  console.log(`✓ Saved ${hiddenVoices.size} hidden voices`);
+}
 
 // Toggle voice filter panel
 if (toggleVoiceFilterBtn && voiceFilterPanel) {
@@ -2508,75 +2538,116 @@ if (toggleVoiceFilterBtn && voiceFilterPanel) {
     }
 
     if (!isOpen) {
-      // Populate voice list when opening
       populateVoicePreviewList();
+      populateHiddenVoicesList();
     }
   });
 }
 
-// Populate voice preview list
+// Show all voices button
+if (showAllVoicesBtn) {
+  showAllVoicesBtn.addEventListener('click', () => {
+    hiddenVoices.clear();
+    saveHiddenVoices();
+    loadVoices(); // Refresh all dropdowns
+    populateVoicePreviewList();
+    populateHiddenVoicesList();
+  });
+}
+
+
+// Populate visible voices list
 function populateVoicePreviewList() {
   if (!voicePreviewList) return;
 
   const allVoices = [];
 
-  // Add cloned voices
+  // Add cloned voices (never hidden)
   clonedVoices.forEach(name => {
     allVoices.push({
       value: `cloned-${name}`,
-      name: name,
+      name,
       lang: 'custom',
       isCloned: true
     });
   });
 
-  // Add system voices
+  // Add system voices (exclude hidden ones)
   voices.forEach((voice, index) => {
-    const lang = voice.lang.toLowerCase().substring(0, 2);
-    if (enabledLanguages.has(lang)) {
+    const voiceId = `system-${index}`;
+    if (!hiddenVoices.has(voiceId)) {
       allVoices.push({
-        value: `system-${index}`,
+        value: voiceId,
         name: voice.name,
         lang: voice.lang,
-        voice: voice
+        voice
       });
     }
   });
 
   if (allVoices.length === 0) {
-    voicePreviewList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">No voices available</div>';
+    voicePreviewList.innerHTML =
+      '<div style="padding:20px;text-align:center;color:var(--text-secondary);">All voices hidden</div>';
     return;
   }
 
-  // Generate HTML
   voicePreviewList.innerHTML = allVoices.map(v => {
+
     const langFlag = {
-      'en': '🇺🇸',
-      'de': '🇩🇪',
-      'es': '🇪🇸',
-      'uk': '🇺🇦',
-      'ru': '🇷🇺',
-      'custom': '🎙️'
-    }[v.lang.substring(0, 2)] || '🌐';
+      en: '🇺🇸',
+      de: '🇩🇪',
+      es: '🇪🇸',
+      uk: '🇺🇦',
+      ru: '🇷🇺',
+      custom: '🎙️'
+    }[(v.lang || '').substring(0, 2)] || '🌐';
+
+    const hideBtn = v.isCloned
+      ? ''
+      : `<button class="secondary hide-voice-btn"
+           data-voice="${v.value}"
+           style="padding:4px 12px;font-size:0.75rem;">
+           ❌ Hide
+         </button>`;
 
     return `
-      <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 6px;">
-        <span style="font-size: 1.2rem;">${langFlag}</span>
-        <span style="flex: 1; color: var(--text-primary); font-size: 0.875rem;">${v.name}</span>
-        <button class="secondary preview-voice-btn" data-voice="${v.value}" style="padding: 4px 12px; font-size: 0.75rem;">
+      <div style="display:flex;align-items:center;gap:8px;padding:8px;
+                  background:rgba(255,255,255,0.03);
+                  border-radius:6px;margin-bottom:6px;">
+        <span style="font-size:1.2rem;">${langFlag}</span>
+        <span style="flex:1;color:var(--text-primary);font-size:0.875rem;">
+          ${v.name}
+        </span>
+        <button class="secondary preview-voice-btn"
+                data-voice="${v.value}"
+                style="padding:4px 12px;font-size:0.75rem;">
           🔊 Preview
         </button>
+        ${hideBtn}
       </div>
     `;
   }).join('');
+}
 
-  // Add preview button handlers
-  document.querySelectorAll('.preview-voice-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      const voiceId = btn.dataset.voice;
-      previewVoice(voiceId);
-    });
+// Voice preview + hide (event delegation)
+if (voicePreviewList) {
+  voicePreviewList.addEventListener('click', (e) => {
+
+    const previewBtn = e.target.closest('.preview-voice-btn');
+    if (previewBtn) {
+      previewVoice(previewBtn.dataset.voice);
+      return;
+    }
+
+    const hideBtn = e.target.closest('.hide-voice-btn');
+    if (hideBtn) {
+      const voiceId = hideBtn.dataset.voice;
+      hiddenVoices.add(voiceId);
+      saveHiddenVoices();
+      loadVoices();
+      populateVoicePreviewList();
+      populateHiddenVoicesList();
+    }
   });
 }
 
