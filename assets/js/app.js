@@ -2555,7 +2555,6 @@ if (showAllVoicesBtn) {
   });
 }
 
-
 // Populate visible voices list
 function populateVoicePreviewList() {
   if (!voicePreviewList) return;
@@ -2566,13 +2565,13 @@ function populateVoicePreviewList() {
   clonedVoices.forEach(name => {
     allVoices.push({
       value: `cloned-${name}`,
-      name,
+      name: name,
       lang: 'custom',
       isCloned: true
     });
   });
 
-  // Add system voices (exclude hidden ones)
+  // Add system voices (check if hidden)
   voices.forEach((voice, index) => {
     const voiceId = `system-${index}`;
     if (!hiddenVoices.has(voiceId)) {
@@ -2580,74 +2579,47 @@ function populateVoicePreviewList() {
         value: voiceId,
         name: voice.name,
         lang: voice.lang,
-        voice
+        voice: voice
       });
     }
   });
 
   if (allVoices.length === 0) {
-    voicePreviewList.innerHTML =
-      '<div style="padding:20px;text-align:center;color:var(--text-secondary);">All voices hidden</div>';
+    voicePreviewList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">All voices hidden</div>';
     return;
   }
 
+  // Generate HTML
   voicePreviewList.innerHTML = allVoices.map(v => {
-
     const langFlag = {
-      en: '🇺🇸',
-      de: '🇩🇪',
-      es: '🇪🇸',
-      uk: '🇺🇦',
-      ru: '🇷🇺',
-      custom: '🎙️'
-    }[(v.lang || '').substring(0, 2)] || '🌐';
+      'en': '🇺🇸',
+      'de': '🇩🇪',
+      'es': '🇪🇸',
+      'uk': '🇺🇦',
+      'ru': '🇷🇺',
+      'custom': '🎙️'
+    }[v.lang.substring(0, 2)] || '🌐';
 
-    const hideBtn = v.isCloned
-      ? ''
-      : `<button class="secondary hide-voice-btn"
-           data-voice="${v.value}"
-           style="padding:4px 12px;font-size:0.75rem;">
-           ❌ Hide
-         </button>`;
+    const hideBtn = v.isCloned ? '' : `<button class="secondary hide-voice-btn" data-voice="${v.value}" style="padding: 4px 12px; font-size: 0.75rem;">❌ Hide</button>`;
 
     return `
-      <div style="display:flex;align-items:center;gap:8px;padding:8px;
-                  background:rgba(255,255,255,0.03);
-                  border-radius:6px;margin-bottom:6px;">
-        <span style="font-size:1.2rem;">${langFlag}</span>
-        <span style="flex:1;color:var(--text-primary);font-size:0.875rem;">
-          ${v.name}
-        </span>
-        <button class="secondary preview-voice-btn"
-                data-voice="${v.value}"
-                style="padding:4px 12px;font-size:0.75rem;">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 6px;">
+        <span style="font-size: 1.2rem;">${langFlag}</span>
+        <span style="flex: 1; color: var(--text-primary); font-size: 0.875rem;">${v.name}</span>
+        <button class="secondary preview-voice-btn" data-voice="${v.value}" style="padding: 4px 12px; font-size: 0.75rem;">
           🔊 Preview
         </button>
-        ${hideBtn}
       </div>
     `;
   }).join('');
-}
 
-// Voice preview + hide (event delegation)
-if (voicePreviewList) {
-  voicePreviewList.addEventListener('click', (e) => {
-
-    const previewBtn = e.target.closest('.preview-voice-btn');
-    if (previewBtn) {
-      previewVoice(previewBtn.dataset.voice);
-      return;
-    }
-
-    const hideBtn = e.target.closest('.hide-voice-btn');
-    if (hideBtn) {
-      const voiceId = hideBtn.dataset.voice;
-      hiddenVoices.add(voiceId);
-      saveHiddenVoices();
-      loadVoices();
-      populateVoicePreviewList();
-      populateHiddenVoicesList();
-    }
+  // Add preview button handlers
+  document.querySelectorAll('.preview-voice-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const voiceId = btn.dataset.voice;
+      previewVoice(voiceId);
+    });
   });
 }
 
@@ -2733,3 +2705,91 @@ function loadLanguageFilters() {
 loadLanguageFilters();
 
 console.log('✓ Language filter system initialized');
+
+// ─── OBS URL Generator ──────────────────────────────────────────────
+
+// Position selector
+const animationPositionSelect = document.getElementById('animationPosition');
+if (animationPositionSelect) {
+  // Load saved position
+  const savedPosition = localStorage.getItem('animation_position');
+  if (savedPosition) {
+    animationPositionSelect.value = savedPosition;
+  }
+
+  // Save on change
+  animationPositionSelect.addEventListener('change', () => {
+    localStorage.setItem('animation_position', animationPositionSelect.value);
+    generateOBSUrl();
+    console.log('✓ Animation position saved:', animationPositionSelect.value);
+  });
+}
+
+// Generate OBS URL with parameters
+function generateOBSUrl() {
+  const baseUrl = 'http://localhost:3000/overlay/animations';
+  const params = new URLSearchParams();
+
+  // Enabled state
+  const enabled = document.getElementById('animationsEnabled');
+  if (enabled) {
+    params.set('enabled', enabled.checked);
+  }
+
+  // Position
+  if (animationPositionSelect) {
+    params.set('position', animationPositionSelect.value);
+  }
+
+  // Chroma key settings
+  const threshold = document.getElementById('greenThreshold');
+  const tolerance = document.getElementById('chromaTolerance');
+  if (threshold) params.set('threshold', threshold.value);
+  if (tolerance) params.set('tolerance', tolerance.value);
+
+  // Animation mappings
+  Object.entries(animationMappings).forEach(([trigger, filename]) => {
+    params.set(trigger, filename);
+  });
+
+  const fullUrl = `${baseUrl}?${params.toString()}`;
+
+  // Update the URL input field
+  const urlInput = document.getElementById('animationOverlayUrl');
+  if (urlInput) {
+    urlInput.value = fullUrl;
+  }
+
+  return fullUrl;
+}
+
+// Regenerate URL whenever mappings change
+const originalSaveAnimationMappings = saveAnimationMappings;
+saveAnimationMappings = function() {
+  originalSaveAnimationMappings();
+  generateOBSUrl();
+};
+
+// Regenerate URL when chroma settings change
+if (greenThresholdSlider) {
+  greenThresholdSlider.addEventListener('change', generateOBSUrl);
+}
+if (chromaToleranceSlider) {
+  chromaToleranceSlider.addEventListener('change', generateOBSUrl);
+}
+
+// Regenerate URL when enabled checkbox changes
+if (animationsEnabledCheckbox) {
+  const originalListener = animationsEnabledCheckbox.onchange;
+  animationsEnabledCheckbox.addEventListener('change', () => {
+    generateOBSUrl();
+  });
+}
+
+// Generate initial URL on load
+setTimeout(() => {
+  generateOBSUrl();
+  console.log('✓ OBS URL generated');
+}, 1000);
+
+console.log('✓ OBS URL generator initialized');

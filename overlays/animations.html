@@ -28,10 +28,7 @@
         }
 
         canvas.animation {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
+            position: relative; /* Changed from absolute */
             max-width: 90%;
             max-height: 90%;
             opacity: 0;
@@ -157,35 +154,172 @@
     const recentlyPlayed = new Map();
     const COOLDOWN_MS = 5000; // 5 second cooldown per animation type
 
-    // ── Load Settings from localStorage ────────────────────────────
+    // ── Load Settings from localStorage OR URL Parameters ─────────
 
     function loadSettings() {
-        try {
-            const enabled = localStorage.getItem('animations_enabled');
-            if (enabled !== null) {
-                animationsEnabled = enabled === 'true';
+        // Check if we have URL parameters (for OBS)
+        const params = new URLSearchParams(window.location.search);
+
+        if (params.size > 0) {
+            // Load from URL parameters (OBS mode)
+            console.log('📡 Loading settings from URL parameters...');
+
+            // Animation enabled
+            animationsEnabled = params.get('enabled') !== 'false'; // Default true
+
+            // Parse mappings from URL
+            // Format: ?lol=file1.MOV&wow=file2.MOV
+            animationMappings = {};
+            const reservedParams = ['enabled', 'threshold', 'tolerance', 'position'];
+
+            for (const [key, value] of params.entries()) {
+                if (!reservedParams.includes(key)) {
+                    animationMappings[key.toLowerCase()] = value;
+                }
             }
 
-            const mappings = localStorage.getItem('animation_mappings');
-            if (mappings) {
-                animationMappings = JSON.parse(mappings);
-            }
+            // Chroma key settings
+            chromaKeySettings = {
+                greenThreshold: parseInt(params.get('threshold') || '70'),
+                tolerance: parseInt(params.get('tolerance') || '60'),
+                spillReduction: 0.5
+            };
 
-            const chromaSettings = localStorage.getItem('chroma_key_settings');
-            if (chromaSettings) {
-                chromaKeySettings = JSON.parse(chromaSettings);
-            }
+            // Position (new!)
+            const position = params.get('position') || 'bottom-left';
+            setAnimationPosition(position);
 
-            console.log('✓ Animation settings loaded:', {
+            console.log('✅ Settings loaded from URL:', {
                 enabled: animationsEnabled,
                 mappings: Object.keys(animationMappings).length,
-                chroma: chromaKeySettings
+                chroma: chromaKeySettings,
+                position: position
             });
+        } else {
+            // Load from localStorage (browser mode)
+            console.log('💾 Loading settings from localStorage...');
 
-            updateDebugInfo();
-        } catch (e) {
-            console.error('Error loading animation settings:', e);
+            try {
+                const enabled = localStorage.getItem('animations_enabled');
+                if (enabled !== null) {
+                    animationsEnabled = enabled === 'true';
+                }
+
+                const mappings = localStorage.getItem('animation_mappings');
+                if (mappings) {
+                    animationMappings = JSON.parse(mappings);
+                }
+
+                const chromaSettings = localStorage.getItem('chroma_key_settings');
+                if (chromaSettings) {
+                    chromaKeySettings = JSON.parse(chromaSettings);
+                }
+
+                const position = localStorage.getItem('animation_position') || 'bottom-left';
+                setAnimationPosition(position);
+
+                console.log('✅ Animation settings loaded from localStorage:', {
+                    enabled: animationsEnabled,
+                    mappings: Object.keys(animationMappings).length,
+                    chroma: chromaKeySettings,
+                    position: position
+                });
+            } catch (e) {
+                console.error('Error loading animation settings:', e);
+            }
         }
+
+        updateDebugInfo();
+    }
+
+    // ── Set Animation Position ──────────────────────────────────────
+
+    function setAnimationPosition(position) {
+        const container = document.getElementById('animationContainer');
+        if (!container) return;
+
+        // Reset all position styles
+        container.style.top = '';
+        container.style.bottom = '';
+        container.style.left = '';
+        container.style.right = '';
+        container.style.transform = '';
+        container.style.justifyContent = '';
+        container.style.alignItems = '';
+
+        // Apply position
+        switch(position) {
+            case 'top-left':
+                container.style.top = '20px';
+                container.style.left = '20px';
+                container.style.justifyContent = 'flex-start';
+                container.style.alignItems = 'flex-start';
+                break;
+
+            case 'top-center':
+                container.style.top = '20px';
+                container.style.left = '50%';
+                container.style.transform = 'translateX(-50%)';
+                container.style.justifyContent = 'center';
+                container.style.alignItems = 'flex-start';
+                break;
+
+            case 'top-right':
+                container.style.top = '20px';
+                container.style.right = '20px';
+                container.style.justifyContent = 'flex-end';
+                container.style.alignItems = 'flex-start';
+                break;
+
+            case 'center-left':
+                container.style.top = '50%';
+                container.style.left = '20px';
+                container.style.transform = 'translateY(-50%)';
+                container.style.justifyContent = 'flex-start';
+                container.style.alignItems = 'center';
+                break;
+
+            case 'center':
+                container.style.top = '50%';
+                container.style.left = '50%';
+                container.style.transform = 'translate(-50%, -50%)';
+                container.style.justifyContent = 'center';
+                container.style.alignItems = 'center';
+                break;
+
+            case 'center-right':
+                container.style.top = '50%';
+                container.style.right = '20px';
+                container.style.transform = 'translateY(-50%)';
+                container.style.justifyContent = 'flex-end';
+                container.style.alignItems = 'center';
+                break;
+
+            case 'bottom-left':
+            default:
+                container.style.bottom = '20px';
+                container.style.left = '20px';
+                container.style.justifyContent = 'flex-start';
+                container.style.alignItems = 'flex-end';
+                break;
+
+            case 'bottom-center':
+                container.style.bottom = '20px';
+                container.style.left = '50%';
+                container.style.transform = 'translateX(-50%)';
+                container.style.justifyContent = 'center';
+                container.style.alignItems = 'flex-end';
+                break;
+
+            case 'bottom-right':
+                container.style.bottom = '20px';
+                container.style.right = '20px';
+                container.style.justifyContent = 'flex-end';
+                container.style.alignItems = 'flex-end';
+                break;
+        }
+
+        console.log(`📍 Animation position set to: ${position}`);
     }
 
     // ── SSE Connection ──────────────────────────────────────────────
