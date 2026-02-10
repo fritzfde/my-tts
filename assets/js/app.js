@@ -6,6 +6,9 @@ let messageQueue = [];
 let isSpeaking = false;
 let clonedVoices = [];
 
+// Track hidden voices
+let hiddenVoices = new Set();
+
 // Keep audio playing in background tabs
 let wakeLock = null;
 
@@ -223,30 +226,26 @@ apiKeyTagsContainer.addEventListener('click', (e) => {
   if (btn) removeApiKey(Number(btn.dataset.index));
 });
 
-// Time-based key rotation (stick with one key until quota exhausted)
-let keyStartTime = Date.now();
-const KEY_ROTATION_INTERVAL = 3 * 60 * 60 * 1000; // 3 hours per key
 
+// Simple key rotation - no time-based logic
 function getNextApiKey() {
   if (apiKeys.length === 0) return '';
-
-  // Auto-rotate key every 3 hours (before quota exhaustion)
-  const now = Date.now();
-  if (now - keyStartTime > KEY_ROTATION_INTERVAL) {
-    currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
-    keyStartTime = now;
-    console.log(`⏰ Auto-rotating to key ${currentKeyIndex + 1}/${apiKeys.length} after 3 hours`);
-  }
-
   return apiKeys[currentKeyIndex];
 }
 
 // Force rotate to next key (called on quota errors)
 function rotateToNextKey() {
+  if (apiKeys.length <= 1) {
+    console.warn('⚠️ Only 1 API key - cannot rotate');
+    return false;
+  }
+  
+  const oldIndex = currentKeyIndex;
   currentKeyIndex = (currentKeyIndex + 1) % apiKeys.length;
-  keyStartTime = Date.now(); // Reset timer
-  console.log(`🔑 Forced rotation to key ${currentKeyIndex + 1}/${apiKeys.length}`);
+  console.log(`🔑 Rotated from key ${oldIndex + 1} to key ${currentKeyIndex + 1}/${apiKeys.length}`);
+  return true;
 }
+
 // ─── end API key manager ────────────────────────────────────────────
 
 // Load cloned voices from server
@@ -978,9 +977,10 @@ document.getElementById('connectYouTubeBtn').addEventListener('click', async () 
     updateStatus('Enter YouTube stream URL', false, true);
     return;
   }
-
-  if (!apiKey) {
-    updateStatus('Enter YouTube API key', false, true);
+  
+  if (!apiKey || apiKeys.length === 0) {
+    updateStatus('Error: No API Keys added. Please type a key and press Enter.', false, true);
+    apiKeyTextInput.focus();
     return;
   }
 
@@ -2146,12 +2146,37 @@ function loadAnimationMappings() {
   }
 }
 
-// Save animation mappings to localStorage
-function saveAnimationMappings() {
+// Save animation mappings to server AND localStorage
+async function saveAnimationMappings() {
+  // Save to localStorage (backup)
   localStorage.setItem('animation_mappings', JSON.stringify(animationMappings));
-  console.log('✓ Saved animation mappings');
-
-  // Settings will auto-reload when overlay gains focus (no need for postMessage)
+  
+  // Save to server
+  try {
+    const config = {
+      enabled: document.getElementById('animationsEnabled')?.checked ?? true,
+      mappings: animationMappings,
+      globalPosition: document.getElementById('animationPosition')?.value || 'bottom-left',
+      globalScale: 1.0,
+      chroma: {
+        greenThreshold: parseInt(document.getElementById('greenThreshold')?.value || 70),
+        tolerance: parseInt(document.getElementById('chromaTolerance')?.value || 60),
+        spillReduction: 0.5
+      }
+    };
+    
+    const response = await fetch('/api/animations/config/default', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    
+    if (response.ok) {
+      console.log('✓ Saved animation config to server');
+    }
+  } catch (err) {
+    console.error('Failed to save config to server:', err);
+  }
 }
 
 // Fetch available animation files from server
@@ -2183,17 +2208,104 @@ function renderAnimationMappings() {
     return;
   }
 
-  list.innerHTML = Object.entries(animationMappings).map(([trigger, filename]) => `
-    <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;">
-      <input type="text" value="${trigger}" data-trigger="${trigger}" class="mapping-trigger" placeholder="Trigger (e.g., laugh, fire)" style="font-size: 0.875rem; padding: 8px;">
+  list.innerHTML = Object.entries(animationMappings).map(([trigger, data]) => {
+    // Handle old format (string) vs new format (object)
+    const fileValue = typeof data === 'string' ? data : data.file;
+    const position = typeof data === 'object' ? data.position : 'bottom-left';
+    const scale = typeof data === 'object' ? data.scale : 1.0;
+    
+    return `
+    <div style="display: grid; grid-template-columns: 1fr 1fr auto auto auto auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; align-items: center;">
+      <input type="text" value="${trigger}" data-trigger="${trigger}" class="mapping-trigger" placeholder="Trigger" style="font-size: 0.875rem; padding: 8px;">
       <select data-trigger="${trigger}" class="mapping-file" style="font-size: 0.875rem; padding: 8px;">
         ${availableAnimations.map(anim =>
-          `<option value="${anim.filename}" ${anim.filename === filename ? 'selected' : ''}>${anim.name}</option>`
+          `<option value="${anim.filename}" ${anim.filename === fileValue ? 'selected' : ''}>${anim.name}</option>`
         ).join('')}
       </select>
-      <button class="secondary remove-mapping-btn" data-trigger="${trigger}" style="padding: 8px 16px; font-size: 0.75rem;">🗑️</button>
+      <select data-trigger="${trigger}" class="mapping-position" style="font-size: 0.75rem; padding: 6px;">
+        <option value="top-left" ${position === 'top-left' ? 'selected' : ''}>⬆️⬅️</option>
+        <option value="top-center" ${position === 'top-center' ? 'selected' : ''}>⬆️</option>
+        <option value="top-right" ${position === 'top-right' ? 'selected' : ''}>⬆️➡️</option>
+        <option value="center-left" ${position === 'center-left' ? 'selected' : ''}>⬅️</option>
+        <option value="center" ${position === 'center' ? 'selected' : ''}>🎯</option>
+        <option value="center-right" ${position === 'center-right' ? 'selected' : ''}>➡️</option>
+        <option value="bottom-left" ${position === 'bottom-left' ? 'selected' : ''}>⬇️⬅️</option>
+        <option value="bottom-center" ${position === 'bottom-center' ? 'selected' : ''}>⬇️</option>
+        <option value="bottom-right" ${position === 'bottom-right' ? 'selected' : ''}>⬇️➡️</option>
+      </select>
+      <input type="number" min="0.5" max="3" step="0.1" value="${scale}" data-trigger="${trigger}" class="mapping-scale" placeholder="Scale" style="font-size: 0.75rem; padding: 6px; width: 60px;">
+      <button class="secondary play-mapping-btn" data-trigger="${trigger}" style="padding: 6px 12px; font-size: 0.75rem;">▶️</button>
+      <button class="secondary remove-mapping-btn" data-trigger="${trigger}" style="padding: 6px 12px; font-size: 0.75rem;">🗑️</button>
     </div>
-  `).join('');
+  `;
+  }).join('');
+
+
+  // Position change handler
+  list.querySelectorAll('.mapping-position').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const trigger = e.target.dataset.trigger;
+      const currentData = animationMappings[trigger];
+      const fileValue = typeof currentData === 'string' ? currentData : currentData.file;
+      
+      animationMappings[trigger] = {
+        file: fileValue,
+        position: e.target.value,
+        scale: typeof currentData === 'object' ? currentData.scale : 1.0
+      };
+      
+      saveAnimationMappings();
+      console.log(`✓ Updated position: ${trigger} → ${e.target.value}`);
+    });
+  });
+
+  // Scale change handler
+  list.querySelectorAll('.mapping-scale').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const trigger = e.target.dataset.trigger;
+      const currentData = animationMappings[trigger];
+      const fileValue = typeof currentData === 'string' ? currentData : currentData.file;
+      
+      animationMappings[trigger] = {
+        file: fileValue,
+        position: typeof currentData === 'object' ? currentData.position : 'bottom-left',
+        scale: parseFloat(e.target.value)
+      };
+      
+      saveAnimationMappings();
+      console.log(`✓ Updated scale: ${trigger} → ${e.target.value}x`);
+    });
+  });
+
+  // Play button handler
+  list.querySelectorAll('.play-mapping-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const trigger = e.target.dataset.trigger;
+      const data = animationMappings[trigger];
+      const filename = typeof data === 'string' ? data : data.file;
+      
+      console.log(`🎬 Testing: ${trigger} → ${filename}`);
+      
+      try {
+        const response = await fetch('/api/animations/trigger', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type: 'test',
+            trigger: trigger,
+            platform: 'manual',
+            author: 'Test'
+          })
+        });
+        
+        if (response.ok) {
+          console.log(`✅ Triggered: ${trigger}`);
+        }
+      } catch (err) {
+        console.error('Test error:', err);
+      }
+    });
+  });
 
   // Add event listeners
   list.querySelectorAll('.mapping-trigger').forEach(input => {
@@ -2216,7 +2328,6 @@ function renderAnimationMappings() {
       const trigger = e.target.dataset.trigger;
       animationMappings[trigger] = e.target.value;
       saveAnimationMappings();
-      populateTestAnimationDropdown(); // Update test dropdown
       console.log(`✓ Updated mapping: ${trigger} → ${e.target.value}`);
     });
   });
@@ -2230,34 +2341,6 @@ function renderAnimationMappings() {
     });
   });
 
-  // Update test animation dropdown
-  populateTestAnimationDropdown();
-}
-
-// Populate test animation dropdown
-function populateTestAnimationDropdown() {
-  const select = document.getElementById('testAnimationSelect');
-  if (!select) return;
-
-  // Remember current selection
-  const currentSelection = select.value;
-
-  select.innerHTML = '<option value="">Select animation to test...</option>';
-
-  Object.entries(animationMappings).forEach(([trigger, filename]) => {
-    const option = document.createElement('option');
-    option.value = trigger;
-    // Show only trigger in dropdown, filename in gray
-    const fileShort = filename.length > 30 ? filename.substring(0, 27) + '...' : filename;
-    option.textContent = trigger;
-    option.setAttribute('data-file', fileShort); // Store for later if needed
-    select.appendChild(option);
-  });
-
-  // Restore selection if it still exists
-  if (currentSelection && animationMappings[currentSelection]) {
-    select.value = currentSelection;
-  }
 }
 
 // Add new mapping button
@@ -2272,10 +2355,15 @@ if (addAnimationMappingBtn) {
     const trigger = prompt('Enter trigger word (e.g., laugh, fire, wow, heart):');
     if (trigger && trigger.trim()) {
       const triggerLower = trigger.trim().toLowerCase();
-      animationMappings[triggerLower] = availableAnimations[0].filename;
+      animationMappings[triggerLower] = {
+        file: availableAnimations[0].filename,
+        position: 'bottom-left',
+        scale: 1.0
+      };
       saveAnimationMappings();
       renderAnimationMappings();
     }
+
   });
 }
 
@@ -2316,10 +2404,12 @@ if (greenThresholdSlider && chromaToleranceSlider) {
   // Update value displays
   greenThresholdSlider.addEventListener('input', () => {
     document.getElementById('greenThresholdValue').textContent = greenThresholdSlider.value;
+    saveAnimationMappings();
   });
 
   chromaToleranceSlider.addEventListener('input', () => {
     document.getElementById('chromaToleranceValue').textContent = chromaToleranceSlider.value;
+    saveAnimationMappings();
   });
 
   // Save on change
@@ -2335,46 +2425,6 @@ if (greenThresholdSlider && chromaToleranceSlider) {
 
   greenThresholdSlider.addEventListener('change', saveChromaSettings);
   chromaToleranceSlider.addEventListener('change', saveChromaSettings);
-}
-
-// Test animation button
-const testAnimationBtn = document.getElementById('testAnimationBtn');
-const testAnimationSelect = document.getElementById('testAnimationSelect');
-
-if (testAnimationBtn && testAnimationSelect) {
-  testAnimationBtn.addEventListener('click', async () => {
-    const selectedTrigger = testAnimationSelect.value;
-
-    if (!selectedTrigger) {
-      alert('⚠️ Please select an animation from the dropdown first!');
-      return;
-    }
-
-    const filename = animationMappings[selectedTrigger];
-    console.log(`🎬 Testing animation: ${selectedTrigger} → ${filename}`);
-
-    try {
-      const response = await fetch('/api/animations/trigger', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'test',
-          trigger: selectedTrigger,
-          platform: 'manual'
-        })
-      });
-
-      if (response.ok) {
-        console.log(`✅ Triggered: ${selectedTrigger} → ${filename}`);
-        // Don't show alert, just log it
-      } else {
-        alert('❌ Failed to trigger animation. Check console for errors.');
-      }
-    } catch (err) {
-      console.error('Test animation error:', err);
-      alert('❌ Error: ' + err.message);
-    }
-  });
 }
 
 // YouTube Chat Emotion Detection with LLM
@@ -2505,9 +2555,6 @@ const voicePreviewText = document.getElementById('voicePreviewText');
 const showAllVoicesBtn = document.getElementById('showAllVoicesBtn');
 const hiddenVoicesContainer = document.getElementById('hiddenVoicesContainer');
 const hiddenVoicesList = document.getElementById('hiddenVoicesList');
-
-// Track hidden voices
-let hiddenVoices = new Set();
 
 // Load hidden voices from localStorage
 function loadHiddenVoices() {
@@ -2720,76 +2767,8 @@ if (animationPositionSelect) {
   // Save on change
   animationPositionSelect.addEventListener('change', () => {
     localStorage.setItem('animation_position', animationPositionSelect.value);
-    generateOBSUrl();
     console.log('✓ Animation position saved:', animationPositionSelect.value);
   });
 }
-
-// Generate OBS URL with parameters
-function generateOBSUrl() {
-  const baseUrl = 'http://localhost:3000/overlay/animations';
-  const params = new URLSearchParams();
-
-  // Enabled state
-  const enabled = document.getElementById('animationsEnabled');
-  if (enabled) {
-    params.set('enabled', enabled.checked);
-  }
-
-  // Position
-  if (animationPositionSelect) {
-    params.set('position', animationPositionSelect.value);
-  }
-
-  // Chroma key settings
-  const threshold = document.getElementById('greenThreshold');
-  const tolerance = document.getElementById('chromaTolerance');
-  if (threshold) params.set('threshold', threshold.value);
-  if (tolerance) params.set('tolerance', tolerance.value);
-
-  // Animation mappings
-  Object.entries(animationMappings).forEach(([trigger, filename]) => {
-    params.set(trigger, filename);
-  });
-
-  const fullUrl = `${baseUrl}?${params.toString()}`;
-
-  // Update the URL input field
-  const urlInput = document.getElementById('animationOverlayUrl');
-  if (urlInput) {
-    urlInput.value = fullUrl;
-  }
-
-  return fullUrl;
-}
-
-// Regenerate URL whenever mappings change
-const originalSaveAnimationMappings = saveAnimationMappings;
-saveAnimationMappings = function() {
-  originalSaveAnimationMappings();
-  generateOBSUrl();
-};
-
-// Regenerate URL when chroma settings change
-if (greenThresholdSlider) {
-  greenThresholdSlider.addEventListener('change', generateOBSUrl);
-}
-if (chromaToleranceSlider) {
-  chromaToleranceSlider.addEventListener('change', generateOBSUrl);
-}
-
-// Regenerate URL when enabled checkbox changes
-if (animationsEnabledCheckbox) {
-  const originalListener = animationsEnabledCheckbox.onchange;
-  animationsEnabledCheckbox.addEventListener('change', () => {
-    generateOBSUrl();
-  });
-}
-
-// Generate initial URL on load
-setTimeout(() => {
-  generateOBSUrl();
-  console.log('✓ OBS URL generated');
-}, 1000);
 
 console.log('✓ OBS URL generator initialized');

@@ -362,14 +362,8 @@
             <div class="input-group" style="margin-bottom: 0;">
                 <label>Animation Overlay URL</label>
                 <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px;">
-                    <input type="text" id="animationOverlayUrl" readonly value="http://localhost:3000/overlay/animations" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
+                    <input type="text" id="animationOverlayUrl" readonly value="http://localhost:3000/overlay/animations?config=default" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
                     <button class="secondary copy-btn" data-target="animationOverlayUrl">📋 Copy</button>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px;">
-                    <select id="testAnimationSelect" style="font-size: 0.875rem; padding: 8px;">
-                        <option value="">Select animation to test...</option>
-                    </select>
-                    <button id="testAnimationBtn" class="secondary" style="padding: 8px 20px;">🎬 Test</button>
                 </div>
                 <div style="margin-top: 8px; padding: 10px; background: rgba(255,107,107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
                     <strong style="color: #ff6b6b;">💡 Setup:</strong> OBS → Add Browser Source → Paste URL → Width: 1920, Height: 1080 → Press D in preview to see debug info

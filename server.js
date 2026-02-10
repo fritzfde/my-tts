@@ -35,53 +35,6 @@ app.get('/api/youtube/*', async (req, res) => {
   }
 });
 
-// Proxy endpoint for ElevenLabs TTS
-app.post('/api/elevenlabs/tts', async (req, res) => {
-  try {
-    const { text, voice_id, api_key } = req.body;
-
-    if (!api_key) {
-      return res.status(400).json({ error: 'ElevenLabs API key required' });
-    }
-
-    console.log('Generating TTS with ElevenLabs...');
-
-    const response = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voice_id}`,
-      {
-        method: 'POST',
-        headers: {
-          'Accept': 'audio/mpeg',
-          'Content-Type': 'application/json',
-          'xi-api-key': api_key
-        },
-        body: JSON.stringify({
-          text: text,
-          model_id: 'eleven_monolingual_v1',
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.5
-          }
-        })
-      }
-    );
-
-    if (!response.ok) {
-      const error = await response.text();
-      return res.status(response.status).json({ error });
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    res.setHeader('Content-Type', 'audio/mpeg');
-    res.send(buffer);
-
-  } catch (error) {
-    console.error('ElevenLabs error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 // Local voice cloning endpoint
 app.post('/api/voice-clone/tts', async (req, res) => {
   try {
@@ -470,84 +423,194 @@ app.get('/api/sounds/list', (req, res) => {
     });
 });
 
+// --- TIKTOK LOGIC END ---
+
+
+
+
 // ─── ANIMATION OVERLAY ENDPOINTS ────────────────────────────────────
+
+// ─── Animation Config Storage ───────────────────────────────────────
+
+const CONFIG_FILE = path.join(__dirname, 'animation-config.json');
+
+// Initialize config file if it doesn't exist
+function initConfigFile() {
+  if (!fs.existsSync(CONFIG_FILE)) {
+    const defaultConfig = {
+      "default": {
+        "enabled": true,
+        "mappings": {},
+        "globalPosition": "bottom-left",
+        "globalScale": 1.0,
+        "chroma": {
+          "greenThreshold": 70,
+          "tolerance": 60,
+          "spillReduction": 0.5
+        }
+      }
+    };
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
+    console.log('✓ Created animation-config.json');
+  }
+}
+
+// Initialize on server start
+initConfigFile();
+
+// Load animation config
+app.get('/api/animations/config/:name', (req, res) => {
+  try {
+    const allConfigs = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    const config = allConfigs[req.params.name] || allConfigs['default'];
+    res.json(config);
+  } catch (err) {
+    console.error('Config load error:', err);
+    res.status(500).json({ error: 'Failed to load config' });
+  }
+});
+
+// Save animation config
+app.post('/api/animations/config/:name', (req, res) => {
+  try {
+    let allConfigs = {};
+    if (fs.existsSync(CONFIG_FILE)) {
+      allConfigs = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    }
+
+    // Ensure we are saving a clean object
+    allConfigs[req.params.name] = {
+        enabled: req.body.enabled ?? true,
+        mappings: req.body.mappings || {},
+        globalPosition: req.body.globalPosition || 'bottom-left',
+        globalScale: req.body.globalScale || 1.0,
+        chroma: req.body.chroma || { greenThreshold: 70, tolerance: 60, spillReduction: 0.5 }
+    };
+
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(allConfigs, null, 2));
+    console.log(`✓ Saved animation config: ${req.params.name}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Config save error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List all available configs
+app.get('/api/animations/configs', (req, res) => {
+  try {
+    const allConfigs = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    res.json({ configs: Object.keys(allConfigs) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to list configs' });
+  }
+});
+
+// Delete a config
+app.delete('/api/animations/config/:name', (req, res) => {
+  try {
+    if (req.params.name === 'default') {
+      return res.status(400).json({ error: 'Cannot delete default config' });
+    }
+
+    const allConfigs = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    delete allConfigs[req.params.name];
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(allConfigs, null, 2));
+
+    console.log(`✓ Deleted config: ${req.params.name}`);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete config' });
+  }
+});
+
+// ─── Animation System ───────────────────────────────────────────────
+
+// SSE clients for animation overlay
+let animationClients = [];
 
 // SSE endpoint for animation overlay
 app.get('/overlay/animations/stream', (req, res) => {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
 
-    animationOverlayClients.push(res);
-    console.log(`🎬 Animation overlay client connected (${animationOverlayClients.length} total)`);
+  const clientId = Date.now();
+  const newClient = { id: clientId, res };
+  animationClients.push(newClient);
 
-    req.on('close', () => {
-        const index = animationOverlayClients.indexOf(res);
-        if (index > -1) {
-            animationOverlayClients.splice(index, 1);
-            console.log(`🎬 Animation overlay client disconnected (${animationOverlayClients.length} remaining)`);
-        }
-    });
+  console.log(`✓ Animation overlay connected (${animationClients.length} total)`);
+
+  res.write('data: {"type":"connected"}\n\n');
+
+  req.on('close', () => {
+    animationClients = animationClients.filter(client => client.id !== clientId);
+    console.log(`✗ Animation overlay disconnected (${animationClients.length} remaining)`);
+  });
 });
 
-// Serve animation overlay HTML
-app.get('/overlay/animations', (req, res) => {
-    res.sendFile(path.join(__dirname, 'overlays', 'animations.html'));
-});
+// Trigger animation endpoint
+app.post('/api/animations/trigger', (req, res) => {
+  const { type, trigger, platform, author } = req.body;
 
-// Get available animation files
-app.get('/api/animations/list', (req, res) => {
-    const animationsDir = path.join(__dirname, 'animations');
+  console.log(`🎬 Animation trigger: ${trigger} (${type}) from ${author || 'unknown'} on ${platform || 'unknown'}`);
 
-    if (!fs.existsSync(animationsDir)) {
-        fs.mkdirSync(animationsDir, { recursive: true });
+  // Broadcast to all connected animation overlays
+  const event = {
+    type: 'animation',
+    trigger: trigger,
+    platform: platform || 'unknown',
+    author: author || 'unknown',
+    timestamp: Date.now()
+  };
+
+  const eventData = `data: ${JSON.stringify(event)}\n\n`;
+
+  animationClients.forEach(client => {
+    try {
+      client.res.write(eventData);
+    } catch (err) {
+      console.error('Error sending to animation client:', err);
     }
+  });
 
-    const files = fs.readdirSync(animationsDir).filter(f =>
-        f.match(/\.(mov|mp4|webm)$/i)
-    );
+  res.json({ success: true, clients: animationClients.length });
+});
 
-    res.json({
-        animations: files.map(f => ({
-            name: f.replace(/\.(mov|mp4|webm)$/i, ''),
-            filename: f,
-            path: `/animations/${f}`
-        }))
-    });
+// List available animation files
+app.get('/api/animations/list', (req, res) => {
+  const animationsDir = path.join(__dirname, 'animations');
+
+  if (!fs.existsSync(animationsDir)) {
+    fs.mkdirSync(animationsDir, { recursive: true });
+  }
+
+  try {
+    const files = fs.readdirSync(animationsDir)
+      .filter(file => {
+        const ext = path.extname(file).toLowerCase();
+        return ['.mov', '.mp4', '.webm', '.avi'].includes(ext);
+      })
+      .map(filename => ({
+        filename: filename,
+        name: filename.replace(/\.(mov|mp4|webm|avi)$/i, ''),
+        path: `/animations/${filename}`
+      }));
+
+    res.json({ animations: files });
+  } catch (err) {
+    console.error('Error listing animations:', err);
+    res.status(500).json({ error: 'Failed to list animations' });
+  }
 });
 
 // Serve animation files
 app.use('/animations', express.static(path.join(__dirname, 'animations')));
 
-// Broadcast animation event to all connected overlay clients
-function broadcastToAnimationOverlay(data) {
-    const payload = `data: ${JSON.stringify(data)}\n\n`;
-
-    animationOverlayClients.forEach(client => {
-        try {
-            client.write(payload);
-        } catch (err) {
-            console.error('Animation overlay broadcast error:', err);
-        }
-    });
-}
-
-// API endpoint to manually trigger animations (for testing)
-app.post('/api/animations/trigger', (req, res) => {
-    const { type, trigger, platform } = req.body;
-
-    broadcastToAnimationOverlay({
-        type: type || 'manual',
-        platform: platform || 'test',
-        trigger: trigger,
-        author: 'Manual Trigger'
-    });
-
-    res.json({ success: true, message: `Triggered animation: ${trigger}` });
+// Serve animation overlay
+app.get('/overlay/animations', (req, res) => {
+  res.sendFile(path.join(__dirname, 'overlays', 'animations.html'));
 });
 
 // ─── END ANIMATION OVERLAY ──────────────────────────────────────────
-
-// --- TIKTOK LOGIC END ---
 

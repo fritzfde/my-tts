@@ -144,3 +144,6 @@ Each operation uses approximately:
 2. **Filter content** - Uncheck emojis/links for cleaner speech
 3. **Adjust speech rate** - Faster rates work better for busy chats
 4. **Save your settings** - They persist between sessions
+
+### Animations Sound Fix
+- IN OBS for Animation Browser Source - right click - Interact - to make sound for videos play as well
