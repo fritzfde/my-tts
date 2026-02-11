@@ -33,6 +33,21 @@
         video.animation.active, canvas.animation.active {
             opacity: 1;
         }
+        
+        /* Change this to make the canvas visible immediately for testing */
+        canvas.animation {
+            position: absolute;
+            opacity: 1; /* Force opacity to 1 to ensure it shows up */
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Keep the raw video hidden so we don't see the green background */
+        video.animation {
+            position: absolute;
+            visibility: hidden; 
+            pointer-events: none;
+        }
 
         /* Debug Overlay */
         #debugOverlay {
@@ -51,364 +66,278 @@
             pointer-events: none;
         }
 
-        #debugOverlay.show { display: block; }
-
-        .debug-row {
-            margin: 3px 0;
-            display: flex;
-            justify-content: space-between;
+        #animationContainer {
+            position: fixed;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 10;
         }
 
-        .debug-label { color: #888; margin-right: 10px; }
-        .debug-value { color: #0f0; }
-        .debug-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid #333; }
+        /* Hide the raw green video */
+        video.animation {
+            display: none;
+        }
+
+        /* Make sure the canvas is visible and positioned correctly */
+        canvas.animation {
+            position: absolute;
+            opacity: 0; /* Starts hidden */
+            transition: opacity 0.3s ease;
+            z-index: 20;
+        }
+
+        canvas.animation.active {
+            opacity: 1; /* Shows up when class is added */
+        }
+
+        #debugOverlay.show { display: block; }
     </style>
 </head>
 <body>
 <div id="animationContainer"></div>
-
 <div id="debugOverlay">
     <div class="debug-row"><span class="debug-label">Status:</span><span class="debug-value" id="debugStatus">Loading...</span></div>
     <div class="debug-row"><span class="debug-label">Enabled:</span><span class="debug-value" id="debugEnabled">-</span></div>
     <div class="debug-row"><span class="debug-label">Mappings:</span><span class="debug-value" id="debugMappings">0</span></div>
-    <div class="debug-row"><span class="debug-label">Config:</span><span class="debug-value" id="debugConfig">-</span></div>
-
-    <div class="debug-section">
-        <div class="debug-row"><span class="debug-label">Chroma:</span></div>
-        <div class="debug-row"><span class="debug-label">  Threshold:</span><span class="debug-value" id="debugThreshold">-</span></div>
-        <div class="debug-row"><span class="debug-label">  Tolerance:</span><span class="debug-value" id="debugTolerance">-</span></div>
-    </div>
-
-    <div class="debug-section">
-        <div class="debug-row"><span class="debug-label">Last Trigger:</span><span class="debug-value" id="debugLastTrigger">None</span></div>
-        <div class="debug-row"><span class="debug-label">Total Played:</span><span class="debug-value" id="debugTotalPlayed">0</span></div>
-    </div>
 </div>
 
 <script>
-    // ── Configuration ───────────────────────────────────────────────
-
+    // Basic config
     let animationsEnabled = true;
-    let animationMappings = {}; // trigger → {file, position, scale}
-    let chromaKeySettings = { greenThreshold: 70, tolerance: 60, spillReduction: 0.5 };
+    let animationMappings = {};
+    let chromaKeySettings = { greenThreshold: 70, tolerance: 60 };
     let globalPosition = 'bottom-left';
     let globalScale = 1.0;
-    let debugMode = false;
     let totalPlayed = 0;
     let lastTrigger = 'None';
-    let currentConfigName = 'default';
 
     const container = document.getElementById('animationContainer');
 
-    // ── Debug Toggle ────────────────────────────────────────────────
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'd' || e.key === 'D') {
-            debugMode = !debugMode;
-            document.getElementById('debugOverlay').classList.toggle('show', debugMode);
-            console.log(debugMode ? '🔍 Debug mode ON' : '🔍 Debug mode OFF');
+    // Shared AudioContext (will be created lazily)
+    let audioCtx = null;
+    function ensureAudioContext() {
+        if (!audioCtx) {
+            try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); console.log('AudioContext created'); } catch (e) { audioCtx = null; }
         }
-    });
+        return audioCtx;
+    }
 
     function updateDebugInfo() {
-        if (!debugMode) return;
-        document.getElementById('debugStatus').textContent = animationsEnabled ? 'Active' : 'Disabled';
-        document.getElementById('debugEnabled').textContent = animationsEnabled ? 'Yes' : 'No';
-        document.getElementById('debugMappings').textContent = Object.keys(animationMappings).length;
-        document.getElementById('debugConfig').textContent = currentConfigName;
-        document.getElementById('debugThreshold').textContent = chromaKeySettings.greenThreshold;
-        document.getElementById('debugTolerance').textContent = chromaKeySettings.tolerance;
-        document.getElementById('debugLastTrigger').textContent = lastTrigger;
-        document.getElementById('debugTotalPlayed').textContent = totalPlayed;
+        const mappings = Object.keys(animationMappings).length;
+        try { document.getElementById('debugMappings').textContent = mappings; } catch (e) {}
     }
-
-    // ── Load Settings from Server ──────────────────────────────────
-
-    async function loadSettings() {
-        const params = new URLSearchParams(window.location.search);
-        currentConfigName = params.get('config') || 'default';
-
-        try {
-            console.log(`📡 Loading config from server: ${currentConfigName}`);
-            const response = await fetch(`/api/animations/config/${currentConfigName}`);
-            const config = await response.json();
-
-            animationsEnabled = config.enabled !== false;
-            animationMappings = config.mappings || {};
-            chromaKeySettings = config.chroma || chromaKeySettings;
-            globalPosition = config.globalPosition || 'bottom-left';
-            globalScale = config.globalScale || 1.0;
-
-            console.log('✅ Config loaded from server:', {
-                config: currentConfigName,
-                enabled: animationsEnabled,
-                mappings: Object.keys(animationMappings).length,
-                globalPosition,
-                globalScale
-            });
-
-            updateDebugInfo();
-
-            // Poll for updates every 10 seconds
-            setTimeout(loadSettings, 10000);
-
-        } catch (err) {
-            console.error('❌ Failed to load config:', err);
-            setTimeout(loadSettings, 5000); // Retry sooner on error
-        }
-    }
-
-    // ── Position & Scale Helpers ────────────────────────────────────
 
     function getPositionStyle(position) {
         const positions = {
-            'top-left': { top: '20px', left: '20px', transform: 'none' },
-            'top-center': { top: '20px', left: '50%', transform: 'translateX(-50%)' },
-            'top-right': { top: '20px', right: '20px', transform: 'none' },
-            'center-left': { top: '50%', left: '20px', transform: 'translateY(-50%)' },
-            'center': { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' },
-            'center-right': { top: '50%', right: '20px', transform: 'translateY(-50%)' },
-            'bottom-left': { bottom: '20px', left: '20px', transform: 'none' },
-            'bottom-center': { bottom: '20px', left: '50%', transform: 'translateX(-50%)' },
-            'bottom-right': { bottom: '20px', right: '20px', transform: 'none' }
+            'top-left': { top: '20px', left: '20px' },
+            'top-right': { top: '20px', right: '20px' },
+            'bottom-left': { bottom: '20px', left: '20px' },
+            'bottom-right': { bottom: '20px', right: '20px' },
+            'center': { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
         };
         return positions[position] || positions['bottom-left'];
     }
 
-    // ── Chroma Key Processing ──────────────────────────────────────
-
     function applyChromaKey(video, canvas) {
         const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
         let rafId = null;
 
         function processFrame() {
-            if (video.paused || video.ended) return;
+            // If video isn't actually sending data yet, skip this frame
+            if (video.paused || video.ended || video.readyState < 2) {
+                rafId = requestAnimationFrame(processFrame);
+                return;
+            }
 
             try {
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const data = imageData.data;
-
+                
                 const threshold = chromaKeySettings.greenThreshold;
                 const tolerance = chromaKeySettings.tolerance;
 
                 for (let i = 0; i < data.length; i += 4) {
-                    const r = data[i];
-                    const g = data[i + 1];
-                    const b = data[i + 2];
-
+                    const r = data[i], g = data[i+1], b = data[i+2];
+                    // Chroma logic
                     const greenness = g - Math.max(r, b);
-                    const dominance = g / (r + g + b + 1);
-                    const ratio = g > 0 ? (r + b) / (2 * g) : 1;
-
-                    if (greenness > threshold && dominance > 0.4 && ratio < 0.8) {
-                        const strength = Math.min(1, greenness / tolerance);
-                        data[i + 3] = Math.floor(255 * (1 - strength));
+                    if (greenness > threshold) {
+                        data[i+3] = 0; // Transparent
                     }
                 }
-
                 ctx.putImageData(imageData, 0, 0);
             } catch (e) {
-                // Silently ignore drawing errors when element removed
+                console.error("Chroma error:", e);
             }
-
             rafId = requestAnimationFrame(processFrame);
         }
 
-        video.addEventListener('play', processFrame);
-
-        // Return a cancel function so callers can stop the rAF loop and remove the listener
-        return () => {
-            if (rafId) cancelAnimationFrame(rafId);
-            try { video.removeEventListener('play', processFrame); } catch (e) {}
-        };
+        processFrame(); // Start immediately
+        return () => { if (rafId) cancelAnimationFrame(rafId); };
     }
 
-    // ── Play and Stop Animation ──────────────────────────────────────────────
-
-    // Track all active animations
+    // Track active animations and resources
     let currentAnimations = [];
 
     function stopAllAnimations() {
-        console.log(`⏹️ Stopping ${currentAnimations.length} active animations`);
-
-        // Stop and remove tracked animations using their cleanup if available
-        currentAnimations.forEach(({ video, canvas, cleanup, cancelChroma }) => {
-            try {
-                if (typeof cancelChroma === 'function') cancelChroma();
-            } catch (e) {}
-            try {
-                if (typeof cleanup === 'function') {
-                    cleanup();
-                    return;
-                }
-            } catch (e) {}
-
-            try { video.muted = true; video.pause(); video.currentTime = 0; } catch (e) {}
-            try { video.src = ''; video.load(); } catch (e) {}
-            if (canvas && canvas.parentNode) canvas.remove();
-            if (video && video.parentNode) video.remove();
+        currentAnimations.forEach(t => {
+            try { if (t.cancelChroma) t.cancelChroma(); } catch (e) {}
+            try { if (t.audioSource) t.audioSource.disconnect(); } catch (e) {}
+            try { t.video.pause(); t.video.muted = true; t.video.currentTime = 0; } catch (e) {}
+            try { t.video.removeAttribute('src'); t.video.src = ''; t.video.load(); } catch (e) {}
+            try { if (t.canvas && t.canvas.parentNode) t.canvas.remove(); } catch (e) {}
+            try { if (t.video && t.video.parentNode) t.video.remove(); } catch (e) {}
         });
-
-        // Also remove any leftover DOM nodes that weren't tracked
-        document.querySelectorAll('video.animation').forEach(v => {
-            try { v.muted = true; v.pause(); v.currentTime = 0; } catch (e) {}
-            try { v.src = ''; v.load(); } catch (e) {}
-            if (v.parentNode) v.remove();
-        });
-        document.querySelectorAll('canvas.animation').forEach(c => {
-            if (c.parentNode) c.remove();
-        });
-
         currentAnimations = [];
     }
 
     async function playAnimation(triggerName) {
-        console.log('playAnimation called with trigger:', triggerName);
-        if (!animationsEnabled) {
-            console.log('⏸️ Animations disabled');
-            return;
-        }
-
+        console.log('playAnimation', triggerName);
+        if (!animationsEnabled) return;
         const mapping = animationMappings[triggerName] || animationMappings[triggerName.toLowerCase()];
-        if (!mapping) {
-            console.warn(`⚠️ No mapping for: ${triggerName}. Available:`, Object.keys(animationMappings));
-            return;
-        }
+        if (!mapping) { console.warn('No mapping for', triggerName); return; }
+
+        stopAllAnimations();
 
         const filename = mapping.file || mapping;
         const position = mapping.position || globalPosition;
         const scale = mapping.scale || globalScale;
 
-        console.log(`▶️ Playing: ${triggerName} → ${filename} (${position}, ${scale}x)`);
-
-        // Stop any existing animations
-        stopAllAnimations();
-
         lastTrigger = `${triggerName} (${new Date().toLocaleTimeString()})`;
         totalPlayed++;
         updateDebugInfo();
 
-        // Create elements
         const video = document.createElement('video');
-        video.src = `/animations/${filename}`;
         video.className = 'animation';
-        video.muted = true;
+        video.autoplay = true;
         video.playsInline = true;
+        video.setAttribute('playsinline', '');
         video.preload = 'auto';
         video.crossOrigin = 'anonymous';
+        // Do not forcibly set muted here; allow audio to play when possible
+        video.muted = false;
+        video.src = `/animations/${filename}`;
 
         const canvas = document.createElement('canvas');
         canvas.className = 'animation';
-
-        // Position & scale
         const posStyle = getPositionStyle(position);
         Object.assign(canvas.style, posStyle);
-        // Combine any configured transform with scale
-        const baseTransform = posStyle.transform && posStyle.transform !== 'none' ? posStyle.transform : '';
-        canvas.style.transform = `${baseTransform} scale(${scale})`.trim();
+        canvas.style.transform = (posStyle.transform ? posStyle.transform + ' ' : '') + `scale(${scale})`;
         canvas.style.pointerEvents = 'none';
-        canvas.style.zIndex = 999;
 
-        // Keep the native video off-screen (we render to canvas)
-        video.style.position = 'absolute';
-        video.style.left = '-9999px';
-        video.style.width = '1px';
-        video.style.height = '1px';
-
-        // Append to DOM
         container.appendChild(canvas);
         container.appendChild(video);
 
-        // Track this animation with cleanup helpers
-        const tracked = { video, canvas, cleanup: null };
+        const tracked = { video, canvas, cancelChroma: null, audioSource: null };
         currentAnimations.push(tracked);
 
-        const removeTracked = () => {
-            const idx = currentAnimations.findIndex(a => a.video === video);
-            if (idx > -1) currentAnimations.splice(idx, 1);
-        };
-
-        const cleanup = () => {
-            try { video.pause(); video.currentTime = 0; } catch (e) {}
-            try { video.src = ''; video.load(); } catch (e) {}
-            if (canvas && canvas.parentNode) canvas.remove();
-            if (video && video.parentNode) video.remove();
-            removeTracked();
-        };
-        tracked.cleanup = cleanup;
+        // Hook audio via AudioContext where available
+        try {
+            const ctx = ensureAudioContext();
+            if (ctx) {
+                try {
+                    tracked.audioSource = ctx.createMediaElementSource(video);
+                    tracked.audioSource.connect(ctx.destination);
+                    if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
+                    console.log('Connected audio for', filename);
+                } catch (e) { console.warn('createMediaElementSource failed', e); }
+            }
+        } catch (e) { console.warn('audio hookup failed', e); }
 
         video.addEventListener('loadedmetadata', () => {
-            // Size canvas to video
-            canvas.width = video.videoWidth || 1920;
-            canvas.height = video.videoHeight || 1080;
-            // Start chroma processing
-            applyChromaKey(video, canvas);
-        });
+            // Force dimensions
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 360;
+            
+            // Apply position and scale
+            const posStyle = getPositionStyle(position);
+            Object.assign(canvas.style, posStyle);
+            
+            // Explicitly set width/height style so it's not 0px
+            canvas.style.width = canvas.width + "px";
+            canvas.style.height = canvas.height + "px";
 
-        video.addEventListener('play', () => {
+            console.log(`✅ Canvas ready: ${canvas.width}x${canvas.height}`);
+            tracked.cancelChroma = applyChromaKey(video, canvas);
+        }, { once: true });
+
+        video.addEventListener('playing', () => { // Changed 'play' to 'playing'
             canvas.classList.add('active');
+            // Ensure dimensions are set before starting chroma
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            if (tracked.cancelChroma) tracked.cancelChroma(); // Clean up old loops
+            tracked.cancelChroma = applyChromaKey(video, canvas);
         });
 
         video.addEventListener('ended', () => {
             canvas.classList.remove('active');
             setTimeout(() => {
-                cleanup();
-                console.log(`✓ Finished ${filename}`);
-            }, 300);
-        });
+                try { if (tracked.cancelChroma) tracked.cancelChroma(); } catch (e) {}
+                try { if (tracked.audioSource) tracked.audioSource.disconnect(); } catch (e) {}
+                try { video.pause(); } catch (e) {}
+                try { video.removeAttribute('src'); video.src = ''; video.load(); } catch (e) {}
+                if (canvas.parentNode) canvas.remove();
+                if (video.parentNode) video.remove();
+                const i = currentAnimations.findIndex(a => a.video === video); if (i > -1) currentAnimations.splice(i, 1);
+                console.log('Finished', filename);
+            }, 200);
+        }, { once: true });
 
         video.addEventListener('error', (err) => {
-            console.error('❌ Video error:', err);
-            cleanup();
-        });
+            console.error('Video error', err);
+            try { if (tracked.audioSource) tracked.audioSource.disconnect(); } catch (e) {}
+            try { if (tracked.cancelChroma) tracked.cancelChroma(); } catch (e) {}
+            if (canvas.parentNode) canvas.remove();
+            if (video.parentNode) video.remove();
+            const i = currentAnimations.findIndex(a => a.video === video); if (i > -1) currentAnimations.splice(i, 1);
+        }, { once: true });
 
-        // Attempt to play
         try {
             await video.play();
+            console.log('Playing', filename);
         } catch (err) {
-            console.warn('▶️ play() promise rejected, attempting resume later', err);
-            setTimeout(() => { video.play().catch(()=>{}); }, 200);
+            console.warn('play() failed, will retry', err);
+            setTimeout(() => { video.play().catch(()=>{}); }, 250);
         }
     }
 
-    // ── SSE Connection ──────────────────────────────────────────────
-
+    // SSE connection
     function connectToAnimationStream() {
-        const eventSource = new EventSource('/overlay/animations/stream');
-
-        eventSource.onopen = () => {
-            console.log('✅ Connected to animation stream');
+        const es = new EventSource('/overlay/animations/stream');
+        es.onopen = () => console.log('Connected to animation stream');
+        es.onmessage = e => {
+            try { const d = JSON.parse(e.data); if (d.type === 'animation' && d.trigger) playAnimation(d.trigger); } catch (err) { console.error('parse', err); }
         };
-
-        eventSource.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-
-                if (data.type === 'animation' && data.trigger) {
-                    console.log(`🎬 Received trigger: ${data.trigger} from ${data.author} (${data.platform})`);
-                    playAnimation(data.trigger);
-                }
-            } catch (err) {
-                console.error('❌ Parse error:', err);
-            }
-        };
-
-        eventSource.onerror = (err) => {
-            console.error('❌ SSE error:', err);
-            eventSource.close();
-            setTimeout(connectToAnimationStream, 3000);
-        };
+        es.onerror = err => { console.error('SSE error', err); es.close(); setTimeout(connectToAnimationStream, 3000); };
     }
 
-    // ── Initialize ──────────────────────────────────────────────────
+    // Load config and start
+    (async function(){
+        try {
+            const params = new URLSearchParams(window.location.search);
+            const cfgName = params.get('config') || 'default';
+            const res = await fetch(`/api/animations/config/${cfgName}`);
+            const cfg = await res.json();
+            animationMappings = cfg.mappings || {};
+            chromaKeySettings = cfg.chroma || chromaKeySettings;
+            globalPosition = cfg.globalPosition || globalPosition;
+            globalScale = cfg.globalScale || globalScale;
+            updateDebugInfo();
+        } catch (e) { console.warn('failed loading config', e); }
+        connectToAnimationStream();
+        console.log('Animation overlay initialized');
+    })();
 
-    loadSettings();
-    connectToAnimationStream();
+    window.addEventListener('click', () => {
+        ensureAudioContext();
+        console.log("System Ready");
+        // Play a tiny silent video/audio if needed to prime the engine
+    }, { once: true });
 
-    console.log('🎬 Animation overlay initialized');
-    console.log('💡 Press D to toggle debug overlay');
 </script>
 </body>
 </html>
