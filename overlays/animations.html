@@ -7,20 +7,48 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
-        body {
+        /* body {
             width: 1920px;
             height: 1080px;
             overflow: hidden;
             background: transparent;
             font-family: Arial, sans-serif;
         }
-
+            
         #animationContainer {
             position: fixed;
             width: 100%;
             height: 100%;
             display: flex;
             pointer-events: none;
+        }
+        */
+
+        body {
+            width: 100vw;  /* Use Viewport Width */
+            height: 100vh; /* Use Viewport Height */
+            overflow: hidden;
+            background: transparent;
+            margin: 0;
+        }
+
+        /* #animationContainer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+        } */
+        #animationContainer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh; /* This might be slightly off on iPad */
+            height: -webkit-fill-available; /* Better for iPad/iOS Safari */
+            pointer-events: none;
+            z-index: 10;
         }
 
         video.animation, canvas.animation {
@@ -131,12 +159,13 @@
     }
 
     function getPositionStyle(position) {
+        const offset = "40px"; // Margin from the edge
         const positions = {
-            'top-left': { top: '20px', left: '20px' },
-            'top-right': { top: '20px', right: '20px' },
-            'bottom-left': { bottom: '20px', left: '20px' },
-            'bottom-right': { bottom: '20px', right: '20px' },
-            'center': { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' }
+            'top-left':      { top: offset, left: offset, bottom: 'auto', right: 'auto', transform: 'none' },
+            'top-right':     { top: offset, right: offset, bottom: 'auto', left: 'auto', transform: 'none' },
+            'bottom-left':   { bottom: offset, left: offset, top: 'auto', right: 'auto', transform: 'none' },
+            'bottom-right':  { bottom: offset, right: offset, top: 'auto', left: 'auto', transform: 'none' },
+            'center':        { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', bottom: 'auto', right: 'auto' }
         };
         return positions[position] || positions['bottom-left'];
     }
@@ -205,6 +234,7 @@
         const filename = mapping.file || mapping;
         const position = mapping.position || globalPosition;
         const scale = mapping.scale || globalScale;
+        console.log(`📏 Scaling check: Trigger=${triggerName}, Scale=${scale}`);
 
         lastTrigger = `${triggerName} (${new Date().toLocaleTimeString()})`;
         totalPlayed++;
@@ -248,28 +278,46 @@
         } catch (e) { console.warn('audio hookup failed', e); }
 
         video.addEventListener('loadedmetadata', () => {
-            // Force dimensions
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 360;
+            // Set the internal drawing resolution to match the video file
+            canvas.width = video.videoWidth || 1920;
+            canvas.height = video.videoHeight || 1080;
+
+            // Use the video's natural size as the CSS basis
+            canvas.style.width = video.videoWidth + 'px';
+            canvas.style.height = video.videoHeight + 'px';
+
+            try { 
+                tracked.cancelChroma = applyChromaKey(video, canvas); 
+            } catch (e) { 
+                tracked.cancelChroma = null; 
+            }
+        }, { once: true });
+
+        video.addEventListener('playing', () => {
+            canvas.classList.add('active');
             
-            // Apply position and scale
+            // 1. Set internal resolution
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            // 2. Set display size
+            canvas.style.width = video.videoWidth + 'px';
+            canvas.style.height = video.videoHeight + 'px';
+
+            // 3. RE-APPLY POSITION AND SCALE HERE
             const posStyle = getPositionStyle(position);
             Object.assign(canvas.style, posStyle);
             
-            // Explicitly set width/height style so it's not 0px
-            canvas.style.width = canvas.width + "px";
-            canvas.style.height = canvas.height + "px";
+            // Combine transform and scale
+            const baseTransform = posStyle.transform && posStyle.transform !== 'none' ? posStyle.transform : '';
+            canvas.style.transform = `${baseTransform} scale(${scale})`.trim();
+            
+            // Set origin so it scales from the correct corner
+            if (position.includes('left')) canvas.style.transformOrigin = 'bottom left';
+            else if (position.includes('right')) canvas.style.transformOrigin = 'bottom right';
+            else canvas.style.transformOrigin = 'center';
 
-            console.log(`✅ Canvas ready: ${canvas.width}x${canvas.height}`);
-            tracked.cancelChroma = applyChromaKey(video, canvas);
-        }, { once: true });
-
-        video.addEventListener('playing', () => { // Changed 'play' to 'playing'
-            canvas.classList.add('active');
-            // Ensure dimensions are set before starting chroma
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            if (tracked.cancelChroma) tracked.cancelChroma(); // Clean up old loops
+            if (tracked.cancelChroma) tracked.cancelChroma(); 
             tracked.cancelChroma = applyChromaKey(video, canvas);
         });
 

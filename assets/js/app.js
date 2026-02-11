@@ -567,19 +567,13 @@ async function findLiveStream(apiKey, input) {
 
     let channelId = null;
 
-    // Figure out what the user actually typed and normalise it
-    // Cases: "@TESLAbot-CODM", "TESLAbot-CODM",
-    //        "https://youtube.com/@TESLAbot-CODM", "https://youtube.com/channel/UCxxx"
-
     const channelIdMatch = input.match(/channel\/([^\/\?]+)/);
     const handleMatch = input.match(/@([^\/\?]+)/);
 
     if (channelIdMatch) {
-      // Full channel ID already — use directly, no API call needed
       channelId = channelIdMatch[1];
       console.log('Using channel ID directly:', channelId);
     } else {
-      // It's a handle — extract it whether or not there's an @
       let handle = handleMatch ? handleMatch[1] : input.replace(/^https?:\/\/(www\.)?youtube\.com\/?/i, '');
       handle = handle.replace(/^@/, '').trim();
 
@@ -589,18 +583,49 @@ async function findLiveStream(apiKey, input) {
 
       console.log('Looking up handle:', handle);
 
-      // Try forHandle first (works for modern @handles)
+      // Try forHandle first
       let response = await fetch(
         `/api/youtube/channels?part=id&forHandle=${handle}&key=${apiKey}`
       );
+      
+      // CHECK FOR QUOTA ERROR - ROTATE KEY
+      if (response.status === 403) {
+        const errorData = await response.json();
+        if (errorData.error?.message?.toLowerCase().includes('quota')) {
+          console.warn('⚠️ Quota exhausted on forHandle, rotating key...');
+          if (rotateToNextKey()) {
+            // Retry with new key
+            apiKey = getNextApiKey();
+            response = await fetch(
+              `/api/youtube/channels?part=id&forHandle=${handle}&key=${apiKey}`
+            );
+          }
+        }
+      }
+      
       let data = response.ok ? await response.json() : null;
 
-      // If forHandle returned nothing, try forUsername (legacy usernames)
+      // If forHandle failed, try forUsername
       if (!data || !data.items || data.items.length === 0) {
         console.log('forHandle returned nothing, trying forUsername...');
         response = await fetch(
           `/api/youtube/channels?part=id&forUsername=${handle}&key=${apiKey}`
         );
+        
+        // CHECK FOR QUOTA ERROR AGAIN
+        if (response.status === 403) {
+          const errorData = await response.json();
+          if (errorData.error?.message?.toLowerCase().includes('quota')) {
+            console.warn('⚠️ Quota exhausted on forUsername, rotating key...');
+            if (rotateToNextKey()) {
+              apiKey = getNextApiKey();
+              response = await fetch(
+                `/api/youtube/channels?part=id&forUsername=${handle}&key=${apiKey}`
+              );
+            }
+          }
+        }
+        
         data = response.ok ? await response.json() : null;
       }
 
@@ -612,10 +637,40 @@ async function findLiveStream(apiKey, input) {
       console.log('Resolved channel ID:', channelId);
     }
 
-    // Now search for live videos on that channel
+    // Search for live videos
     const searchResponse = await fetch(
       `/api/youtube/search?part=snippet&channelId=${channelId}&eventType=live&type=video&key=${apiKey}`
     );
+
+    // CHECK FOR QUOTA ERROR ON SEARCH
+    if (searchResponse.status === 403) {
+      const errorData = await searchResponse.json();
+      if (errorData.error?.message?.toLowerCase().includes('quota')) {
+        console.warn('⚠️ Quota exhausted on search, rotating key...');
+        if (rotateToNextKey()) {
+          apiKey = getNextApiKey();
+          const retryResponse = await fetch(
+            `/api/youtube/search?part=snippet&channelId=${channelId}&eventType=live&type=video&key=${apiKey}`
+          );
+          if (!retryResponse.ok) {
+            throw new Error('Failed to search after key rotation');
+          }
+          const retryData = await retryResponse.json();
+          if (!retryData.items || retryData.items.length === 0) {
+            throw new Error('No live streams found on this channel');
+          }
+          const liveVideo = retryData.items[0];
+          const videoId = liveVideo.id.videoId;
+          const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+          streamUrlInput.value = videoUrl;
+          saveSettings();
+          updateStatus(`✓ Found: ${liveVideo.snippet.title}`, false);
+          return videoUrl;
+        } else {
+          throw new Error('All API keys exhausted');
+        }
+      }
+    }
 
     if (!searchResponse.ok) {
       const err = await searchResponse.json();
@@ -682,6 +737,8 @@ findStreamBtn.addEventListener('click', async () => {
 
 // Filter message text
 function filterMessage(text) {
+  if (!text || typeof text !== 'string') return '';
+
   let filtered = text;
 
   if (!readEmojisCheckbox.checked) {
@@ -748,6 +805,13 @@ function processQueue() {
   ensureAudioContext();
 
   const { author, text, platform, display, voiceOverride } = messageQueue.shift();
+
+  // Validate that text exists before filtering
+  if (!text) {
+    isSpeaking = false;
+    processQueue();
+    return;
+  }
 
   const filteredText = filterMessage(text);
 
@@ -1905,8 +1969,18 @@ async function pollTikTokMessages() {
 
     if (tiktokIsFirstPoll) {
       tiktokIsFirstPoll = false;
+      
+      // Mark all messages as seen on first poll
+      messages.forEach(msg => {
+        const msgId = `${msg.type}-${msg.author}-${msg.timestamp || Date.now()}`;
+        tiktokSeenMessages.add(msgId);
+      });
+
+      // Only speak the LAST chat message (skip old ones)
       let lastChatIndex = -1;
-      messages.forEach((msg, i) => { if (msg.type !== 'gift') lastChatIndex = i; });
+      messages.forEach((msg, i) => { 
+        if (msg.type !== 'gift') lastChatIndex = i; 
+      });
 
       for (let i = 0; i < messages.length; i++) {
         const msg = messages[i];
@@ -1915,9 +1989,7 @@ async function pollTikTokMessages() {
           const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
           console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
           addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
-          if (window.playGiftSound) window.playGiftSound();
         } else {
-          // Auto-assign voice before speaking
           await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
 
           if (i === lastChatIndex) {
@@ -1930,24 +2002,40 @@ async function pollTikTokMessages() {
       return;
     }
 
-    // Normal poll
+    // Normal poll - ONLY process NEW messages
     for (const msg of messages) {
+      // Create unique message ID
+      const msgId = `${msg.type}-${msg.author}-${msg.timestamp || Date.now()}`;
+      
+      // Skip if already seen
+      if (tiktokSeenMessages.has(msgId)) {
+        continue; // ← This is the key fix!
+      }
+      
+      // Mark as seen
+      tiktokSeenMessages.add(msgId);
+
       if (msg.type === 'gift') {
         const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
         console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
         addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
         if (window.playGiftSound) window.playGiftSound();
       } else {
-        // Auto-assign voice before speaking
         await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
         speakText(msg.author, msg.text, 'tiktok', true);
       }
     }
 
+    // Clean up old seen messages (keep last 1000 to prevent memory leak)
+    if (tiktokSeenMessages.size > 1000) {
+      const items = Array.from(tiktokSeenMessages);
+      tiktokSeenMessages = new Set(items.slice(-1000));
+    }
+
   } catch (err) {
     console.error('TikTok polling error:', err);
   } finally {
-    // CRITICAL: Schedule next poll (2 seconds)
+    // Schedule next poll (2 seconds)
     if (tiktokConnected) {
       setTimeout(pollTikTokMessages, 2000);
     }
@@ -1956,89 +2044,64 @@ async function pollTikTokMessages() {
 
 // Also hook into YouTube polling
 const originalPollYouTube = pollYouTubeMessages;
-
 async function pollYouTubeMessages(isReconnect = false) {
   if (!youtubeConnected || !youtubeLiveChatId) return;
 
   const apiKey = getNextApiKey();
+  let url = `/api/youtube/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails&key=${apiKey}`;
+  
+  if (youtubeNextPageToken) {
+    url += `&pageToken=${youtubeNextPageToken}`;
+  }
 
   try {
-    let url = `/api/youtube/liveChat/messages?liveChatId=${youtubeLiveChatId}&part=snippet,authorDetails&key=${apiKey}`;
-
-    if (youtubeNextPageToken) {
-      url += `&pageToken=${youtubeNextPageToken}`;
-    }
-
     const response = await fetch(url);
-
+    
     if (!response.ok) {
       const errorData = await response.json();
-      const message = errorData.error?.message || '';
-
-      if (response.status === 403 && message.toLowerCase().includes('quota')) {
-        console.warn(`⚠️ Quota hit on key ${currentKeyIndex + 1}, rotating… (${apiKeys.length} keys available)`);
-        rotateToNextKey(); // Force rotate to next key
-        const backoff = apiKeys.length > 1 ? 5000 : 30000;
-        setTimeout(() => pollYouTubeMessages(false), backoff);
-        return;
+      // Handle Quota exhaustion by rotating keys
+      if (response.status === 403 && errorData.error?.message?.includes('quota')) {
+        if (rotateToNextKey()) {
+          setTimeout(() => pollYouTubeMessages(isReconnect), 1000);
+          return;
+        }
       }
-
-      throw new Error(message || `API Error: ${response.status}`);
+      throw new Error(errorData.error?.message || 'Error fetching messages');
     }
 
     const data = await response.json();
     youtubeNextPageToken = data.nextPageToken;
     youtubeLastPollTime = Date.now();
 
-    if (data.items) {
-      if (youtubeIsFirstPoll) {
-        const items = data.items;
-        const twoMinAgo = Date.now() - 120000;
+    const messages = data.items || [];
 
-        for (let idx = 0; idx < items.length; idx++) {
-          const item = items[idx];
-          youtubeSeenMessages.add(item.id);
-
-          // Auto-assign voice
-          await autoAssignVoiceIfNeeded(item.authorDetails.displayName, 'youtube');
-
-          if (idx === items.length - 1) {
-            const publishedAt = new Date(item.snippet.publishedAt).getTime();
-            if (publishedAt >= twoMinAgo) {
-              speakText(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', true);
-            } else {
-              addChatMessage(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', false);
-            }
-          } else {
-            addChatMessage(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', false);
-          }
+    // On the very first poll, we just "mark as read" everything currently in chat
+    if (youtubeIsFirstPoll && !isReconnect) {
+      messages.forEach(msg => youtubeSeenMessages.add(msg.id));
+      youtubeIsFirstPoll = false;
+      console.log(`Initial sync: Ignored ${messages.length} old YouTube messages.`);
+      addChatMessage('SYSTEM', 'YouTube chat synced. Waiting for new messages...', 'youtube', false);
+    } else {
+      // Process only new messages
+      messages.forEach(msg => {
+        if (!youtubeSeenMessages.has(msg.id)) {
+          youtubeSeenMessages.add(msg.id);
+          const author = msg.authorDetails.displayName;
+          const text = msg.snippet.displayMessage;
+          speakText(author, text, 'youtube');
         }
-
-        youtubeIsFirstPoll = false;
-      } else {
-        for (const item of data.items) {
-          if (!youtubeSeenMessages.has(item.id)) {
-            youtubeSeenMessages.add(item.id);
-
-            // Auto-assign voice
-            await autoAssignVoiceIfNeeded(item.authorDetails.displayName, 'youtube');
-
-            speakText(item.authorDetails.displayName, item.snippet.displayMessage, 'youtube', true);
-
-            // Check for animation triggers
-            analyzeMessageForAnimation(item.snippet.displayMessage, item.authorDetails.displayName, 'youtube');
-          }
-        }
-      }
+      });
     }
 
-    const pollInterval = data.pollingIntervalMillis || 5000;
-    setTimeout(() => pollYouTubeMessages(false), pollInterval);
+    // Poll again based on the interval YouTube suggests (usually 5 seconds)
+    const interval = data.pollingIntervalMillis || 5000;
+    setTimeout(() => pollYouTubeMessages(), interval);
 
   } catch (error) {
-    console.error('YouTube polling error:', error);
-    updateStatus(`YouTube error: ${error.message}`, false, true);
-    disconnectYouTube();
+    console.error('YouTube Poll Error:', error);
+    updateStatus(`YouTube Poll Error: ${error.message}`, false, true);
+    // Retry after 10 seconds if there's an error
+    setTimeout(() => pollYouTubeMessages(), 10000);
   }
 }
 
@@ -2239,8 +2302,7 @@ function renderAnimationMappings() {
     </div>
   `;
   }).join('');
-
-
+  
   // Position change handler
   list.querySelectorAll('.mapping-position').forEach(select => {
     select.addEventListener('change', (e) => {
@@ -2748,6 +2810,47 @@ function loadLanguageFilters() {
   }
 }
 
+// Populate hidden voices list
+function populateHiddenVoicesList() {
+  if (!hiddenVoicesList) return;
+
+  const hiddenArray = Array.from(hiddenVoices);
+
+  if (hiddenArray.length === 0) {
+    hiddenVoicesContainer.style.display = 'none';
+    return;
+  }
+
+  hiddenVoicesContainer.style.display = 'block';
+
+  hiddenVoicesList.innerHTML = hiddenArray.map(voiceId => {
+    const voiceIndex = parseInt(voiceId.replace('system-', ''));
+    const voice = voices[voiceIndex];
+    const voiceName = voice ? voice.name : voiceId;
+
+    return `
+      <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 6px;">
+        <span style="flex: 1; color: var(--text-secondary); font-size: 0.875rem;">${voiceName}</span>
+        <button class="secondary unhide-voice-btn" data-voice="${voiceId}" style="padding: 4px 12px; font-size: 0.75rem;">
+          ↩️ Restore
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  // Add unhide button handlers
+  document.querySelectorAll('.unhide-voice-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const voiceId = btn.dataset.voice;
+      hiddenVoices.delete(voiceId);
+      saveHiddenVoices();
+      loadVoices(); // Refresh all dropdowns
+      populateVoicePreviewList();
+      populateHiddenVoicesList();
+    });
+  });
+}
+
 // Load filters on startup
 loadLanguageFilters();
 
@@ -2772,3 +2875,63 @@ if (animationPositionSelect) {
 }
 
 console.log('✓ OBS URL generator initialized');
+
+// Auto-unlock audio on page load with a silent click simulation
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    // Try to unlock audio automatically
+    unlockAudio();
+    
+    // If that doesn't work, show a prominent message
+    if (!audioUnlocked) {
+      const notice = document.createElement('div');
+      notice.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #ff4444;
+        color: white;
+        padding: 15px 30px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: bold;
+        z-index: 999999;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        cursor: pointer;
+      `;
+      notice.textContent = '🔊 Click anywhere to enable TTS audio';
+      document.body.appendChild(notice);
+      
+      // Remove notice after first interaction
+      const removeNotice = () => {
+        notice.remove();
+        document.removeEventListener('click', removeNotice);
+        document.removeEventListener('keydown', removeNotice);
+      };
+      document.addEventListener('click', removeNotice);
+      document.addEventListener('keydown', removeNotice);
+    }
+  }, 1000);
+});
+
+// Add this function anywhere in app.js
+async function testAllKeys() {
+  console.log('🔑 Testing all API keys...');
+  for (let i = 0; i < apiKeys.length; i++) {
+    const key = apiKeys[i];
+    try {
+      const response = await fetch(`/api/youtube/channels?part=id&forHandle=youtube&key=${key}`);
+      if (response.ok) {
+        console.log(`✅ Key ${i + 1}: WORKING`);
+      } else {
+        const error = await response.json();
+        console.log(`❌ Key ${i + 1}: ${error.error?.message || 'FAILED'}`);
+      }
+    } catch (err) {
+      console.log(`❌ Key ${i + 1}: ${err.message}`);
+    }
+  }
+}
+// Run this in console to test all keys
+// testAllKeys()
