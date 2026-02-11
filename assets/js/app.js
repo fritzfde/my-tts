@@ -987,8 +987,10 @@ function speakText(author, text, platform, shouldDisplay = true) {
   const userVoice = getVoiceForUser(author, platform);
   const voiceToUse = userVoice || defaultVoice;
 
+  // Show immediately in UI when requested, and only queue speech (avoid double-insert)
   if (shouldDisplay) {
-    messageQueue.push({ author, text, platform, display: true, voiceOverride: voiceToUse });
+    try { addChatMessage(author, text, platform, false); } catch (e) { /* ignore UI errors */ }
+    messageQueue.push({ author, text, platform, display: false, voiceOverride: voiceToUse });
   } else {
     messageQueue.push({ author, text, platform, display: false, voiceOverride: voiceToUse });
   }
@@ -1152,8 +1154,14 @@ document.getElementById('connectTikTokBtn').addEventListener('click', async () =
       updateStatus('TikTok connected', true);
       addChatMessage('SYSTEM', `Connected to @${username}`, 'tiktok', false);
 
-      if (tiktokPollInterval) clearInterval(tiktokPollInterval);
-      tiktokPollInterval = setInterval(() => pollTikTokMessages(), 2000);
+      // Use a single timeout-based scheduler to avoid duplicate polling
+      if (tiktokPollInterval) {
+        try { clearTimeout(tiktokPollInterval); } catch (e) { /* ignore */ }
+        tiktokPollInterval = null;
+      }
+
+      // Start polling loop (pollTikTokMessages will re-schedule itself)
+      pollTikTokMessages();
 
     } else {
       throw new Error('Connection failed');
@@ -1170,7 +1178,7 @@ function disconnectTikTok() {
   tiktokLastPollTime = Date.now();
 
   if (tiktokPollInterval) {
-    clearInterval(tiktokPollInterval);
+    try { clearTimeout(tiktokPollInterval); } catch (e) { /* ignore */ }
     tiktokPollInterval = null;
   }
 
@@ -1963,6 +1971,9 @@ async function pollTikTokMessages() {
     const response = await fetch('/api/tiktok/messages');
     const messages = await response.json();
 
+    // Debug: log fetched TikTok messages for troubleshooting
+    console.log('🔎 Fetched TikTok messages:', Array.isArray(messages) ? messages.length : 0, messages);
+
     tiktokLastPollTime = Date.now();
 
     if (!messages || messages.length === 0) return;
@@ -2037,7 +2048,10 @@ async function pollTikTokMessages() {
   } finally {
     // Schedule next poll (2 seconds)
     if (tiktokConnected) {
-      setTimeout(pollTikTokMessages, 2000);
+      if (tiktokPollInterval) {
+        try { clearTimeout(tiktokPollInterval); } catch (e) { /* ignore */ }
+      }
+      tiktokPollInterval = setTimeout(pollTikTokMessages, 2000);
     }
   }
 }

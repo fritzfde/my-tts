@@ -322,25 +322,10 @@
                 <div style="margin-bottom: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
                     Map emojis/stickers to .MOV files. For YouTube, uses LLM to detect emotions. For TikTok, uses actual emote names.
                 </div>
-                <div id="animationMappingsList" style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+                <div id="animationMappingsList" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-height: 500px; overflow-y: auto; padding-right: 5px;">
                     <!-- Mapping items will be added here dynamically -->
                 </div>
                 <button id="addAnimationMappingBtn" class="secondary" style="width: 100%; margin-top: 8px;">+ Add Mapping</button>
-            </div>
-
-            <div class="input-group" style="margin-bottom: 12px;">
-                <label>Animation Position</label>
-                <select id="animationPosition" style="width: 100%; padding: 8px; font-size: 0.875rem;">
-                    <option value="bottom-left">⬇️ ⬅️ Bottom Left</option>
-                    <option value="bottom-center">⬇️ Bottom Center</option>
-                    <option value="bottom-right">⬇️ ➡️ Bottom Right</option>
-                    <option value="center-left">⬅️ Center Left</option>
-                    <option value="center">🎯 Center</option>
-                    <option value="center-right">➡️ Center Right</option>
-                    <option value="top-left">⬆️ ⬅️ Top Left</option>
-                    <option value="top-center">⬆️ Top Center</option>
-                    <option value="top-right">⬆️ ➡️ Top Right</option>
-                </select>
             </div>
 
             <div class="input-group" style="margin-bottom: 12px;">
