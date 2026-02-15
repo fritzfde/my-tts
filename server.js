@@ -165,15 +165,47 @@ app.post('/api/tiktok/connect', (req, res) => {
 
     // Capture Chat
     tiktokConnection.on('chat', data => {
-        const msg = {
-            type: 'chat',
-            author: data.uniqueId,
-            authorName: data.nickname || data.uniqueId,
-            authorAvatar: data.profilePictureUrl || null,
-            text: data.comment
-        };
-        console.log(`💬 [Chat] ${msg.authorName} (@${msg.author}): ${msg.text}`);
-        tiktokMessageQueue.push(msg);
+        const hasEmotes = data.emotes && data.emotes.length > 0;
+        const hasText = data.comment && data.comment.trim();
+        
+        if (hasEmotes) {
+            // Process each emote as a separate message
+            data.emotes.forEach(emote => {
+                const msg = {
+                    type: 'emote',
+                    author: data.uniqueId,
+                    authorName: data.nickname || data.uniqueId,
+                    authorAvatar: data.profilePictureUrl || null,
+                    emoteId: emote.emoteId,
+                    emoteName: `sticker_${emote.emoteId}`,
+                    emoteImage: emote.emoteImageUrl,
+                    timestamp: Date.now()
+                };
+                
+                log(`🖼️ [Custom Sticker] ${msg.authorName} sent sticker ID: ${msg.emoteId}`);
+                tiktokMessageQueue.push(msg);
+            });
+        }
+        
+        if (hasText) {
+            // Also process the text message
+            const msg = {
+                type: 'chat',
+                author: data.uniqueId,
+                authorName: data.nickname || data.uniqueId,
+                authorAvatar: data.profilePictureUrl || null,
+                text: data.comment,
+                timestamp: Date.now()
+            };
+            
+            log(`💬 [Chat] ${msg.authorName} (@${msg.author}): ${msg.text}`);
+            tiktokMessageQueue.push(msg);
+        }
+        
+        // If neither text nor emotes (shouldn't happen but just in case)
+        if (!hasEmotes && !hasText) {
+            log(`⚠️ [Empty Message] from ${data.uniqueId}`);
+        }
     });
 
     // Capture Gifts
@@ -363,6 +395,7 @@ app.use('/sounds', express.static(path.join(__dirname, 'sounds')));
 
 // Upload custom sound
 const multer = require('multer');
+const { log } = require('console');
 const soundStorage = multer.diskStorage({
     destination: (req, file, cb) => {
         const soundsDir = path.join(__dirname, 'sounds', 'custom');
@@ -613,4 +646,3 @@ app.get('/overlay/animations', (req, res) => {
 });
 
 // ─── END ANIMATION OVERLAY ──────────────────────────────────────────
-

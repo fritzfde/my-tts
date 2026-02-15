@@ -12,6 +12,11 @@ let hiddenVoices = new Set();
 // Keep audio playing in background tabs
 let wakeLock = null;
 
+// User avatar cache
+if (!window.userAvatars) {
+  window.userAvatars = new Map();
+}
+
 // Prevent browser from pausing audio when tab is inactive
 async function requestWakeLock() {
   try {
@@ -920,8 +925,7 @@ function updateStatus(message, isActive = false, isError = false) {
   }
 }
 
-// Add chat message with platform badge
-function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, extraClass = '') {
+function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, extraClass = '', allowHtml = false) {
   // Remove the placeholder on first real message
   const empty = chatFeed.querySelector('.empty-state');
   if (empty) empty.remove();
@@ -939,10 +943,15 @@ function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, e
     badge = '<span class="platform-badge tiktok">TikTok</span> ';
   }
 
-  // Author part — clickable for real users
+  // Author part with avatar (if available)
   let authorHtml;
   if (author !== 'SYSTEM') {
-    authorHtml = `<span class="chat-author clickable" onclick="openVoiceAssignment('${author.replace(/'/g, "\\'")}', '${platform}')">${badge}${escapeHtml(author)}:</span>`;
+    const avatar = window.userAvatars && window.userAvatars.get(`${platform}:${author}`);
+    const avatarHtml = avatar 
+      ? `<img src="${avatar}" alt="${author}" style="width: 32px; height: 32px; border-radius: 50%; margin-right: 8px; vertical-align: middle;">` 
+      : '';
+    
+    authorHtml = `<span class="chat-author clickable" onclick="openVoiceAssignment('${author.replace(/'/g, "\\'")}', '${platform}')">${avatarHtml}${badge}${escapeHtml(author)}:</span>`;
   } else {
     authorHtml = `<span class="chat-author">${badge}${escapeHtml(text)}</span>`;
   }
@@ -951,7 +960,9 @@ function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, e
   if (author === 'SYSTEM') {
     messageDiv.innerHTML = `${authorHtml}<span class="timestamp">${timestamp}</span>`;
   } else {
-    messageDiv.innerHTML = `${authorHtml}<span class="chat-text">${escapeHtml(text)}</span><span class="timestamp">${timestamp}</span>`;
+    // Use raw HTML if allowed (for sticker images), otherwise escape
+    const textContent = allowHtml ? text : escapeHtml(text);
+    messageDiv.innerHTML = `${authorHtml}<span class="chat-text">${textContent}</span><span class="timestamp">${timestamp}</span>`;
   }
 
   chatFeed.appendChild(messageDiv);
@@ -1962,8 +1973,6 @@ async function autoAssignVoiceIfNeeded(author, platform) {
 // Hook into existing polling functions
 // We'll override the existing pollTikTokMessages to add auto-assignment
 
-const originalPollTikTok = pollTikTokMessages;
-
 async function pollTikTokMessages() {
   if (!tiktokConnected) return;
 
@@ -1975,50 +1984,88 @@ async function pollTikTokMessages() {
 
     if (!messages || messages.length === 0) return;
 
+    // Helper function to process a single message
+    const processMessage = async (msg, shouldSpeak = true) => {
+      // Cache avatar
+      if (msg.authorAvatar) {
+        window.userAvatars.set(`tiktok:${msg.author}`, msg.authorAvatar);
+      }
+
+      if (msg.type === 'gift') {
+        // Handle gift
+        const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
+        console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
+        addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
+        if (!tiktokIsFirstPoll && window.playGiftSound) window.playGiftSound();
+        
+      } else if (msg.type === 'emote') {
+        // Handle custom image sticker
+        console.log(`🖼️ TikTok custom sticker from ${msg.author}:`, msg);
+        
+        const stickerHTML = msg.emoteImage 
+          ? `<img src="${msg.emoteImage}" alt="sticker_${msg.emoteId}" style="max-width: 100px; max-height: 100px; border-radius: 8px;">` 
+          : `🖼️ Sticker ${msg.emoteId}`;
+        
+        addChatMessage(msg.author, stickerHTML, 'tiktok', false, 'sticker', true);
+        
+        if (!tiktokIsFirstPoll && typeof handleStickerAnimation === 'function') {
+          handleStickerAnimation(msg);
+        }
+        
+      } else if (msg.text && msg.text.trim()) {
+        // Handle regular text message
+        await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
+        
+        if (shouldSpeak) {
+          speakText(msg.author, msg.text, 'tiktok', true);
+        } else {
+          addChatMessage(msg.author, msg.text, 'tiktok', false);
+        }
+      }
+    };
+
+    // First poll: mark everything as seen, only speak last message
     if (tiktokIsFirstPoll) {
       tiktokIsFirstPoll = false;
       
-      // Mark all messages as seen on first poll
+      // Mark all as seen
       messages.forEach(msg => {
+        if (msg.authorAvatar) {
+          window.userAvatars.set(`tiktok:${msg.author}`, msg.authorAvatar);
+        }
+        
         const msgId = msg.type === 'gift' 
           ? `gift-${msg.author}-${msg.giftName}-${msg.repeatCount}-${msg.timestamp}`
+          : msg.type === 'emote'
+          ? `emote-${msg.author}-${msg.emoteId}-${msg.timestamp}`
           : `chat-${msg.author}-${msg.text || 'empty'}-${msg.timestamp}`;
+        
         tiktokSeenMessages.add(msgId);
       });
 
-      // Only speak the LAST chat message (skip old ones)
-      let lastChatIndex = -1;
+      // Find last text message index
+      let lastTextIndex = -1;
       messages.forEach((msg, i) => { 
-        if (msg.type !== 'gift' && msg.text) lastChatIndex = i; 
+        if (msg.type === 'chat' && msg.text && msg.text.trim()) {
+          lastTextIndex = i;
+        }
       });
 
+      // Process all messages (only speak the last text message)
       for (let i = 0; i < messages.length; i++) {
-        const msg = messages[i];
-
-        if (msg.type === 'gift') {
-          const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
-          console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
-          addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
-        } else if (msg.text && msg.text.trim()) {
-          await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
-
-          if (i === lastChatIndex) {
-            speakText(msg.author, msg.text, 'tiktok', true);
-          } else {
-            addChatMessage(msg.author, msg.text, 'tiktok', false);
-          }
-        } else {
-          console.log(`🎭 TikTok sticker/emote from ${msg.author}:`, msg);
-        }
+        await processMessage(messages[i], i === lastTextIndex);
       }
+      
       return;
     }
 
-    // Normal poll - ONLY process NEW messages
+    // Normal poll: only process NEW messages
     for (const msg of messages) {
-      // Create UNIQUE message ID
+      // Create unique message ID
       const msgId = msg.type === 'gift' 
         ? `gift-${msg.author}-${msg.giftName}-${msg.repeatCount}-${msg.timestamp}`
+        : msg.type === 'emote'
+        ? `emote-${msg.author}-${msg.emoteId}-${msg.timestamp}`
         : `chat-${msg.author}-${msg.text || 'empty'}-${msg.timestamp}`;
       
       // Skip if already seen
@@ -2029,20 +2076,11 @@ async function pollTikTokMessages() {
       // Mark as seen
       tiktokSeenMessages.add(msgId);
 
-      if (msg.type === 'gift') {
-        const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
-        console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
-        addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
-        if (window.playGiftSound) window.playGiftSound();
-      } else if (msg.text && msg.text.trim()) {
-        await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
-        speakText(msg.author, msg.text, 'tiktok', true);
-      } else {
-        console.log(`🎭 TikTok sticker/emote from ${msg.author}:`, msg);
-      }
+      // Process the message
+      await processMessage(msg, true);
     }
 
-    // Clean up old seen messages (keep last 1000 to prevent memory leak)
+    // Clean up old seen messages (keep last 1000)
     if (tiktokSeenMessages.size > 1000) {
       const items = Array.from(tiktokSeenMessages);
       tiktokSeenMessages = new Set(items.slice(-1000));
@@ -2057,6 +2095,135 @@ async function pollTikTokMessages() {
     }
   }
 }
+
+// ─── TikTok Sticker to Animation Mappings ───────────────────────────
+
+let stickerMappings = {}; // emoteId or emoteName → animation trigger
+
+// Load sticker mappings
+function loadStickerMappings() {
+  const saved = localStorage.getItem('sticker_mappings');
+  if (saved) {
+    try {
+      stickerMappings = JSON.parse(saved);
+      renderStickerMappings();
+    } catch (e) {
+      console.error('Error loading sticker mappings:', e);
+    }
+  }
+}
+
+// Save sticker mappings
+function saveStickerMappings() {
+  localStorage.setItem('sticker_mappings', JSON.stringify(stickerMappings));
+}
+
+// Render sticker mappings
+function renderStickerMappings() {
+  const list = document.getElementById('stickerMappingsList');
+  if (!list) return;
+
+  if (Object.keys(stickerMappings).length === 0) {
+    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No stickers captured yet. Send stickers in TikTok to auto-capture them!</div>';
+    return;
+  }
+
+  list.innerHTML = Object.entries(stickerMappings).map(([emoteKey, data]) => {
+    const animTrigger = typeof data === 'string' ? data : (data.trigger || '');
+    const emoteName = typeof data === 'object' ? data.name : emoteKey;
+    const emoteImage = typeof data === 'object' ? data.image : null;
+    
+    return `
+      <div style="display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; align-items: center;">
+        ${emoteImage 
+          ? `<img src="${emoteImage}" alt="${emoteName}" style="width: 40px; height: 40px; border-radius: 4px;">` 
+          : '<div style="width: 40px; height: 40px; background: rgba(255,255,255,0.05); border-radius: 4px; display: flex; align-items: center; justify-content: center;">🎭</div>'
+        }
+        <div style="font-size: 0.875rem; color: var(--text-secondary);">${emoteName}</div>
+        <select data-emote="${emoteKey}" class="sticker-animation" style="font-size: 0.875rem; padding: 8px;">
+          <option value="">🚫 No Animation</option>
+          ${Object.keys(animationMappings).map(trigger =>
+            `<option value="${trigger}" ${trigger === animTrigger ? 'selected' : ''}>${trigger}</option>`
+          ).join('')}
+        </select>
+        <button class="secondary remove-sticker-btn" data-emote="${emoteKey}" style="padding: 6px 12px; font-size: 0.75rem;">🗑️</button>
+      </div>
+    `;
+  }).join('');
+
+  // Animation change handler
+  list.querySelectorAll('.sticker-animation').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const emote = e.target.dataset.emote;
+      const trigger = e.target.value;
+      
+      if (trigger) {
+        // Update mapping
+        if (typeof stickerMappings[emote] === 'object') {
+          stickerMappings[emote].trigger = trigger;
+        } else {
+          stickerMappings[emote] = trigger;
+        }
+        console.log(`✓ Mapped sticker: ${emote} → ${trigger}`);
+      } else {
+        // Remove mapping but keep the sticker entry
+        if (typeof stickerMappings[emote] === 'object') {
+          stickerMappings[emote].trigger = '';
+        } else {
+          stickerMappings[emote] = '';
+        }
+        console.log(`✓ Unmapped sticker: ${emote}`);
+      }
+      
+      saveStickerMappings();
+    });
+  });
+
+  // Remove button handler
+  list.querySelectorAll('.remove-sticker-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const emote = e.target.dataset.emote;
+      delete stickerMappings[emote];
+      saveStickerMappings();
+      renderStickerMappings();
+    });
+  });
+}
+
+function handleStickerAnimation(msg) {
+  const emoteKey = msg.emoteId || msg.emoteName;
+  if (!emoteKey) return;
+  
+  // Auto-capture new stickers
+  if (!stickerMappings[emoteKey]) {
+    console.log(`📚 Auto-captured new sticker: ${emoteKey}`);
+    
+    stickerMappings[emoteKey] = {
+      name: msg.emoteName || `Sticker ${emoteKey}`,
+      image: msg.emoteImage || null,
+      trigger: '' // No animation by default
+    };
+    
+    saveStickerMappings();
+    renderStickerMappings();
+    
+    addChatMessage('SYSTEM', `📚 New sticker captured: ${emoteKey.slice(0, 12)}... Assign an animation!`, 'SYSTEM', false);
+  }
+  
+  // Trigger animation if mapped
+  const data = stickerMappings[emoteKey];
+  const animTrigger = typeof data === 'string' ? data : (data.trigger || '');
+  
+  if (animTrigger) {
+    console.log(`🎬 Sticker triggered animation: ${emoteKey} → ${animTrigger}`);
+    triggerAnimation(animTrigger, 'tiktok', msg.author);
+  }
+}
+
+
+// Initialize
+loadStickerMappings();
+
 
 // Also hook into YouTube polling
 const originalPollYouTube = pollYouTubeMessages;
