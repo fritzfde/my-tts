@@ -366,6 +366,24 @@
             </div>
         </div>
 
+        <div class="input-group" style="margin-bottom: 12px;">
+            <label>
+                <input type="checkbox" id="globalAnimationTrigger" checked style="width: auto; margin-right: 8px;">
+                🎬 Allow stickers to trigger animations (global)
+            </label>
+            <div style="margin-top: 8px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+                When enabled, any user can trigger animations with stickers. You can override per-user below.
+            </div>
+        </div>
+
+        <div class="input-group" style="margin-bottom: 12px;">
+            <label>Per-User Animation Permissions</label>
+            <div id="animationPermissionsList" style="display: grid; gap: 8px; max-height: 200px; overflow-y: auto; padding-right: 5px;">
+                <!-- User permissions will appear here -->
+            </div>
+            <button id="manageAnimationPermissionsBtn" class="secondary" style="width: 100%; margin-top: 8px;">👤 Manage User Permissions</button>
+        </div>
+
         <div id="status" class="status">
             <div class="status-icon"></div>
             <span>Ready to connect...</span>

@@ -168,27 +168,45 @@ app.post('/api/tiktok/connect', (req, res) => {
         const hasEmotes = data.emotes && data.emotes.length > 0;
         const hasText = data.comment && data.comment.trim();
         
-        if (hasEmotes) {
-            // Process each emote as a separate message
-            data.emotes.forEach(emote => {
-                const msg = {
-                    type: 'emote',
-                    author: data.uniqueId,
-                    authorName: data.nickname || data.uniqueId,
-                    authorAvatar: data.profilePictureUrl || null,
-                    emoteId: emote.emoteId,
-                    emoteName: `sticker_${emote.emoteId}`,
-                    emoteImage: emote.emoteImageUrl,
-                    timestamp: Date.now()
-                };
-                
-                log(`🖼️ [Custom Sticker] ${msg.authorName} sent sticker ID: ${msg.emoteId}`);
-                tiktokMessageQueue.push(msg);
-            });
-        }
-        
-        if (hasText) {
-            // Also process the text message
+        if (hasEmotes && hasText) {
+            // COMBINED MESSAGE: Text + Stickers
+            const msg = {
+                type: 'combined',
+                author: data.uniqueId,
+                authorName: data.nickname || data.uniqueId,
+                authorAvatar: data.profilePictureUrl || null,
+                text: data.comment,
+                emotes: data.emotes.map(e => ({
+                    emoteId: e.emoteId,
+                    emoteImage: e.emoteImageUrl,
+                    position: e.placeInComment
+                })),
+                timestamp: Date.now()
+            };
+            
+            log(`💬🖼️ [Combined] ${msg.authorName}: ${msg.text} + ${msg.emotes.length} sticker(s)`);
+            tiktokMessageQueue.push(msg);
+            
+        } else if (hasEmotes) {
+            // ONLY stickers (process first one for animation, show all)
+            const msg = {
+                type: 'emote',
+                author: data.uniqueId,
+                authorName: data.nickname || data.uniqueId,
+                authorAvatar: data.profilePictureUrl || null,
+                emotes: data.emotes.map(e => ({
+                    emoteId: e.emoteId,
+                    emoteImage: e.emoteImageUrl
+                })),
+                primaryEmoteId: data.emotes[0].emoteId, // For animation triggering
+                timestamp: Date.now()
+            };
+            
+            log(`🖼️ [Stickers Only] ${msg.authorName} sent ${msg.emotes.length} sticker(s)`);
+            tiktokMessageQueue.push(msg);
+            
+        } else if (hasText) {
+            // ONLY text
             const msg = {
                 type: 'chat',
                 author: data.uniqueId,
@@ -198,13 +216,8 @@ app.post('/api/tiktok/connect', (req, res) => {
                 timestamp: Date.now()
             };
             
-            log(`💬 [Chat] ${msg.authorName} (@${msg.author}): ${msg.text}`);
+            log(`💬 [Chat] ${msg.authorName}: ${msg.text}`);
             tiktokMessageQueue.push(msg);
-        }
-        
-        // If neither text nor emotes (shouldn't happen but just in case)
-        if (!hasEmotes && !hasText) {
-            log(`⚠️ [Empty Message] from ${data.uniqueId}`);
         }
     });
 

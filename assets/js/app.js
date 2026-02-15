@@ -12,6 +12,55 @@ let hiddenVoices = new Set();
 // Keep audio playing in background tabs
 let wakeLock = null;
 
+// Animation trigger permissions
+let globalAnimationTriggerEnabled = true; // Default: allow all users
+let userAnimationPermissions = {}; // username → 'allow' | 'deny'
+
+// Load permissions
+function loadAnimationPermissions() {
+  const saved = localStorage.getItem('animation_permissions');
+  if (saved) {
+    try {
+      const data = JSON.parse(saved);
+      globalAnimationTriggerEnabled = data.global !== false;
+      userAnimationPermissions = data.users || {};
+    } catch (e) {
+      console.error('Error loading animation permissions:', e);
+    }
+  }
+}
+
+// Save permissions
+function saveAnimationPermissions() {
+  localStorage.setItem('animation_permissions', JSON.stringify({
+    global: globalAnimationTriggerEnabled,
+    users: userAnimationPermissions
+  }));
+}
+
+// Check if user can trigger animations
+function canUserTriggerAnimations(username, platform = 'tiktok') {
+  const userKey = `${platform}:${username}`;
+  
+  // Check user-specific override first
+  if (userAnimationPermissions[userKey] === 'allow') {
+    console.log(`✅ User ${username} (${platform}) explicitly ALLOWED to trigger animations`);
+    return true;
+  }
+  if (userAnimationPermissions[userKey] === 'deny') {
+    console.log(`🚫 User ${username} (${platform}) explicitly DENIED from triggering animations`);
+    return false;
+  }
+  
+  // Fall back to global setting
+  const allowed = globalAnimationTriggerEnabled;
+  console.log(`⚙️ User ${username} (${platform}) using GLOBAL setting: ${allowed ? 'allowed' : 'denied'}`);
+  return allowed;
+}
+
+// Initialize
+loadAnimationPermissions();
+
 // User avatar cache
 if (!window.userAvatars) {
   window.userAvatars = new Map();
@@ -1296,6 +1345,72 @@ document.getElementById('voiceModal').addEventListener('click', function(e) {
   }
 });
 
+// Global animation trigger checkbox
+const globalAnimationTriggerCheckbox = document.getElementById('globalAnimationTrigger');
+if (globalAnimationTriggerCheckbox) {
+  globalAnimationTriggerCheckbox.checked = globalAnimationTriggerEnabled;
+  
+  globalAnimationTriggerCheckbox.addEventListener('change', () => {
+    globalAnimationTriggerEnabled = globalAnimationTriggerCheckbox.checked;
+    saveAnimationPermissions();
+    console.log('Global animation trigger:', globalAnimationTriggerEnabled ? 'enabled' : 'disabled');
+  });
+}
+
+// Manage permissions button
+document.getElementById('manageAnimationPermissionsBtn')?.addEventListener('click', () => {
+  const modal = document.getElementById('voiceModal');
+  const list = document.getElementById('userVoiceList');
+  
+  if (recentUsers.length === 0) {
+    list.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No recent users yet.</p>';
+  } else {
+    list.innerHTML = `
+      <h3 style="margin-bottom: 12px;">Animation Trigger Permissions</h3>
+      <div style="margin-bottom: 16px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+        <strong>Default:</strong> Follow global setting (currently ${globalAnimationTriggerEnabled ? 'enabled' : 'disabled'})<br>
+        <strong>Allow:</strong> Can trigger animations even if global is disabled<br>
+        <strong>Deny:</strong> Cannot trigger animations even if global is enabled
+      </div>
+      ${recentUsers.map(userKey => {
+        const [platform, username] = userKey.split(':');
+        const permission = userAnimationPermissions[userKey] || 'default';
+        
+        const platformBadge = platform === 'youtube'
+          ? '<span class="platform-badge youtube">YouTube</span>'
+          : '<span class="platform-badge tiktok">TikTok</span>';
+        
+        return `
+          <div class="user-voice-item">
+            <div class="username">${platformBadge}${username}</div>
+            <select onchange="setUserAnimationPermission('${userKey.replace(/'/g, "\\'")}', this.value)">
+              <option value="default" ${permission === 'default' ? 'selected' : ''}>⚙️ Default</option>
+              <option value="allow" ${permission === 'allow' ? 'selected' : ''}>✅ Allow</option>
+              <option value="deny" ${permission === 'deny' ? 'selected' : ''}>🚫 Deny</option>
+            </select>
+          </div>
+        `;
+      }).join('')}
+    `;
+  }
+  
+  modal.style.display = 'flex';
+});
+
+// Set user permission
+window.setUserAnimationPermission = function(userKey, permission) {
+  if (permission === 'default') {
+    delete userAnimationPermissions[userKey];
+  } else {
+    userAnimationPermissions[userKey] = permission;
+  }
+  saveAnimationPermissions();
+  
+  const [platform, username] = userKey.split(':');
+  addChatMessage('SYSTEM', `Animation trigger for "${username}" (${platform}): ${permission}`, 'SYSTEM', false);
+};
+
+
 // Test voice buttons
 testVoiceYouTubeBtn.addEventListener('click', () => {
   const testMsg = testMessageInput.value.trim() || 'Hello! This is a test.';
@@ -1970,9 +2085,6 @@ async function autoAssignVoiceIfNeeded(author, platform) {
   }
 }
 
-// Hook into existing polling functions
-// We'll override the existing pollTikTokMessages to add auto-assignment
-
 async function pollTikTokMessages() {
   if (!tiktokConnected) return;
 
@@ -1983,6 +2095,20 @@ async function pollTikTokMessages() {
     tiktokLastPollTime = Date.now();
 
     if (!messages || messages.length === 0) return;
+
+    // Helper function to generate unique message ID
+    const getMessageId = (msg) => {
+      if (msg.type === 'gift') {
+        return `gift-${msg.author}-${msg.giftName}-${msg.repeatCount}-${msg.timestamp}`;
+      } else if (msg.type === 'emote') {
+        const emoteId = msg.primaryEmoteId || (msg.emotes && msg.emotes[0]?.emoteId) || msg.emoteId;
+        return `emote-${msg.author}-${emoteId}-${msg.timestamp}`;
+      } else if (msg.type === 'combined') {
+        return `combined-${msg.author}-${msg.timestamp}`;
+      } else {
+        return `chat-${msg.author}-${msg.text || 'empty'}-${msg.timestamp}`;
+      }
+    };
 
     // Helper function to process a single message
     const processMessage = async (msg, shouldSpeak = true) => {
@@ -1998,18 +2124,65 @@ async function pollTikTokMessages() {
         addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
         if (!tiktokIsFirstPoll && window.playGiftSound) window.playGiftSound();
         
+      } else if (msg.type === 'combined') {
+        // Handle text + stickers combined
+        console.log(`💬🖼️ TikTok combined message from ${msg.author}:`, msg);
+        
+        // Build HTML with text and sticker images inline
+        const stickersHTML = msg.emotes.map(e => 
+          `<img src="${e.emoteImage}" alt="sticker" style="max-width: 60px; max-height: 60px; border-radius: 4px; margin: 0 4px; vertical-align: middle;">`
+        ).join('');
+        
+        const combinedHTML = `${escapeHtml(msg.text)} ${stickersHTML}`;
+        
+        addChatMessage(msg.author, combinedHTML, 'tiktok', false, 'combined', true);
+        
+        // Trigger animation ONCE for the first sticker only
+        
+        // Trigger animation ONCE for the first sticker only
+        if (!tiktokIsFirstPoll && msg.emotes.length > 0 && typeof handleStickerAnimation === 'function') {
+          // CHECK PERMISSIONS HERE with platform parameter
+          if (canUserTriggerAnimations(msg.author, 'tiktok')) {
+            console.log(`🎬 Triggering animation for combined message from ${msg.author}`);
+            handleStickerAnimation({
+              type: 'emote',
+              author: msg.author,
+              authorName: msg.authorName,
+              emoteId: msg.emotes[0].emoteId,
+              emoteName: `sticker_${msg.emotes[0].emoteId}`,
+              emoteImage: msg.emotes[0].emoteImage
+            });
+          } else {
+            console.log(`🚫 Animation blocked for ${msg.author} (combined message)`);
+          }
+        }
+        
       } else if (msg.type === 'emote') {
-        // Handle custom image sticker
-        console.log(`🖼️ TikTok custom sticker from ${msg.author}:`, msg);
+        // Handle stickers only (multiple stickers, no text)
+        console.log(`🖼️ TikTok stickers from ${msg.author}:`, msg);
         
-        const stickerHTML = msg.emoteImage 
-          ? `<img src="${msg.emoteImage}" alt="sticker_${msg.emoteId}" style="max-width: 100px; max-height: 100px; border-radius: 8px;">` 
-          : `🖼️ Sticker ${msg.emoteId}`;
+        const stickersHTML = msg.emotes.map(e => 
+          `<img src="${e.emoteImage}" alt="sticker" style="max-width: 100px; max-height: 100px; border-radius: 8px; margin: 4px;">`
+        ).join('');
         
-        addChatMessage(msg.author, stickerHTML, 'tiktok', false, 'sticker', true);
+        addChatMessage(msg.author, stickersHTML, 'tiktok', false, 'sticker', true);
         
+        // Trigger animation ONCE for the first sticker only
         if (!tiktokIsFirstPoll && typeof handleStickerAnimation === 'function') {
-          handleStickerAnimation(msg);
+          // CHECK PERMISSIONS HERE with platform parameter
+          if (canUserTriggerAnimations(msg.author, 'tiktok')) {
+            console.log(`🎬 Triggering animation for sticker from ${msg.author}`);
+            handleStickerAnimation({
+              type: 'emote',
+              author: msg.author,
+              authorName: msg.authorName,
+              emoteId: msg.primaryEmoteId || msg.emotes[0].emoteId,
+              emoteName: `sticker_${msg.primaryEmoteId || msg.emotes[0].emoteId}`,
+              emoteImage: msg.emotes[0].emoteImage
+            });
+          } else {
+            console.log(`🚫 Animation blocked for ${msg.author} (sticker only)`);
+          }
         }
         
       } else if (msg.text && msg.text.trim()) {
@@ -2033,14 +2206,7 @@ async function pollTikTokMessages() {
         if (msg.authorAvatar) {
           window.userAvatars.set(`tiktok:${msg.author}`, msg.authorAvatar);
         }
-        
-        const msgId = msg.type === 'gift' 
-          ? `gift-${msg.author}-${msg.giftName}-${msg.repeatCount}-${msg.timestamp}`
-          : msg.type === 'emote'
-          ? `emote-${msg.author}-${msg.emoteId}-${msg.timestamp}`
-          : `chat-${msg.author}-${msg.text || 'empty'}-${msg.timestamp}`;
-        
-        tiktokSeenMessages.add(msgId);
+        tiktokSeenMessages.add(getMessageId(msg));
       });
 
       // Find last text message index
@@ -2061,12 +2227,7 @@ async function pollTikTokMessages() {
 
     // Normal poll: only process NEW messages
     for (const msg of messages) {
-      // Create unique message ID
-      const msgId = msg.type === 'gift' 
-        ? `gift-${msg.author}-${msg.giftName}-${msg.repeatCount}-${msg.timestamp}`
-        : msg.type === 'emote'
-        ? `emote-${msg.author}-${msg.emoteId}-${msg.timestamp}`
-        : `chat-${msg.author}-${msg.text || 'empty'}-${msg.timestamp}`;
+      const msgId = getMessageId(msg);
       
       // Skip if already seen
       if (tiktokSeenMessages.has(msgId)) {
@@ -2670,82 +2831,6 @@ if (greenThresholdSlider && chromaToleranceSlider) {
 
   greenThresholdSlider.addEventListener('change', saveChromaSettings);
   chromaToleranceSlider.addEventListener('change', saveChromaSettings);
-}
-
-// YouTube Chat Emotion Detection with LLM
-async function analyzeMessageForAnimation(message, author, platform) {
-  console.log(`🎬 [ANIMATION] Analyzing message: "${message}" from ${author} on ${platform}`);
-
-  // Skip if animations disabled
-  const animationsEnabledCheckbox = document.getElementById('animationsEnabled');
-  if (!animationsEnabledCheckbox) {
-    console.error('❌ [ANIMATION] animationsEnabled checkbox not found in DOM!');
-    return;
-  }
-
-  if (!animationsEnabledCheckbox.checked) {
-    console.log('⏸️ [ANIMATION] Animations disabled (checkbox unchecked)');
-    return;
-  }
-
-  console.log('✅ [ANIMATION] Animations enabled!');
-
-  // Skip if no mappings configured
-  const mappingCount = Object.keys(animationMappings).length;
-  if (mappingCount === 0) {
-    console.log('⏸️ [ANIMATION] No animation mappings configured');
-    return;
-  }
-
-  console.log(`✅ [ANIMATION] ${mappingCount} mappings available:`, Object.keys(animationMappings));
-
-  // Cache common phrases - map to ACTUAL trigger words you configured
-  const phraseCache = {
-    'lol': 'lol',
-    'lmao': 'lol',
-    'haha': 'lol',
-    'lmfao': 'lol',
-    'omg': 'wow',
-    'wtf': 'wow',
-    'wow': 'wow',
-    'no way': 'wow',
-    'lets go': 'hype',
-    "let's go": 'hype',
-    'fire': 'fire',
-    'sick': 'fire',
-    '❤️': 'heart',
-    '💖': 'heart',
-    '🔥': 'fire',
-    '😂': 'laugh',
-    '🤣': 'laugh',
-    '😮': 'wow',
-    '😱': 'wow'
-  };
-
-  const lowerMsg = message.toLowerCase();
-  console.log(`🔍 [ANIMATION] Searching in: "${lowerMsg}"`);
-
-  // Quick emoji/phrase match
-  for (const [phrase, emotion] of Object.entries(phraseCache)) {
-    if (lowerMsg.includes(phrase)) {
-      console.log(`✅ [ANIMATION] Phrase match: "${phrase}" → ${emotion}`);
-
-      // Check if we have a mapping for this emotion
-      if (animationMappings[emotion]) {
-        console.log(`✅ [ANIMATION] Mapping found: ${emotion} → ${animationMappings[emotion]}`);
-        triggerAnimation(emotion, platform, author);
-        return;
-      } else {
-        console.warn(`⚠️ [ANIMATION] No mapping for emotion: ${emotion}`);
-        console.log(`Available mappings:`, Object.keys(animationMappings));
-      }
-    }
-  }
-
-  console.log(`ℹ️ [ANIMATION] No phrase match found in cache`);
-
-  // Use LLM for complex messages (optional)
-  // Skipping LLM if no cache match to avoid spam
 }
 
 function triggerAnimation(trigger, platform, author) {
