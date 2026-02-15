@@ -1971,9 +1971,6 @@ async function pollTikTokMessages() {
     const response = await fetch('/api/tiktok/messages');
     const messages = await response.json();
 
-    // Debug: log fetched TikTok messages for troubleshooting
-    console.log('🔎 Fetched TikTok messages:', Array.isArray(messages) ? messages.length : 0, messages);
-
     tiktokLastPollTime = Date.now();
 
     if (!messages || messages.length === 0) return;
@@ -1983,14 +1980,16 @@ async function pollTikTokMessages() {
       
       // Mark all messages as seen on first poll
       messages.forEach(msg => {
-        const msgId = `${msg.type}-${msg.author}-${msg.timestamp || Date.now()}`;
+        const msgId = msg.type === 'gift' 
+          ? `gift-${msg.author}-${msg.giftName}-${msg.repeatCount}-${msg.timestamp}`
+          : `chat-${msg.author}-${msg.text || 'empty'}-${msg.timestamp}`;
         tiktokSeenMessages.add(msgId);
       });
 
       // Only speak the LAST chat message (skip old ones)
       let lastChatIndex = -1;
       messages.forEach((msg, i) => { 
-        if (msg.type !== 'gift') lastChatIndex = i; 
+        if (msg.type !== 'gift' && msg.text) lastChatIndex = i; 
       });
 
       for (let i = 0; i < messages.length; i++) {
@@ -2000,7 +1999,7 @@ async function pollTikTokMessages() {
           const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
           console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
           addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
-        } else {
+        } else if (msg.text && msg.text.trim()) {
           await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
 
           if (i === lastChatIndex) {
@@ -2008,6 +2007,8 @@ async function pollTikTokMessages() {
           } else {
             addChatMessage(msg.author, msg.text, 'tiktok', false);
           }
+        } else {
+          console.log(`🎭 TikTok sticker/emote from ${msg.author}:`, msg);
         }
       }
       return;
@@ -2015,12 +2016,14 @@ async function pollTikTokMessages() {
 
     // Normal poll - ONLY process NEW messages
     for (const msg of messages) {
-      // Create unique message ID
-      const msgId = `${msg.type}-${msg.author}-${msg.timestamp || Date.now()}`;
+      // Create UNIQUE message ID
+      const msgId = msg.type === 'gift' 
+        ? `gift-${msg.author}-${msg.giftName}-${msg.repeatCount}-${msg.timestamp}`
+        : `chat-${msg.author}-${msg.text || 'empty'}-${msg.timestamp}`;
       
       // Skip if already seen
       if (tiktokSeenMessages.has(msgId)) {
-        continue; // ← This is the key fix!
+        continue;
       }
       
       // Mark as seen
@@ -2031,9 +2034,11 @@ async function pollTikTokMessages() {
         console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
         addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
         if (window.playGiftSound) window.playGiftSound();
-      } else {
+      } else if (msg.text && msg.text.trim()) {
         await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
         speakText(msg.author, msg.text, 'tiktok', true);
+      } else {
+        console.log(`🎭 TikTok sticker/emote from ${msg.author}:`, msg);
       }
     }
 
@@ -2048,10 +2053,7 @@ async function pollTikTokMessages() {
   } finally {
     // Schedule next poll (2 seconds)
     if (tiktokConnected) {
-      if (tiktokPollInterval) {
-        try { clearTimeout(tiktokPollInterval); } catch (e) { /* ignore */ }
-      }
-      tiktokPollInterval = setTimeout(pollTikTokMessages, 2000);
+      setTimeout(pollTikTokMessages, 2000);
     }
   }
 }
