@@ -136,6 +136,9 @@ app.listen(PORT, () => {
 // --- TIKTOK LOGIC START ---
 let tiktokConnection = null;
 let tiktokMessageQueue = [];
+// Recent gifts cache to deduplicate duplicate events from the TikTok connector
+let recentGifts = new Map(); // key -> ts
+const RECENT_GIFT_WINDOW_MS = 5000; // ignore duplicates within 5 seconds
 let giftOverlayClients = [];
 let likerLeaderboard = new Map(); // username → like count
 let likerUserInfo = new Map(); // username → { nickname, avatar }
@@ -223,24 +226,47 @@ app.post('/api/tiktok/connect', (req, res) => {
 
     // Capture Gifts
     tiktokConnection.on('gift', data => {
-        const count = data.repeatCount || 1;
-        const diamonds = (data.diamondCount || 0) * count;
-        const msg = {
-            type: 'gift',
-            author: data.uniqueId,
-            authorName: data.nickname || data.userName || data.uniqueId,
-            authorAvatar: data.profilePictureUrl || null,
-            giftName: data.giftName,
-            giftPictureUrl: data.giftPictureUrl || data.gift?.image?.url_list?.[0] || null,
-            repeatCount: count,
-            diamondCount: diamonds,
-            timestamp: Date.now()
-        };
-        console.log(`🎁 [Gift] ${msg.authorName} (@${msg.author}): ${msg.giftName} x${count} (${diamonds} diamonds)`);
-        tiktokMessageQueue.push(msg);
+      const count = data.repeatCount || 1;
+      const diamonds = (data.diamondCount || 0) * count;
+      const msg = {
+        type: 'gift',
+        author: data.uniqueId,
+        authorName: data.nickname || data.userName || data.uniqueId,
+        authorAvatar: data.profilePictureUrl || null,
+        giftName: data.giftName,
+        giftPictureUrl: data.giftPictureUrl || data.gift?.image?.url_list?.[0] || null,
+        repeatCount: count,
+        diamondCount: diamonds,
+        timestamp: Date.now()
+      };
 
-        // Broadcast to gift overlay
-        broadcastToGiftOverlay(msg);
+      // Deduplicate: create a robust signature and ignore if seen recently
+      const normalizedGiftName = (msg.giftName || '').toLowerCase().trim();
+      const giftIdField = data.gift?.id || data.giftId || data.id || '';
+      const keyParts = [msg.author, normalizedGiftName, msg.repeatCount, msg.diamondCount, giftIdField];
+      const key = keyParts.join(':');
+      const now = Date.now();
+
+      // Remove expired entries from the map
+      for (const [k, ts] of recentGifts.entries()) {
+        if (now - ts > RECENT_GIFT_WINDOW_MS) recentGifts.delete(k);
+      }
+
+      if (recentGifts.has(key)) {
+        console.log(`🔁 Ignored duplicate gift event: ${msg.authorName} — ${msg.giftName}`);
+        console.debug('Duplicate gift raw data warning');
+        // console.debug('Duplicate gift raw data:', JSON.stringify(data));
+        return;
+      }
+
+      // Add to recent cache and proceed
+      recentGifts.set(key, now);
+
+      console.log(`🎁 [Gift] ${msg.authorName} (@${msg.author}): ${msg.giftName} x${count} (${diamonds} diamonds)`);
+      tiktokMessageQueue.push(msg);
+
+      // Broadcast to gift overlay
+      broadcastToGiftOverlay(msg);
     });
 
     // Capture Follows
