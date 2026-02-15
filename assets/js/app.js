@@ -849,19 +849,38 @@ async function speakWithCustomVoice(voiceType, text) {
   return { utterance: utterance, isCloned: false };
 }
 
+// Add a watchdog timer to reset isSpeaking if stuck
+let speakingWatchdog = null;
+
 // Process message queue
 function processQueue() {
-  if (isSpeaking || messageQueue.length === 0) return;
+  console.log(`🔊 processQueue called. isSpeaking: ${isSpeaking}, queue length: ${messageQueue.length}`);
+  
+  if (isSpeaking || messageQueue.length === 0) {
+    console.log(`🔊 Exiting: isSpeaking=${isSpeaking}, queue empty=${messageQueue.length === 0}`);
+    return;
+  }
 
   isSpeaking = true;
 
-  // Ensure audio context is active (prevents pausing in background tabs)
+  // Safety watchdog: if speech doesn't end in 30 seconds, force reset
+  if (speakingWatchdog) clearTimeout(speakingWatchdog);
+  speakingWatchdog = setTimeout(() => {
+    console.warn('⚠️ Speech watchdog triggered - forcing reset');
+    isSpeaking = false;
+    processQueue();
+  }, 30000); // 30 seconds
+
+  // Ensure audio context is active
   ensureAudioContext();
 
   const { author, text, platform, display, voiceOverride } = messageQueue.shift();
+  
+  console.log(`🔊 Processing: "${text}" from ${author} (${platform})`);
 
   // Validate that text exists before filtering
   if (!text) {
+    console.warn(`🔊 No text, skipping`);
     isSpeaking = false;
     processQueue();
     return;
@@ -870,6 +889,7 @@ function processQueue() {
   const filteredText = filterMessage(text);
 
   if (!filteredText.trim()) {
+    console.warn(`🔊 Text filtered to empty, skipping`);
     isSpeaking = false;
     processQueue();
     return;
@@ -903,15 +923,21 @@ function processQueue() {
 
       if (result.isCloned) {
         result.audio.onended = () => {
+          console.log('🔊 Cloned audio ended');
+          if (speakingWatchdog) clearTimeout(speakingWatchdog);
           isSpeaking = false;
           processQueue();
         };
         result.audio.onerror = () => {
+          console.error('🔊 Cloned audio error');
+          if (speakingWatchdog) clearTimeout(speakingWatchdog);
           isSpeaking = false;
           processQueue();
         };
         result.audio.play().catch(err => {
           console.warn('⏸️ Audio autoplay blocked. Click page to enable audio.');
+          if (speakingWatchdog) clearTimeout(speakingWatchdog);
+          isSpeaking = false;
           unlockAudio();
         });
       } else {
@@ -949,11 +975,13 @@ function processQueue() {
 
 function setupUtteranceHandlers(utterance) {
   utterance.onend = () => {
+    console.log('🔊 Speech ended');
     isSpeaking = false;
     processQueue();
   };
 
-  utterance.onerror = () => {
+  utterance.onerror = (event) => {
+    console.error('🔊 Speech error:', event);
     isSpeaking = false;
     processQueue();
   };
@@ -2085,6 +2113,26 @@ async function autoAssignVoiceIfNeeded(author, platform) {
   }
 }
 
+// Play a specific sound by ID
+function playSpecificSound(soundId) {
+  if (!soundId) {
+    // Empty = use default gift sound
+    if (window.playGiftSound) window.playGiftSound();
+    return;
+  }
+  
+  if (soundId.startsWith('custom-')) {
+    // Play custom uploaded sound
+    const soundPath = soundId.replace('custom-', '');
+    const audio = new Audio(soundPath);
+    audio.volume = volumeSlider.value / 100;
+    audio.play().catch(err => console.error('Sound play error:', err));
+  } else {
+    // Play built-in synthesized sound
+    playBuiltInSound(soundId);
+  }
+}
+
 async function pollTikTokMessages() {
   if (!tiktokConnected) return;
 
@@ -2121,9 +2169,31 @@ async function pollTikTokMessages() {
         // Handle gift
         const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
         console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
+        console.log(`🎁 isFirstPoll: ${isFirstPoll}`); // ← ADD THIS
         addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
-        if (!isFirstPoll && window.playGiftSound) window.playGiftSound();
         
+        if (!isFirstPoll) {
+          console.log(`🎁 Processing gift action (not first poll)`); // ← ADD THIS
+          // Get the action for this gift
+          const action = getGiftAction(msg.giftName, msg.diamondCount);
+          
+          if (action && action.type === 'animation' && action.value) {
+            // Trigger animation
+            console.log(`🎬 Triggering animation for gift ${msg.giftName}: ${action.value}`);
+            triggerAnimation(action.value, 'tiktok', msg.author);
+            
+          } else if (action && action.type === 'sound' && action.value) {
+            // Play specific sound
+            console.log(`🔊 Playing specific sound for gift ${msg.giftName}: ${action.value}`);
+            playSpecificSound(action.value);
+            
+          } else {
+            // Fall back to default gift sound
+            if (window.playGiftSound) window.playGiftSound();
+          }
+        } else {
+          console.log(`🎁 Skipping gift action (first poll)`); // ← ADD THIS
+        }
       } else if (msg.type === 'combined') {
         // Handle text + stickers combined
         console.log(`💬🖼️ TikTok combined message from ${msg.author}:`, msg);
@@ -2180,12 +2250,14 @@ async function pollTikTokMessages() {
             console.log(`🚫 Animation blocked for ${msg.author} (sticker only)`);
           }
         }
-        
       } else if (msg.text && msg.text.trim()) {
         // Handle regular text message
+        console.log(`💬 Text message from ${msg.author}: "${msg.text}"`);
+        
         await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
         
         if (shouldSpeak) {
+          console.log(`💬 Calling speakText for: "${msg.text}"`);
           speakText(msg.author, msg.text, 'tiktok', true);
         } else {
           addChatMessage(msg.author, msg.text, 'tiktok', false);
@@ -2251,6 +2323,380 @@ async function pollTikTokMessages() {
       setTimeout(pollTikTokMessages, 2000);
     }
   }
+}
+
+// Populate sound/animation options
+function populateGiftActionSelect(selectElement, currentType, currentValue) {
+  if (!selectElement) return;
+  
+  selectElement.innerHTML = '';
+  
+  if (currentType === 'sound') {
+    // Add sound options
+    const soundSelect = document.getElementById('giftSoundSelect');
+    if (soundSelect) {
+      Array.from(soundSelect.options).forEach(opt => {
+        const option = document.createElement('option');
+        option.value = opt.value;
+        option.textContent = opt.textContent;
+        option.selected = opt.value === currentValue;
+        selectElement.appendChild(option);
+      });
+    }
+  } else if (currentType === 'animation') {
+    // Add animation options
+    Object.keys(animationMappings).forEach(trigger => {
+      const option = document.createElement('option');
+      option.value = trigger;
+      option.textContent = `🎬 ${trigger}`;
+      option.selected = trigger === currentValue;
+      selectElement.appendChild(option);
+    });
+  }
+}
+
+// Render gift name mappings
+function renderGiftNameMappings() {
+  const list = document.getElementById('giftNameMappingsList');
+  if (!list) return;
+  
+  if (Object.keys(giftMappings.byName).length === 0) {
+    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No gift name mappings yet.</div>';
+    return;
+  }
+  
+  list.innerHTML = Object.entries(giftMappings.byName).map(([giftName, action]) => {
+    const uniqueId = `gift-name-${giftName.replace(/\s/g, '-')}`;
+    
+    return `
+      <div style="display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; align-items: center;">
+        <input type="text" value="${giftName}" data-gift="${giftName}" class="gift-name-input" placeholder="Gift Name" style="font-size: 0.875rem; padding: 8px;">
+        <select data-gift="${giftName}" class="gift-type-select" style="font-size: 0.75rem; padding: 6px;">
+          <option value="sound" ${action.type === 'sound' ? 'selected' : ''}>🔊 Sound</option>
+          <option value="animation" ${action.type === 'animation' ? 'selected' : ''}>🎬 Animation</option>
+        </select>
+        <select id="${uniqueId}-value" data-gift="${giftName}" class="gift-value-select" style="font-size: 0.875rem; padding: 8px;">
+          <!-- Populated by populateGiftActionSelect -->
+        </select>
+        <button class="secondary remove-gift-name-btn" data-gift="${giftName}" style="padding: 6px 12px; font-size: 0.75rem;">🗑️</button>
+      </div>
+    `;
+  }).join('');
+  
+  // Populate value selects
+  Object.entries(giftMappings.byName).forEach(([giftName, action]) => {
+    const uniqueId = `gift-name-${giftName.replace(/\s/g, '-')}`;
+    const select = document.getElementById(`${uniqueId}-value`);
+    if (select) {
+      populateGiftActionSelect(select, action.type, action.value);
+    }
+  });
+  
+  // Add event listeners
+  attachGiftNameListeners();
+}
+
+// Render gift value mappings
+function renderGiftValueMappings() {
+  const list = document.getElementById('giftValueMappingsList');
+  if (!list) return;
+  
+  if (Object.keys(giftMappings.byValue).length === 0) {
+    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No value mappings yet.</div>';
+    return;
+  }
+  
+  list.innerHTML = Object.entries(giftMappings.byValue).map(([value, action]) => {
+    const uniqueId = `gift-value-${value}`;
+    
+    return `
+      <div style="display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; align-items: center;">
+        <input type="number" min="1" value="${value}" data-value="${value}" class="gift-value-input" placeholder="Diamonds" style="font-size: 0.875rem; padding: 8px; width: 80px;">
+        <select data-value="${value}" class="gift-value-type-select" style="font-size: 0.75rem; padding: 6px;">
+          <option value="sound" ${action.type === 'sound' ? 'selected' : ''}>🔊</option>
+          <option value="animation" ${action.type === 'animation' ? 'selected' : ''}>🎬</option>
+        </select>
+        <select id="${uniqueId}-action" data-value="${value}" class="gift-value-action-select" style="font-size: 0.875rem; padding: 8px;">
+          <!-- Populated by populateGiftActionSelect -->
+        </select>
+        <button class="secondary remove-gift-value-btn" data-value="${value}" style="padding: 6px 12px; font-size: 0.75rem;">🗑️</button>
+      </div>
+    `;
+  }).join('');
+  
+  // Populate action selects
+  Object.entries(giftMappings.byValue).forEach(([value, action]) => {
+    const uniqueId = `gift-value-${value}`;
+    const select = document.getElementById(`${uniqueId}-action`);
+    if (select) {
+      populateGiftActionSelect(select, action.type, action.value);
+    }
+  });
+  
+  // Add event listeners
+  attachGiftValueListeners();
+}
+
+// Combined render function
+function renderGiftMappings() {
+  renderGiftNameMappings();
+  renderGiftValueMappings();
+  
+  // Update default select
+  const defaultType = document.getElementById('defaultGiftType');
+  const defaultValue = document.getElementById('defaultGiftValue');
+  
+  if (defaultType && defaultValue) {
+    defaultType.value = giftMappings.default.type;
+    populateGiftActionSelect(defaultValue, giftMappings.default.type, giftMappings.default.value);
+  }
+}
+
+
+
+// Attach event listeners for gift name mappings
+function attachGiftNameListeners() {
+  const list = document.getElementById('giftNameMappingsList');
+  if (!list) return;
+  
+  // Type select change
+  list.querySelectorAll('.gift-type-select').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const giftName = e.target.dataset.gift;
+      const newType = e.target.value;
+      
+      // Update type and reset value
+      giftMappings.byName[giftName].type = newType;
+      giftMappings.byName[giftName].value = '';
+      
+      // Repopulate the value select
+      const uniqueId = `gift-name-${giftName.replace(/\s/g, '-')}`;
+      const valueSelect = document.getElementById(`${uniqueId}-value`);
+      if (valueSelect) {
+        populateGiftActionSelect(valueSelect, newType, '');
+      }
+      
+      saveGiftMappings();
+      console.log(`✓ Gift type changed: ${giftName} → ${newType}`);
+    });
+  });
+  
+  // Value select change
+  list.querySelectorAll('.gift-value-select').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const giftName = e.target.dataset.gift;
+      giftMappings.byName[giftName].value = e.target.value;
+      saveGiftMappings();
+      console.log(`✓ Gift action changed: ${giftName} → ${e.target.value}`);
+    });
+  });
+  
+  // Name input change
+  list.querySelectorAll('.gift-name-input').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const oldName = e.target.dataset.gift;
+      const newName = e.target.value.trim();
+      
+      if (newName && newName !== oldName) {
+        // Move mapping to new name
+        giftMappings.byName[newName] = giftMappings.byName[oldName];
+        delete giftMappings.byName[oldName];
+        saveGiftMappings();
+        renderGiftMappings();
+        console.log(`✓ Renamed gift: ${oldName} → ${newName}`);
+      }
+    });
+  });
+  
+  // Remove button
+  list.querySelectorAll('.remove-gift-name-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const giftName = e.target.dataset.gift;
+      delete giftMappings.byName[giftName];
+      saveGiftMappings();
+      renderGiftMappings();
+      console.log(`✓ Removed gift mapping: ${giftName}`);
+    });
+  });
+}
+
+// Attach event listeners for gift value mappings
+function attachGiftValueListeners() {
+  const list = document.getElementById('giftValueMappingsList');
+  if (!list) return;
+  
+  // Type select change
+  list.querySelectorAll('.gift-value-type-select').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const value = e.target.dataset.value;
+      const newType = e.target.value;
+      
+      // Update type and reset action
+      giftMappings.byValue[value].type = newType;
+      giftMappings.byValue[value].value = '';
+      
+      // Repopulate the action select
+      const uniqueId = `gift-value-${value}`;
+      const actionSelect = document.getElementById(`${uniqueId}-action`);
+      if (actionSelect) {
+        populateGiftActionSelect(actionSelect, newType, '');
+      }
+      
+      saveGiftMappings();
+      console.log(`✓ Value type changed: ${value}💎 → ${newType}`);
+    });
+  });
+  
+  // Action select change
+  list.querySelectorAll('.gift-value-action-select').forEach(select => {
+    select.addEventListener('change', (e) => {
+      const value = e.target.dataset.value;
+      giftMappings.byValue[value].value = e.target.value;
+      saveGiftMappings();
+      console.log(`✓ Value action changed: ${value}💎 → ${e.target.value}`);
+    });
+  });
+  
+  // Value input change
+  list.querySelectorAll('.gift-value-input').forEach(input => {
+    input.addEventListener('change', (e) => {
+      const oldValue = e.target.dataset.value;
+      const newValue = e.target.value.trim();
+      
+      if (newValue && newValue !== oldValue) {
+        // Move mapping to new value
+        giftMappings.byValue[newValue] = giftMappings.byValue[oldValue];
+        delete giftMappings.byValue[oldValue];
+        saveGiftMappings();
+        renderGiftMappings();
+        console.log(`✓ Changed value: ${oldValue}💎 → ${newValue}💎`);
+      }
+    });
+  });
+  
+  // Remove button
+  list.querySelectorAll('.remove-gift-value-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const value = e.target.dataset.value;
+      delete giftMappings.byValue[value];
+      saveGiftMappings();
+      renderGiftMappings();
+      console.log(`✓ Removed value mapping: ${value}💎`);
+    });
+  });
+}
+
+// Add Gift Name Mapping button
+const addGiftNameMappingBtn = document.getElementById('addGiftNameMappingBtn');
+if (addGiftNameMappingBtn) {
+  addGiftNameMappingBtn.addEventListener('click', () => {
+    const giftName = prompt('Enter gift name (e.g., "Rose", "TOFU Cat"):');
+    if (giftName && giftName.trim()) {
+      const name = giftName.trim();
+      giftMappings.byName[name] = { type: 'sound', value: '' };
+      saveGiftMappings();
+      renderGiftMappings();
+      console.log(`✓ Added gift mapping: ${name}`);
+    }
+  });
+}
+
+// Add Gift Value Mapping button
+const addGiftValueMappingBtn = document.getElementById('addGiftValueMappingBtn');
+if (addGiftValueMappingBtn) {
+  addGiftValueMappingBtn.addEventListener('click', () => {
+    const value = prompt('Enter diamond value (e.g., 1, 5, 10):');
+    if (value && !isNaN(value) && parseInt(value) > 0) {
+      const diamonds = parseInt(value);
+      giftMappings.byValue[diamonds] = { type: 'sound', value: '' };
+      saveGiftMappings();
+      renderGiftMappings();
+      console.log(`✓ Added value mapping: ${diamonds}💎`);
+    } else if (value) {
+      alert('Please enter a valid number greater than 0');
+    }
+  });
+}
+
+
+
+
+// ─── Gift Sound & Animation Mappings ────────────────────────────────
+
+let giftMappings = {
+  byName: {},      // giftName → { type: 'sound'|'animation', value: 'soundId' or 'animationTrigger' }
+  byValue: {},     // diamondCount → { type: 'sound'|'animation', value: '...' }
+  default: { type: 'sound', value: '' }  // Default behavior (empty = current gift sound setting)
+};
+
+// Load gift mappings
+function loadGiftMappings() {
+  const saved = localStorage.getItem('gift_mappings');
+  if (saved) {
+    try {
+      giftMappings = JSON.parse(saved);
+      renderGiftMappings();
+    } catch (e) {
+      console.error('Error loading gift mappings:', e);
+    }
+  }
+}
+
+// Save gift mappings
+function saveGiftMappings() {
+  localStorage.setItem('gift_mappings', JSON.stringify(giftMappings));
+}
+
+// Get action for a gift (returns { type, value } or null)
+function getGiftAction(giftName, diamondCount) {
+  // Priority 1: Specific gift name
+  if (giftMappings.byName[giftName]) {
+    console.log(`🎁 Using name-based mapping for ${giftName}:`, giftMappings.byName[giftName]);
+    return giftMappings.byName[giftName];
+  }
+  
+  // Priority 2: Diamond value range
+  if (giftMappings.byValue[diamondCount]) {
+    console.log(`🎁 Using value-based mapping for ${diamondCount}💎:`, giftMappings.byValue[diamondCount]);
+    return giftMappings.byValue[diamondCount];
+  }
+  
+  // Priority 3: Default
+  console.log(`🎁 Using default mapping:`, giftMappings.default);
+  return giftMappings.default;
+}
+
+// Initialize
+loadGiftMappings();
+
+// Render UI after a short delay to ensure DOM is ready
+setTimeout(() => {
+  renderGiftMappings();
+}, 100);
+
+// Default gift action event listeners
+const defaultGiftType = document.getElementById('defaultGiftType');
+const defaultGiftValue = document.getElementById('defaultGiftValue');
+
+if (defaultGiftType && defaultGiftValue) {
+  // Type changed - repopulate value dropdown
+  defaultGiftType.addEventListener('change', () => {
+    giftMappings.default.type = defaultGiftType.value;
+    giftMappings.default.value = ''; // Reset value when type changes
+    populateGiftActionSelect(defaultGiftValue, defaultGiftType.value, '');
+    saveGiftMappings();
+    console.log('✓ Default gift type changed to:', defaultGiftType.value);
+  });
+  
+  // Value changed - save it
+  defaultGiftValue.addEventListener('change', () => {
+    giftMappings.default.value = defaultGiftValue.value;
+    saveGiftMappings();
+    console.log('✓ Default gift action changed to:', defaultGiftValue.value);
+  });
+  
+  // Initial population
+  populateGiftActionSelect(defaultGiftValue, giftMappings.default.type, giftMappings.default.value);
 }
 
 // ─── TikTok Sticker to Animation Mappings ───────────────────────────
@@ -2840,7 +3286,8 @@ function triggerAnimation(trigger, platform, author) {
     return;
   }
 
-  const filename = animationMappings[trigger];
+  const data = animationMappings[trigger];
+  const filename = typeof data === 'string' ? data : data.file;
   console.log(`✅ Found mapping: ${trigger} → ${filename}`);
 
   // Send to server to broadcast to overlay
@@ -2849,7 +3296,7 @@ function triggerAnimation(trigger, platform, author) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      type: 'emotion',
+      type: 'gift',
       trigger: trigger,
       platform: platform,
       author: author

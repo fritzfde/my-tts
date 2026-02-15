@@ -291,6 +291,46 @@
                 </div>
             </div>
 
+            <div class="input-group" style="margin-bottom: 12px;">
+                <label>Gift Triggers (Sounds & Animations)</label>
+                <div style="margin-bottom: 8px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+                    <strong>Priority:</strong> Gift Name > Diamond Value > Default<br>
+                    Map specific gifts or value ranges to sounds or animations.
+                </div>
+                
+                <!-- Default Setting -->
+                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+                    <label style="font-size: 0.875rem; margin-bottom: 8px; display: block;">Default Gift Action</label>
+                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center;">
+                        <select id="defaultGiftType" style="font-size: 0.875rem; padding: 8px;">
+                            <option value="sound">🔊 Sound</option>
+                            <option value="animation">🎬 Animation</option>
+                        </select>
+                        <select id="defaultGiftValue" style="font-size: 0.875rem; padding: 8px;">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- By Gift Name -->
+                <div style="margin-bottom: 16px;">
+                    <label style="font-size: 0.875rem; margin-bottom: 8px; display: block;">By Gift Name</label>
+                    <div id="giftNameMappingsList" style="display: grid; gap: 8px; max-height: 200px; overflow-y: auto;">
+                        <!-- Gift name mappings -->
+                    </div>
+                    <button id="addGiftNameMappingBtn" class="secondary" style="width: 100%; margin-top: 8px;">+ Add Gift Name Mapping</button>
+                </div>
+                
+                <!-- By Diamond Value -->
+                <div style="margin-bottom: 0;">
+                    <label style="font-size: 0.875rem; margin-bottom: 8px; display: block;">By Diamond Value</label>
+                    <div id="giftValueMappingsList" style="display: grid; gap: 8px; max-height: 200px; overflow-y: auto;">
+                        <!-- Value mappings -->
+                    </div>
+                    <button id="addGiftValueMappingBtn" class="secondary" style="width: 100%; margin-top: 8px;">+ Add Value Mapping</button>
+                </div>
+            </div>
+
             <div class="input-group" style="margin-bottom: 0;">
                 <label>OBS Overlay URLs <span style="color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: normal;">(Add these as Browser Source in OBS)</span></label>
                 <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px;">
