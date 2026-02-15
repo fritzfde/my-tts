@@ -33,3 +33,11 @@ logs/
 # -------------------------
 /voices/
 /custom-voices/
+
+
+# -------------------------
+# Application files
+# -------------------------
+animation-config.json
+/animations/*
+copilot-instructions.md

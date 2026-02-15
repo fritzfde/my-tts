@@ -2111,7 +2111,7 @@ async function pollTikTokMessages() {
     };
 
     // Helper function to process a single message
-    const processMessage = async (msg, shouldSpeak = true) => {
+    const processMessage = async (msg, shouldSpeak = true, isFirstPoll = false) => {
       // Cache avatar
       if (msg.authorAvatar) {
         window.userAvatars.set(`tiktok:${msg.author}`, msg.authorAvatar);
@@ -2122,7 +2122,7 @@ async function pollTikTokMessages() {
         const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
         console.log(`🎁 TikTok gift: ${msg.author} — ${msg.giftName} x${msg.repeatCount} (${msg.diamondCount}💎)`);
         addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
-        if (!tiktokIsFirstPoll && window.playGiftSound) window.playGiftSound();
+        if (!isFirstPoll && window.playGiftSound) window.playGiftSound();
         
       } else if (msg.type === 'combined') {
         // Handle text + stickers combined
@@ -2137,11 +2137,8 @@ async function pollTikTokMessages() {
         
         addChatMessage(msg.author, combinedHTML, 'tiktok', false, 'combined', true);
         
-        // Trigger animation ONCE for the first sticker only
-        
-        // Trigger animation ONCE for the first sticker only
-        if (!tiktokIsFirstPoll && msg.emotes.length > 0 && typeof handleStickerAnimation === 'function') {
-          // CHECK PERMISSIONS HERE with platform parameter
+        // Trigger animation ONCE for the first sticker only (SKIP on first poll)
+        if (!isFirstPoll && msg.emotes.length > 0 && typeof handleStickerAnimation === 'function') {
           if (canUserTriggerAnimations(msg.author, 'tiktok')) {
             console.log(`🎬 Triggering animation for combined message from ${msg.author}`);
             handleStickerAnimation({
@@ -2167,9 +2164,8 @@ async function pollTikTokMessages() {
         
         addChatMessage(msg.author, stickersHTML, 'tiktok', false, 'sticker', true);
         
-        // Trigger animation ONCE for the first sticker only
-        if (!tiktokIsFirstPoll && typeof handleStickerAnimation === 'function') {
-          // CHECK PERMISSIONS HERE with platform parameter
+        // Trigger animation ONCE for the first sticker only (SKIP on first poll)
+        if (!isFirstPoll && typeof handleStickerAnimation === 'function') {
           if (canUserTriggerAnimations(msg.author, 'tiktok')) {
             console.log(`🎬 Triggering animation for sticker from ${msg.author}`);
             handleStickerAnimation({
@@ -2217,9 +2213,9 @@ async function pollTikTokMessages() {
         }
       });
 
-      // Process all messages (only speak the last text message)
+      // Process all messages (only speak the last text message, NO ANIMATIONS)
       for (let i = 0; i < messages.length; i++) {
-        await processMessage(messages[i], i === lastTextIndex);
+        await processMessage(messages[i], i === lastTextIndex, true); // ← Pass true for isFirstPoll
       }
       
       return;
@@ -2237,8 +2233,8 @@ async function pollTikTokMessages() {
       // Mark as seen
       tiktokSeenMessages.add(msgId);
 
-      // Process the message
-      await processMessage(msg, true);
+      // Process the message (animations ENABLED)
+      await processMessage(msg, true, false); // ← Pass false for isFirstPoll
     }
 
     // Clean up old seen messages (keep last 1000)
