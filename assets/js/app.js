@@ -2725,6 +2725,7 @@ function saveStickerMappings() {
 function renderStickerMappings() {
   const list = document.getElementById('stickerMappingsList');
   if (!list) return;
+  const availableTriggers = Object.keys(animationMappings);
 
   if (Object.keys(stickerMappings).length === 0) {
     list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No stickers captured yet. Send stickers in TikTok to auto-capture them!</div>';
@@ -2745,7 +2746,8 @@ function renderStickerMappings() {
         <div style="font-size: 0.875rem; color: var(--text-secondary);">${emoteName}</div>
         <select data-emote="${emoteKey}" class="sticker-animation" style="font-size: 0.875rem; padding: 8px;">
           <option value="">🚫 No Animation</option>
-          ${Object.keys(animationMappings).map(trigger =>
+          ${availableTriggers.length === 0 ? '<option value="" disabled>No animation triggers configured yet</option>' : ''}
+          ${availableTriggers.map(trigger =>
             `<option value="${trigger}" ${trigger === animTrigger ? 'selected' : ''}>${trigger}</option>`
           ).join('')}
         </select>
@@ -2822,10 +2824,6 @@ function handleStickerAnimation(msg) {
     triggerAnimation(animTrigger, 'tiktok', msg.author);
   }
 }
-
-
-// Initialize
-loadStickerMappings();
 
 
 // Also hook into YouTube polling
@@ -2980,6 +2978,19 @@ function announceGiftBatch() {
 
 let animationMappings = {}; // trigger → filename
 let availableAnimations = []; // List of .MOV files
+const animationVolumeSlider = document.getElementById('animationVolumeSlider');
+const animationVolumeValue = document.getElementById('animationVolumeValue');
+
+function getAnimationVolumePercent() {
+  if (!animationVolumeSlider) return 100;
+  const value = parseInt(animationVolumeSlider.value, 10);
+  return Number.isFinite(value) ? value : 100;
+}
+
+function updateAnimationVolumeLabel() {
+  if (!animationVolumeSlider || !animationVolumeValue) return;
+  animationVolumeValue.textContent = `${animationVolumeSlider.value}%`;
+}
 
 // Load animation mappings from localStorage
 function loadAnimationMappings() {
@@ -2989,6 +3000,7 @@ function loadAnimationMappings() {
       animationMappings = JSON.parse(saved);
       console.log('✓ Loaded animation mappings:', Object.keys(animationMappings).length);
       renderAnimationMappings();
+      renderStickerMappings();
     } catch (e) {
       console.error('Error loading animation mappings:', e);
     }
@@ -3007,6 +3019,7 @@ async function saveAnimationMappings() {
       mappings: animationMappings,
       globalPosition: document.getElementById('animationPosition')?.value || 'bottom-left',
       globalScale: 1.0,
+      animationVolume: getAnimationVolumePercent(),
       chroma: {
         greenThreshold: parseInt(document.getElementById('greenThreshold')?.value || 70),
         tolerance: parseInt(document.getElementById('chromaTolerance')?.value || 60),
@@ -3189,6 +3202,7 @@ function renderAnimationMappings() {
     });
   });
 
+  renderStickerMappings();
 }
 
 // Add new mapping button
@@ -3227,6 +3241,20 @@ if (animationsEnabledCheckbox) {
   animationsEnabledCheckbox.addEventListener('change', () => {
     localStorage.setItem('animations_enabled', animationsEnabledCheckbox.checked);
     console.log('Animations:', animationsEnabledCheckbox.checked ? 'enabled ✅' : 'disabled ❌');
+  });
+}
+
+if (animationVolumeSlider) {
+  const savedAnimationVolume = localStorage.getItem('animation_volume');
+  if (savedAnimationVolume !== null) {
+    animationVolumeSlider.value = savedAnimationVolume;
+  }
+  updateAnimationVolumeLabel();
+
+  animationVolumeSlider.addEventListener('input', () => {
+    localStorage.setItem('animation_volume', animationVolumeSlider.value);
+    updateAnimationVolumeLabel();
+    saveAnimationMappings();
   });
 }
 
@@ -3315,6 +3343,7 @@ function triggerAnimation(trigger, platform, author) {
 // Initialize animation system
 loadAvailableAnimations();
 loadAnimationMappings();
+loadStickerMappings();
 
 console.log('🎬 Animation system initialized');
 

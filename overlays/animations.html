@@ -139,6 +139,7 @@
     let chromaKeySettings = { greenThreshold: 70, tolerance: 60 };
     let globalPosition = 'bottom-left';
     let globalScale = 1.0;
+    let animationVolume = 100;
     let totalPlayed = 0;
     let lastTrigger = 'None';
 
@@ -156,6 +157,24 @@
     function updateDebugInfo() {
         const mappings = Object.keys(animationMappings).length;
         try { document.getElementById('debugMappings').textContent = mappings; } catch (e) {}
+    }
+
+    function getAnimationGain() {
+        const percent = Number.isFinite(animationVolume) ? animationVolume : 100;
+        return Math.max(0, Math.min(1, percent / 100));
+    }
+
+    function applyTrackedVolume(tracked) {
+        if (!tracked || !tracked.video) return;
+        const gain = getAnimationGain();
+        tracked.video.volume = gain;
+        if (tracked.gainNode) {
+            tracked.gainNode.gain.value = gain;
+        }
+    }
+
+    function applyVolumeToAllActiveAnimations() {
+        currentAnimations.forEach(applyTrackedVolume);
     }
 
     function getPositionStyle(position) {
@@ -215,6 +234,7 @@
         currentAnimations.forEach(t => {
             try { if (t.cancelChroma) t.cancelChroma(); } catch (e) {}
             try { if (t.audioSource) t.audioSource.disconnect(); } catch (e) {}
+            try { if (t.gainNode) t.gainNode.disconnect(); } catch (e) {}
             try { t.video.pause(); t.video.muted = true; t.video.currentTime = 0; } catch (e) {}
             try { t.video.removeAttribute('src'); t.video.src = ''; t.video.load(); } catch (e) {}
             try { if (t.canvas && t.canvas.parentNode) t.canvas.remove(); } catch (e) {}
@@ -263,6 +283,7 @@
 
         const tracked = { video, canvas, cancelChroma: null, audioSource: null };
         currentAnimations.push(tracked);
+        applyTrackedVolume(tracked);
 
         // Hook audio via AudioContext where available
         try {
@@ -270,7 +291,10 @@
             if (ctx) {
                 try {
                     tracked.audioSource = ctx.createMediaElementSource(video);
-                    tracked.audioSource.connect(ctx.destination);
+                    tracked.gainNode = ctx.createGain();
+                    tracked.audioSource.connect(tracked.gainNode);
+                    tracked.gainNode.connect(ctx.destination);
+                    tracked.gainNode.gain.value = getAnimationGain();
                     if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
                     console.log('Connected audio for', filename);
                 } catch (e) { console.warn('createMediaElementSource failed', e); }
@@ -326,6 +350,7 @@
             setTimeout(() => {
                 try { if (tracked.cancelChroma) tracked.cancelChroma(); } catch (e) {}
                 try { if (tracked.audioSource) tracked.audioSource.disconnect(); } catch (e) {}
+                try { if (tracked.gainNode) tracked.gainNode.disconnect(); } catch (e) {}
                 try { video.pause(); } catch (e) {}
                 try { video.removeAttribute('src'); video.src = ''; video.load(); } catch (e) {}
                 if (canvas.parentNode) canvas.remove();
@@ -338,6 +363,7 @@
         video.addEventListener('error', (err) => {
             console.error('Video error', err);
             try { if (tracked.audioSource) tracked.audioSource.disconnect(); } catch (e) {}
+            try { if (tracked.gainNode) tracked.gainNode.disconnect(); } catch (e) {}
             try { if (tracked.cancelChroma) tracked.cancelChroma(); } catch (e) {}
             if (canvas.parentNode) canvas.remove();
             if (video.parentNode) video.remove();
@@ -358,7 +384,15 @@
         const es = new EventSource('/overlay/animations/stream');
         es.onopen = () => console.log('Connected to animation stream');
         es.onmessage = e => {
-            try { const d = JSON.parse(e.data); if (d.type === 'animation' && d.trigger) playAnimation(d.trigger); } catch (err) { console.error('parse', err); }
+            try {
+                const d = JSON.parse(e.data);
+                if (d.type === 'animation' && d.trigger) playAnimation(d.trigger);
+                if (d.type === 'config' && d.config) {
+                    animationVolume = d.config.animationVolume ?? animationVolume;
+                    applyVolumeToAllActiveAnimations();
+                    console.log('Animation config updated, volume =', animationVolume);
+                }
+            } catch (err) { console.error('parse', err); }
         };
         es.onerror = err => { console.error('SSE error', err); es.close(); setTimeout(connectToAnimationStream, 3000); };
     }
@@ -374,6 +408,7 @@
             chromaKeySettings = cfg.chroma || chromaKeySettings;
             globalPosition = cfg.globalPosition || globalPosition;
             globalScale = cfg.globalScale || globalScale;
+            animationVolume = cfg.animationVolume ?? animationVolume;
             updateDebugInfo();
         } catch (e) { console.warn('failed loading config', e); }
         connectToAnimationStream();

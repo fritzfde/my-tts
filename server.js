@@ -515,6 +515,7 @@ function initConfigFile() {
         "mappings": {},
         "globalPosition": "bottom-left",
         "globalScale": 1.0,
+        "animationVolume": 100,
         "chroma": {
           "greenThreshold": 70,
           "tolerance": 60,
@@ -556,11 +557,22 @@ app.post('/api/animations/config/:name', (req, res) => {
         mappings: req.body.mappings || {},
         globalPosition: req.body.globalPosition || 'bottom-left',
         globalScale: req.body.globalScale || 1.0,
+        animationVolume: req.body.animationVolume ?? 100,
         chroma: req.body.chroma || { greenThreshold: 70, tolerance: 60, spillReduction: 0.5 }
     };
 
     fs.writeFileSync(CONFIG_FILE, JSON.stringify(allConfigs, null, 2));
     console.log(`✓ Saved animation config: ${req.params.name}`);
+
+    const payload = JSON.stringify({ type: 'config', config: allConfigs[req.params.name] });
+    animationClients.forEach(client => {
+      try {
+        client.res.write(`data: ${payload}\n\n`);
+      } catch (err) {
+        console.error('Error sending config update to animation client:', err);
+      }
+    });
+
     res.json({ success: true });
   } catch (err) {
     console.error('Config save error:', err);
