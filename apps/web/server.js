@@ -6,6 +6,36 @@ const fs = require('fs');
 const app = express();
 const PORT = 3000;
 
+function loadRootEnv() {
+  const envPath = path.resolve(__dirname, '../../.env');
+  if (!fs.existsSync(envPath)) return;
+
+  const content = fs.readFileSync(envPath, 'utf8');
+  content.split('\n').forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return;
+
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex < 1) return;
+
+    const key = trimmed.slice(0, eqIndex).trim();
+    let value = trimmed.slice(eqIndex + 1).trim();
+
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  });
+}
+
+loadRootEnv();
+
+const TTS_SERVER_URL = (process.env.TTS_SERVER_URL || 'http://127.0.0.1:5000').replace(/\/+$/, '');
+const TTS_TIMEOUT_MS = 60000;
+
 const { WebcastPushConnection } = require('tiktok-live-connector');
 
 app.use(cors());
@@ -60,9 +90,10 @@ app.post('/api/voice-clone/tts', async (req, res) => {
       });
     }
 
-    console.log('📡 Forwarding request to Python TTS server (127.0.0.1:5000)...');
+    const ttsEndpoint = `${TTS_SERVER_URL}/tts`;
+    console.log(`📡 Forwarding request to Python TTS server (${ttsEndpoint})...`);
 
-    const pythonResponse = await fetch('http://127.0.0.1:5000/tts', {
+    const pythonResponse = await fetch(ttsEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -70,7 +101,7 @@ app.post('/api/voice-clone/tts', async (req, res) => {
         text: text,
         language: req.body.language || 'en'
       }),
-      signal: AbortSignal.timeout(60000)
+      signal: AbortSignal.timeout(TTS_TIMEOUT_MS)
     });
 
     if (!pythonResponse.ok) {
@@ -102,7 +133,7 @@ app.post('/api/voice-clone/tts', async (req, res) => {
     if (error.cause && error.cause.code === 'ECONNREFUSED') {
       return res.status(503).json({
         error: 'Cannot connect to Python server',
-        solution: 'Is tts_server.py running on port 5000?'
+        solution: `Is tts_server.py running at ${TTS_SERVER_URL}?`
       });
     }
 

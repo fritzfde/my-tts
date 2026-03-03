@@ -5,7 +5,6 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-package-lock.json
 yarn.lock
 
 # -------------------------
@@ -27,17 +26,22 @@ yarn.lock
 # -------------------------
 logs/
 *.log
+.env
 
 # -------------------------
 # Local voices / temp files
 # -------------------------
-/voices/
-/custom-voices/
+apps/web/voices/*
+!apps/web/voices/elon.wav
+!apps/web/voices/trump.wav
+apps/web/custom-voices/
 
 
 # -------------------------
 # Application files
 # -------------------------
 animation-config.json
-/animations/*
+apps/web/animations/*
+!apps/web/animations/elon.mov
+!apps/web/animations/trump.mov
 copilot-instructions.md

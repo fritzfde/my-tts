@@ -1,6 +1,14 @@
-# YouTube Live Chat Text-to-Speech Reader
+# My TTS Platform
 
-A modern web application that reads YouTube live stream chat messages aloud using text-to-speech with AI voice options.
+Monorepo for a chat-to-speech web app plus a Python TTS service.
+
+## Repository Structure
+
+```text
+apps/web/       # Node/Express app + frontend + overlays
+services/tts/   # Python TTS service code
+scripts/        # Startup/orchestration scripts
+```
 
 ## ✨ Features
 
@@ -17,13 +25,28 @@ A modern web application that reads YouTube live stream chat messages aloud usin
 ### 1. Install Node.js
 Download from: https://nodejs.org/
 
-### 2. Install Dependencies
-Open a terminal in this folder and run:
+### 1.1 Install Python 3.10 (recommended for XTTS)
+`services/tts/requirements.txt` targets Python 3.10-compatible packages.
+
+### 2. Install Web Dependencies
+From repo root, run:
 ```bash
-npm install
+npm --prefix apps/web install
 ```
 
-### 3. Get YouTube API Key
+### 3. Configure Environment
+Create/update `.env` in repo root:
+```bash
+cp .env.example .env
+```
+
+### 4. Setup Python TTS Environment
+Run once to create `services/tts/myenv` and install requirements:
+```bash
+npm run setup:tts
+```
+
+### 5. Get YouTube API Key
 1. Go to: https://console.cloud.google.com/apis/credentials
 2. Create a new project (or select an existing one)
 3. Click "Enable APIs and Services"
@@ -37,21 +60,26 @@ npm install
 - Under "API restrictions", select "Restrict key"
 - Enable only "YouTube Data API v3"
 
-### 4. Get ElevenLabs API Key (Optional - for Real AI Voices)
+### 6. Get ElevenLabs API Key (Optional - for Real AI Voices)
 1. Go to: https://elevenlabs.io/
 2. Sign up for a free account
 3. Go to your profile → API Keys
 4. Copy your API key
 5. Note: Free tier includes 10,000 characters/month
 
-### 5. Start the Server
+### 7. Start the App
+Start both Python TTS + Node app:
 ```bash
-npm start
+npm run start:all
 ```
 
-The server will start at: http://localhost:3000
+Or for faster daily dev, run in separate terminals:
+```bash
+npm run start:tts
+npm run start:web
+```
 
-### 6. Open the App
+### 8. Open the App
 Open your browser and go to: http://localhost:3000/index.html
 
 ## How to Use
@@ -95,8 +123,9 @@ Without ElevenLabs API key, these use simulated voices with modified pitch/rate.
 ## Troubleshooting
 
 ### "Failed to fetch" error
-- Make sure the Node.js server is running (`npm start`)
+- Make sure the app is running (`npm run start:all` or `npm run start:web`)
 - Check that you're accessing http://localhost:3000/index.html
+- If TTS is failing, verify Python service is up with `npm run start:tts`
 
 ### "No live streams found"
 - Make sure you have an active live stream running on your channel

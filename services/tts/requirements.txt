@@ -1,0 +1,10 @@
+# Requires Python 3.10.x
+flask
+TTS==0.22.0
+torch==2.2.2
+torchaudio==2.2.2
+transformers==4.33.3
+tokenizers==0.13.3
+soundfile
+sounddevice
+numpy

@@ -555,7 +555,7 @@ function loadSettings() {
   if (savedTikTokUsername) document.getElementById('tiktokUsername').value = savedTikTokUsername;
 
   const savedTestMessage = localStorage.getItem('yt_tts_test_message');
-  testMessageInput.value = savedTestMessage || 'Hello! This is a test of the text-to-speech voice.';
+  testMessageInput.value = savedTestMessage || 'Are you already subscribe to my YouTube? Wait, what!? Bro!';
 
   const savedVolume = localStorage.getItem('yt_tts_volume');
   volumeSlider.value = savedVolume || '100';
