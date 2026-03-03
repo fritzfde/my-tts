@@ -362,10 +362,19 @@
                 <div style="margin-bottom: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
                     Map emojis/stickers to .MOV files. For YouTube, uses LLM to detect emotions. For TikTok, uses actual emote names.
                 </div>
-                <div id="animationMappingsList" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-height: 500px; overflow-y: auto; padding-right: 5px;">
+                <div id="animationMappingsList" class="animation-mappings-grid" style="max-height: 500px; overflow-y: auto; padding-right: 5px;">
                     <!-- Mapping items will be added here dynamically -->
                 </div>
-                <button id="addAnimationMappingBtn" class="secondary" style="width: 100%; margin-top: 8px;">+ Add Mapping</button>
+                <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 8px;">
+                    <select id="newAnimationMappingFile" style="font-size: 0.875rem; padding: 8px;">
+                        <option value="">Select animation file</option>
+                    </select>
+                    <button id="addAnimationMappingBtn" class="secondary">+ Add Mapping</button>
+                    <button id="autoMapAnimationsBtn" class="secondary">⚡ Auto-Map All</button>
+                </div>
+                <div style="margin-top: 8px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+                    ⚠️ Auto-map and filename-based add use trigger names from file names. If a trigger already exists, that mapping will be overwritten.
+                </div>
             </div>
 
             <div class="input-group" style="margin-bottom: 12px;">

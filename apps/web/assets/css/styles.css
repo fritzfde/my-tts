@@ -624,3 +624,115 @@ input[type="range"] {
     border-color: #ffaa00;
   }
 }
+
+/* Animation mapping cards and thumbnails */
+.animation-mappings-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.animation-mapping-card {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  align-items: stretch;
+}
+
+.animation-thumb-btn {
+  position: relative;
+  width: 100%;
+  height: 110px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #111;
+  cursor: pointer;
+}
+
+.animation-thumb-btn:hover {
+  border-color: #3b82f6;
+}
+
+.animation-thumb-video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.animation-thumb-overlay {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+}
+
+.animation-mapping-bottom {
+  display: grid;
+  grid-template-columns: 1fr minmax(120px, 140px);
+  gap: 6px;
+}
+
+.animation-mapping-left {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 6px;
+}
+
+.animation-mapping-right {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 6px;
+}
+
+.animation-mapping-actions {
+  display: grid;
+  grid-template-columns: 68px 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
+.animation-mapping-actions .mapping-scale {
+  width: 100%;
+}
+
+.animation-mapping-actions .remove-mapping-btn {
+  white-space: nowrap;
+}
+
+@media (max-width: 1200px) {
+  .animation-mappings-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .animation-mappings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .animation-mappings-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .animation-mapping-bottom {
+    grid-template-columns: 1fr;
+  }
+
+  .animation-mapping-actions {
+    grid-template-columns: 68px 1fr;
+  }
+}
