@@ -512,9 +512,17 @@ app.use('/sounds', express.static(path.join(__dirname, 'sounds')));
 // Upload custom sound
 const multer = require('multer');
 const { log } = require('console');
+function getCustomSoundsDir() {
+    return path.join(__dirname, 'sounds', 'custom');
+}
+
+function isSafeSoundFilename(filename) {
+    return /^[a-zA-Z0-9._-]+\.(mp3|wav|ogg)$/i.test(String(filename || ''));
+}
+
 const soundStorage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const soundsDir = path.join(__dirname, 'sounds', 'custom');
+        const soundsDir = getCustomSoundsDir();
         if (!fs.existsSync(soundsDir)) {
             fs.mkdirSync(soundsDir, { recursive: true });
         }
@@ -556,7 +564,7 @@ app.post('/api/sounds/upload', soundUpload.single('sound'), (req, res) => {
 // Get available sounds
 app.get('/api/sounds/list', (req, res) => {
     const soundsDir = path.join(__dirname, 'sounds');
-    const customDir = path.join(soundsDir, 'custom');
+    const customDir = getCustomSoundsDir();
 
     const builtIn = fs.existsSync(soundsDir)
         ? fs.readdirSync(soundsDir).filter(f => f.match(/\.(mp3|wav|ogg)$/i))
@@ -570,6 +578,32 @@ app.get('/api/sounds/list', (req, res) => {
         builtIn: builtIn.map(f => ({ name: f, path: `/sounds/${f}` })),
         custom: custom.map(f => ({ name: f, path: `/sounds/custom/${f}` }))
     });
+});
+
+// Delete a custom sound
+app.delete('/api/sounds/custom/:filename', (req, res) => {
+    const filename = req.params.filename;
+    if (!isSafeSoundFilename(filename)) {
+        return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const customDir = getCustomSoundsDir();
+    const filePath = path.join(customDir, filename);
+
+    if (!filePath.startsWith(customDir + path.sep)) {
+        return res.status(400).json({ error: 'Invalid path' });
+    }
+    if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ error: 'Sound not found' });
+    }
+
+    try {
+        fs.unlinkSync(filePath);
+        res.json({ success: true, filename });
+    } catch (err) {
+        console.error('Delete sound error:', err);
+        res.status(500).json({ error: 'Failed to delete sound' });
+    }
 });
 
 // --- TIKTOK LOGIC END ---

@@ -1420,10 +1420,21 @@ window.closeVoiceModal = function() {
   document.getElementById('voiceModal').style.display = 'none';
 };
 
+function setVoiceModalHeader(title, subtitle) {
+  const titleEl = document.getElementById('voiceModalTitle');
+  const subtitleEl = document.getElementById('voiceModalSubtitle');
+  if (titleEl) titleEl.textContent = title;
+  if (subtitleEl) subtitleEl.textContent = subtitle;
+}
+
 // Manage voices button
 document.getElementById('manageVoicesBtn').addEventListener('click', function() {
   const modal = document.getElementById('voiceModal');
   const list = document.getElementById('userVoiceList');
+  setVoiceModalHeader(
+    'Manage User Voices',
+    'Assign specific voices to users from any platform.'
+  );
 
   if (recentUsers.length === 0) {
     list.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No recent users yet.</p>';
@@ -1486,12 +1497,15 @@ if (globalAnimationTriggerCheckbox) {
 document.getElementById('manageAnimationPermissionsBtn')?.addEventListener('click', () => {
   const modal = document.getElementById('voiceModal');
   const list = document.getElementById('userVoiceList');
+  setVoiceModalHeader(
+    'Per-User Animation Permissions',
+    'Control which users can trigger animations with stickers.'
+  );
   
   if (recentUsers.length === 0) {
     list.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No recent users yet.</p>';
   } else {
     list.innerHTML = `
-      <h3 style="margin-bottom: 12px;">Animation Trigger Permissions</h3>
       <div style="margin-bottom: 16px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
         <strong>Default:</strong> Follow global setting (currently ${globalAnimationTriggerEnabled ? 'enabled' : 'disabled'})<br>
         <strong>Allow:</strong> Can trigger animations even if global is disabled<br>
@@ -1697,6 +1711,50 @@ setTimeout(async () => {
 const giftSoundSelect = document.getElementById('giftSoundSelect');
 const customSoundUpload = document.getElementById('customSoundUpload');
 const uploadSoundBtn = document.getElementById('uploadSoundBtn');
+const customSoundManageSelect = document.getElementById('customSoundManageSelect');
+const deleteCustomSoundBtn = document.getElementById('deleteCustomSoundBtn');
+const giftSoundSelectBaseMarkup = giftSoundSelect ? giftSoundSelect.innerHTML : '';
+let customGiftSounds = [];
+
+function populateCustomSoundManageSelect(selectedFilename = '') {
+  if (!customSoundManageSelect) return;
+
+  customSoundManageSelect.innerHTML = '<option value="">Custom sounds...</option>';
+  customGiftSounds.forEach(sound => {
+    const option = document.createElement('option');
+    option.value = sound.filename;
+    option.textContent = `🎵 ${sound.filename}`;
+    if (selectedFilename && sound.filename === selectedFilename) {
+      option.selected = true;
+    }
+    customSoundManageSelect.appendChild(option);
+  });
+
+  if (!selectedFilename && customGiftSounds.length === 0) {
+    customSoundManageSelect.value = '';
+  }
+}
+
+function rebuildGiftSoundSelect(selectedValue = '') {
+  if (!giftSoundSelect) return;
+
+  const preferredValue = selectedValue || settingsStore.getItem('gift_sound_preference') || giftSoundSelect.value || '';
+  giftSoundSelect.innerHTML = giftSoundSelectBaseMarkup;
+
+  customGiftSounds.forEach(sound => {
+    const option = document.createElement('option');
+    option.value = `custom-${sound.path}`;
+    option.textContent = `🎵 ${sound.filename}`;
+    giftSoundSelect.appendChild(option);
+  });
+
+  const hasPreferred = Array.from(giftSoundSelect.options).some(opt => opt.value === preferredValue);
+  giftSoundSelect.value = hasPreferred ? preferredValue : '';
+  settingsStore.setItem('gift_sound_preference', giftSoundSelect.value);
+
+  populateCustomSoundManageSelect();
+  renderGiftMappings();
+}
 
 // Play gift sound when gifts are received
 function playGiftSound() {
@@ -1857,7 +1915,7 @@ function playBuiltInSound(type) {
 // Upload custom sound
 if (uploadSoundBtn) {
   uploadSoundBtn.addEventListener('click', async () => {
-    const file = customSoundUpload.files[0];
+    const file = customSoundUpload?.files?.[0];
 
     if (!file) {
       updateStatus('Please select a sound file first', false, true);
@@ -1879,16 +1937,12 @@ if (uploadSoundBtn) {
       const data = await response.json();
 
       if (data.success) {
-        const option = document.createElement('option');
-        option.value = `custom-${data.path}`;
-        option.textContent = `🎵 ${data.filename}`;
-        giftSoundSelect.appendChild(option);
-        giftSoundSelect.value = option.value;
-
-        settingsStore.setItem('gift_sound_preference', option.value);
+        const uploadedSoundValue = `custom-${data.path}`;
+        settingsStore.setItem('gift_sound_preference', uploadedSoundValue);
+        await loadCustomSounds(uploadedSoundValue);
 
         updateStatus(`✓ Sound uploaded: ${data.filename}`, false);
-        customSoundUpload.value = '';
+        if (customSoundUpload) customSoundUpload.value = '';
 
       } else {
         throw new Error(data.error || 'Upload failed');
@@ -1905,25 +1959,17 @@ if (uploadSoundBtn) {
 }
 
 // Load available custom sounds
-async function loadCustomSounds() {
+async function loadCustomSounds(selectedSoundOverride = '') {
   try {
     const response = await fetch('/api/sounds/list');
     const data = await response.json();
 
-    if (giftSoundSelect && data.custom && data.custom.length > 0) {
-      data.custom.forEach(sound => {
-        const option = document.createElement('option');
-        option.value = `custom-${sound.path}`;
-        option.textContent = `🎵 ${sound.name}`;
-        giftSoundSelect.appendChild(option);
-      });
-    }
+    customGiftSounds = (data.custom || []).map(sound => ({
+      filename: sound.name,
+      path: sound.path
+    }));
 
-    const savedSound = settingsStore.getItem('gift_sound_preference');
-    if (giftSoundSelect && savedSound) {
-      const hasOption = Array.from(giftSoundSelect.options).some(opt => opt.value === savedSound);
-      if (hasOption) giftSoundSelect.value = savedSound;
-    }
+    rebuildGiftSoundSelect(selectedSoundOverride);
 
   } catch (error) {
     console.error('Error loading custom sounds:', error);
@@ -1934,6 +1980,65 @@ async function loadCustomSounds() {
 if (giftSoundSelect) {
   giftSoundSelect.addEventListener('change', () => {
     settingsStore.setItem('gift_sound_preference', giftSoundSelect.value);
+    renderGiftMappings();
+  });
+}
+
+if (deleteCustomSoundBtn) {
+  deleteCustomSoundBtn.addEventListener('click', async () => {
+    const filename = customSoundManageSelect?.value || '';
+    if (!filename) {
+      updateStatus('Select a custom sound to delete', false, true);
+      return;
+    }
+
+    const shouldDelete = confirm(`Delete custom sound "${filename}"?`);
+    if (!shouldDelete) return;
+
+    try {
+      deleteCustomSoundBtn.disabled = true;
+      deleteCustomSoundBtn.textContent = 'Deleting...';
+
+      const response = await fetch(`/api/sounds/custom/${encodeURIComponent(filename)}`, {
+        method: 'DELETE'
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Delete failed');
+      }
+
+      const removedSoundValue = `custom-/sounds/custom/${filename}`;
+
+      if (giftSoundSelect && giftSoundSelect.value === removedSoundValue) {
+        settingsStore.setItem('gift_sound_preference', '');
+      }
+
+      if (typeof giftMappings === 'object' && giftMappings) {
+        if (giftMappings.default?.type === 'sound' && giftMappings.default.value === removedSoundValue) {
+          giftMappings.default.value = '';
+        }
+        Object.values(giftMappings.byName || {}).forEach(entry => {
+          if (entry?.type === 'sound' && entry.value === removedSoundValue) {
+            entry.value = '';
+          }
+        });
+        Object.values(giftMappings.byValue || {}).forEach(entry => {
+          if (entry?.type === 'sound' && entry.value === removedSoundValue) {
+            entry.value = '';
+          }
+        });
+        saveGiftMappings();
+      }
+
+      await loadCustomSounds();
+      updateStatus(`✓ Sound deleted: ${filename}`, false);
+    } catch (error) {
+      console.error('Delete custom sound error:', error);
+      updateStatus(`Delete failed: ${error.message}`, false, true);
+    } finally {
+      deleteCustomSoundBtn.disabled = false;
+      deleteCustomSoundBtn.textContent = '🗑️ Delete';
+    }
   });
 }
 
@@ -2422,297 +2527,27 @@ async function pollTikTokMessages() {
   }
 }
 
-// Populate sound/animation options
-function populateGiftActionSelect(selectElement, currentType, currentValue) {
+function populateGiftSoundOptions(selectElement, selectedValue) {
   if (!selectElement) return;
-  
+
   selectElement.innerHTML = '';
-  
-  if (currentType === 'sound') {
-    // Add sound options
-    const soundSelect = document.getElementById('giftSoundSelect');
-    if (soundSelect) {
-      Array.from(soundSelect.options).forEach(opt => {
-        const option = document.createElement('option');
-        option.value = opt.value;
-        option.textContent = opt.textContent;
-        option.selected = opt.value === currentValue;
-        selectElement.appendChild(option);
-      });
-    }
-  } else if (currentType === 'animation') {
-    // Add animation options
-    Object.keys(animationMappings).forEach(trigger => {
-      const option = document.createElement('option');
-      option.value = trigger;
-      option.textContent = `🎬 ${trigger}`;
-      option.selected = trigger === currentValue;
-      selectElement.appendChild(option);
-    });
-  }
-}
+  const soundSelect = document.getElementById('giftSoundSelect');
+  if (!soundSelect) return;
 
-// Render gift name mappings
-function renderGiftNameMappings() {
-  const list = document.getElementById('giftNameMappingsList');
-  if (!list) return;
-  
-  if (Object.keys(giftMappings.byName).length === 0) {
-    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No gift name mappings yet.</div>';
-    return;
-  }
-  
-  list.innerHTML = Object.entries(giftMappings.byName).map(([giftName, action]) => {
-    const uniqueId = `gift-name-${giftName.replace(/\s/g, '-')}`;
-    
-    return `
-      <div style="display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; align-items: center;">
-        <input type="text" value="${giftName}" data-gift="${giftName}" class="gift-name-input" placeholder="Gift Name" style="font-size: 0.875rem; padding: 8px;">
-        <select data-gift="${giftName}" class="gift-type-select" style="font-size: 0.75rem; padding: 6px;">
-          <option value="sound" ${action.type === 'sound' ? 'selected' : ''}>🔊 Sound</option>
-          <option value="animation" ${action.type === 'animation' ? 'selected' : ''}>🎬 Animation</option>
-        </select>
-        <select id="${uniqueId}-value" data-gift="${giftName}" class="gift-value-select" style="font-size: 0.875rem; padding: 8px;">
-          <!-- Populated by populateGiftActionSelect -->
-        </select>
-        <button class="secondary remove-gift-name-btn" data-gift="${giftName}" style="padding: 6px 12px; font-size: 0.75rem;">🗑️</button>
-      </div>
-    `;
-  }).join('');
-  
-  // Populate value selects
-  Object.entries(giftMappings.byName).forEach(([giftName, action]) => {
-    const uniqueId = `gift-name-${giftName.replace(/\s/g, '-')}`;
-    const select = document.getElementById(`${uniqueId}-value`);
-    if (select) {
-      populateGiftActionSelect(select, action.type, action.value);
-    }
+  Array.from(soundSelect.options).forEach(opt => {
+    const option = document.createElement('option');
+    option.value = opt.value;
+    option.textContent = opt.textContent;
+    option.selected = opt.value === selectedValue;
+    selectElement.appendChild(option);
   });
-  
-  // Add event listeners
-  attachGiftNameListeners();
 }
 
-// Render gift value mappings
-function renderGiftValueMappings() {
-  const list = document.getElementById('giftValueMappingsList');
-  if (!list) return;
-  
-  if (Object.keys(giftMappings.byValue).length === 0) {
-    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No value mappings yet.</div>';
-    return;
-  }
-  
-  list.innerHTML = Object.entries(giftMappings.byValue).map(([value, action]) => {
-    const uniqueId = `gift-value-${value}`;
-    
-    return `
-      <div style="display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; align-items: center;">
-        <input type="number" min="1" value="${value}" data-value="${value}" class="gift-value-input" placeholder="Diamonds" style="font-size: 0.875rem; padding: 8px; width: 80px;">
-        <select data-value="${value}" class="gift-value-type-select" style="font-size: 0.75rem; padding: 6px;">
-          <option value="sound" ${action.type === 'sound' ? 'selected' : ''}>🔊</option>
-          <option value="animation" ${action.type === 'animation' ? 'selected' : ''}>🎬</option>
-        </select>
-        <select id="${uniqueId}-action" data-value="${value}" class="gift-value-action-select" style="font-size: 0.875rem; padding: 8px;">
-          <!-- Populated by populateGiftActionSelect -->
-        </select>
-        <button class="secondary remove-gift-value-btn" data-value="${value}" style="padding: 6px 12px; font-size: 0.75rem;">🗑️</button>
-      </div>
-    `;
-  }).join('');
-  
-  // Populate action selects
-  Object.entries(giftMappings.byValue).forEach(([value, action]) => {
-    const uniqueId = `gift-value-${value}`;
-    const select = document.getElementById(`${uniqueId}-action`);
-    if (select) {
-      populateGiftActionSelect(select, action.type, action.value);
-    }
-  });
-  
-  // Add event listeners
-  attachGiftValueListeners();
-}
-
-// Combined render function
 function renderGiftMappings() {
-  renderGiftNameMappings();
-  renderGiftValueMappings();
-  
-  // Update default select
-  const defaultType = document.getElementById('defaultGiftType');
   const defaultValue = document.getElementById('defaultGiftValue');
-  
-  if (defaultType && defaultValue) {
-    defaultType.value = giftMappings.default.type;
-    populateGiftActionSelect(defaultValue, giftMappings.default.type, giftMappings.default.value);
-  }
-}
-
-
-
-// Attach event listeners for gift name mappings
-function attachGiftNameListeners() {
-  const list = document.getElementById('giftNameMappingsList');
-  if (!list) return;
-  
-  // Type select change
-  list.querySelectorAll('.gift-type-select').forEach(select => {
-    select.addEventListener('change', (e) => {
-      const giftName = e.target.dataset.gift;
-      const newType = e.target.value;
-      
-      // Update type and reset value
-      giftMappings.byName[giftName].type = newType;
-      giftMappings.byName[giftName].value = '';
-      
-      // Repopulate the value select
-      const uniqueId = `gift-name-${giftName.replace(/\s/g, '-')}`;
-      const valueSelect = document.getElementById(`${uniqueId}-value`);
-      if (valueSelect) {
-        populateGiftActionSelect(valueSelect, newType, '');
-      }
-      
-      saveGiftMappings();
-      console.log(`✓ Gift type changed: ${giftName} → ${newType}`);
-    });
-  });
-  
-  // Value select change
-  list.querySelectorAll('.gift-value-select').forEach(select => {
-    select.addEventListener('change', (e) => {
-      const giftName = e.target.dataset.gift;
-      giftMappings.byName[giftName].value = e.target.value;
-      saveGiftMappings();
-      console.log(`✓ Gift action changed: ${giftName} → ${e.target.value}`);
-    });
-  });
-  
-  // Name input change
-  list.querySelectorAll('.gift-name-input').forEach(input => {
-    input.addEventListener('change', (e) => {
-      const oldName = e.target.dataset.gift;
-      const newName = e.target.value.trim();
-      
-      if (newName && newName !== oldName) {
-        // Move mapping to new name
-        giftMappings.byName[newName] = giftMappings.byName[oldName];
-        delete giftMappings.byName[oldName];
-        saveGiftMappings();
-        renderGiftMappings();
-        console.log(`✓ Renamed gift: ${oldName} → ${newName}`);
-      }
-    });
-  });
-  
-  // Remove button
-  list.querySelectorAll('.remove-gift-name-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const giftName = e.target.dataset.gift;
-      delete giftMappings.byName[giftName];
-      saveGiftMappings();
-      renderGiftMappings();
-      console.log(`✓ Removed gift mapping: ${giftName}`);
-    });
-  });
-}
-
-// Attach event listeners for gift value mappings
-function attachGiftValueListeners() {
-  const list = document.getElementById('giftValueMappingsList');
-  if (!list) return;
-  
-  // Type select change
-  list.querySelectorAll('.gift-value-type-select').forEach(select => {
-    select.addEventListener('change', (e) => {
-      const value = e.target.dataset.value;
-      const newType = e.target.value;
-      
-      // Update type and reset action
-      giftMappings.byValue[value].type = newType;
-      giftMappings.byValue[value].value = '';
-      
-      // Repopulate the action select
-      const uniqueId = `gift-value-${value}`;
-      const actionSelect = document.getElementById(`${uniqueId}-action`);
-      if (actionSelect) {
-        populateGiftActionSelect(actionSelect, newType, '');
-      }
-      
-      saveGiftMappings();
-      console.log(`✓ Value type changed: ${value}💎 → ${newType}`);
-    });
-  });
-  
-  // Action select change
-  list.querySelectorAll('.gift-value-action-select').forEach(select => {
-    select.addEventListener('change', (e) => {
-      const value = e.target.dataset.value;
-      giftMappings.byValue[value].value = e.target.value;
-      saveGiftMappings();
-      console.log(`✓ Value action changed: ${value}💎 → ${e.target.value}`);
-    });
-  });
-  
-  // Value input change
-  list.querySelectorAll('.gift-value-input').forEach(input => {
-    input.addEventListener('change', (e) => {
-      const oldValue = e.target.dataset.value;
-      const newValue = e.target.value.trim();
-      
-      if (newValue && newValue !== oldValue) {
-        // Move mapping to new value
-        giftMappings.byValue[newValue] = giftMappings.byValue[oldValue];
-        delete giftMappings.byValue[oldValue];
-        saveGiftMappings();
-        renderGiftMappings();
-        console.log(`✓ Changed value: ${oldValue}💎 → ${newValue}💎`);
-      }
-    });
-  });
-  
-  // Remove button
-  list.querySelectorAll('.remove-gift-value-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const value = e.target.dataset.value;
-      delete giftMappings.byValue[value];
-      saveGiftMappings();
-      renderGiftMappings();
-      console.log(`✓ Removed value mapping: ${value}💎`);
-    });
-  });
-}
-
-// Add Gift Name Mapping button
-const addGiftNameMappingBtn = document.getElementById('addGiftNameMappingBtn');
-if (addGiftNameMappingBtn) {
-  addGiftNameMappingBtn.addEventListener('click', () => {
-    const giftName = prompt('Enter gift name (e.g., "Rose", "TOFU Cat"):');
-    if (giftName && giftName.trim()) {
-      const name = giftName.trim();
-      giftMappings.byName[name] = { type: 'sound', value: '' };
-      saveGiftMappings();
-      renderGiftMappings();
-      console.log(`✓ Added gift mapping: ${name}`);
-    }
-  });
-}
-
-// Add Gift Value Mapping button
-const addGiftValueMappingBtn = document.getElementById('addGiftValueMappingBtn');
-if (addGiftValueMappingBtn) {
-  addGiftValueMappingBtn.addEventListener('click', () => {
-    const value = prompt('Enter diamond value (e.g., 1, 5, 10):');
-    if (value && !isNaN(value) && parseInt(value) > 0) {
-      const diamonds = parseInt(value);
-      giftMappings.byValue[diamonds] = { type: 'sound', value: '' };
-      saveGiftMappings();
-      renderGiftMappings();
-      console.log(`✓ Added value mapping: ${diamonds}💎`);
-    } else if (value) {
-      alert('Please enter a valid number greater than 0');
-    }
-  });
+  giftMappings.default.type = 'sound';
+  if (!defaultValue) return;
+  populateGiftSoundOptions(defaultValue, giftMappings.default.value);
 }
 
 
@@ -2725,17 +2560,73 @@ let giftMappings = {
   byValue: {},     // diamondCount → { type: 'sound'|'animation', value: '...' }
   default: { type: 'sound', value: '' }  // Default behavior (empty = current gift sound setting)
 };
+const giftCycleState = {
+  byName: {},
+  byValue: {}
+};
+
+function toAnimationTriggerList(value) {
+  if (Array.isArray(value)) {
+    return value.filter(v => typeof v === 'string' && v.trim()).map(v => v.trim());
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return [value.trim()];
+  }
+  return [];
+}
+
+function normalizeGiftAction(action) {
+  if (!action || typeof action !== 'object') {
+    return { type: 'sound', value: '' };
+  }
+
+  if (action.type === 'animation') {
+    const unique = Array.from(new Set(toAnimationTriggerList(action.value)));
+    if (unique.length > 1) {
+      return { type: 'animation', value: unique };
+    }
+    return { type: 'animation', value: unique[0] || '' };
+  }
+
+  return {
+    type: 'sound',
+    value: typeof action.value === 'string' ? action.value : ''
+  };
+}
+
+function normalizeGiftMappings(raw) {
+  const byName = {};
+  const byValue = {};
+  const normalizedDefault = normalizeGiftAction(raw?.default || { type: 'sound', value: '' });
+  const defaultSoundValue = normalizedDefault.type === 'sound' ? normalizedDefault.value : '';
+
+  Object.entries(raw?.byName || {}).forEach(([giftName, action]) => {
+    byName[giftName] = normalizeGiftAction(action);
+  });
+
+  Object.entries(raw?.byValue || {}).forEach(([diamondValue, action]) => {
+    byValue[diamondValue] = normalizeGiftAction(action);
+  });
+
+  return {
+    byName,
+    byValue,
+    default: { type: 'sound', value: defaultSoundValue }
+  };
+}
 
 // Load gift mappings
 function loadGiftMappings() {
   const saved = settingsStore.getItem('gift_mappings');
   if (saved) {
     try {
-      giftMappings = JSON.parse(saved);
+      giftMappings = normalizeGiftMappings(JSON.parse(saved));
       renderGiftMappings();
     } catch (e) {
       console.error('Error loading gift mappings:', e);
     }
+  } else {
+    giftMappings = normalizeGiftMappings(giftMappings);
   }
 }
 
@@ -2746,16 +2637,41 @@ function saveGiftMappings() {
 
 // Get action for a gift (returns { type, value } or null)
 function getGiftAction(giftName, diamondCount) {
+  function resolveGiftAction(entry, keyType, key) {
+    const normalized = normalizeGiftAction(entry);
+    if (normalized.type !== 'animation') {
+      return normalized;
+    }
+
+    const triggers = toAnimationTriggerList(normalized.value);
+    if (triggers.length === 0) {
+      return { type: 'animation', value: '' };
+    }
+
+    if (triggers.length === 1) {
+      return { type: 'animation', value: triggers[0] };
+    }
+
+    const cycleState = keyType === 'byName' ? giftCycleState.byName : giftCycleState.byValue;
+    const currentIndex = Number.isInteger(cycleState[key]) ? cycleState[key] : 0;
+    const index = currentIndex % triggers.length;
+    cycleState[key] = (index + 1) % triggers.length;
+
+    return { type: 'animation', value: triggers[index] };
+  }
+
   // Priority 1: Specific gift name
   if (giftMappings.byName[giftName]) {
-    console.log(`🎁 Using name-based mapping for ${giftName}:`, giftMappings.byName[giftName]);
-    return giftMappings.byName[giftName];
+    const resolved = resolveGiftAction(giftMappings.byName[giftName], 'byName', giftName);
+    console.log(`🎁 Using name-based mapping for ${giftName}:`, resolved);
+    return resolved;
   }
   
   // Priority 2: Diamond value range
   if (giftMappings.byValue[diamondCount]) {
-    console.log(`🎁 Using value-based mapping for ${diamondCount}💎:`, giftMappings.byValue[diamondCount]);
-    return giftMappings.byValue[diamondCount];
+    const resolved = resolveGiftAction(giftMappings.byValue[diamondCount], 'byValue', String(diamondCount));
+    console.log(`🎁 Using value-based mapping for ${diamondCount}💎:`, resolved);
+    return resolved;
   }
   
   // Priority 3: Default
@@ -2771,125 +2687,147 @@ setTimeout(() => {
   renderGiftMappings();
 }, 100);
 
-// Default gift action event listeners
-const defaultGiftType = document.getElementById('defaultGiftType');
+// Default gift sound event listener
 const defaultGiftValue = document.getElementById('defaultGiftValue');
 
-if (defaultGiftType && defaultGiftValue) {
-  // Type changed - repopulate value dropdown
-  defaultGiftType.addEventListener('change', () => {
-    giftMappings.default.type = defaultGiftType.value;
-    giftMappings.default.value = ''; // Reset value when type changes
-    populateGiftActionSelect(defaultGiftValue, defaultGiftType.value, '');
-    saveGiftMappings();
-    console.log('✓ Default gift type changed to:', defaultGiftType.value);
-  });
-  
-  // Value changed - save it
+if (defaultGiftValue) {
+  giftMappings.default.type = 'sound';
+
   defaultGiftValue.addEventListener('change', () => {
+    giftMappings.default.type = 'sound';
     giftMappings.default.value = defaultGiftValue.value;
     saveGiftMappings();
-    console.log('✓ Default gift action changed to:', defaultGiftValue.value);
+    console.log('✓ Default gift sound changed to:', defaultGiftValue.value);
   });
-  
-  // Initial population
-  populateGiftActionSelect(defaultGiftValue, giftMappings.default.type, giftMappings.default.value);
+
+  populateGiftSoundOptions(defaultGiftValue, giftMappings.default.value);
 }
 
 // ─── TikTok Sticker to Animation Mappings ───────────────────────────
 
 let stickerMappings = {}; // emoteId or emoteName → animation trigger
 
-// Load sticker mappings
+function normalizeStickerMappingEntry(key, data) {
+  if (typeof data === 'object' && data !== null) {
+    return {
+      name: typeof data.name === 'string' && data.name.trim() ? data.name : key,
+      image: typeof data.image === 'string' && data.image.trim() ? data.image : null,
+      trigger: typeof data.trigger === 'string' ? data.trigger : ''
+    };
+  }
+  return {
+    name: key,
+    image: null,
+    trigger: typeof data === 'string' ? data : ''
+  };
+}
+
+function getStickerEntries() {
+  return Object.entries(stickerMappings).map(([key, data]) => {
+    const normalized = normalizeStickerMappingEntry(key, data);
+    return { key, ...normalized };
+  });
+}
+
 function loadStickerMappings() {
   const saved = settingsStore.getItem('sticker_mappings');
-  if (saved) {
-    try {
-      stickerMappings = JSON.parse(saved);
-      renderStickerMappings();
-    } catch (e) {
-      console.error('Error loading sticker mappings:', e);
-    }
+  if (!saved) return;
+  try {
+    const parsed = JSON.parse(saved);
+    const normalized = {};
+    Object.entries(parsed || {}).forEach(([key, data]) => {
+      normalized[key] = normalizeStickerMappingEntry(key, data);
+    });
+    stickerMappings = normalized;
+  } catch (e) {
+    console.error('Error loading sticker mappings:', e);
   }
 }
 
-// Save sticker mappings
 function saveStickerMappings() {
   settingsStore.setItem('sticker_mappings', JSON.stringify(stickerMappings));
 }
 
-// Render sticker mappings
-function renderStickerMappings() {
-  const list = document.getElementById('stickerMappingsList');
-  if (!list) return;
-  const availableTriggers = Object.keys(animationMappings);
+function getAvailableStickerOptions() {
+  return getStickerEntries()
+    .sort((a, b) => String(a.name || a.key).localeCompare(String(b.name || b.key)));
+}
 
-  if (Object.keys(stickerMappings).length === 0) {
-    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No stickers captured yet. Send stickers in TikTok to auto-capture them!</div>';
-    return;
-  }
+function getStickerTriggerForKey(stickerKey) {
+  const data = stickerMappings[stickerKey];
+  if (!data) return '';
+  return typeof data === 'string' ? data : (data.trigger || '');
+}
 
-  list.innerHTML = Object.entries(stickerMappings).map(([emoteKey, data]) => {
-    const animTrigger = typeof data === 'string' ? data : (data.trigger || '');
-    const emoteName = typeof data === 'object' ? data.name : emoteKey;
-    const emoteImage = typeof data === 'object' ? data.image : null;
-    
-    return `
-      <div style="display: grid; grid-template-columns: auto 1fr 1fr auto; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; align-items: center;">
-        ${emoteImage 
-          ? `<img src="${emoteImage}" alt="${emoteName}" style="width: 40px; height: 40px; border-radius: 4px;">` 
-          : '<div style="width: 40px; height: 40px; background: rgba(255,255,255,0.05); border-radius: 4px; display: flex; align-items: center; justify-content: center;">🎭</div>'
-        }
-        <div style="font-size: 0.875rem; color: var(--text-secondary);">${emoteName}</div>
-        <select data-emote="${emoteKey}" class="sticker-animation" style="font-size: 0.875rem; padding: 8px;">
-          <option value="">🚫 No Animation</option>
-          ${availableTriggers.length === 0 ? '<option value="" disabled>No animation triggers configured yet</option>' : ''}
-          ${availableTriggers.map(trigger =>
-            `<option value="${trigger}" ${trigger === animTrigger ? 'selected' : ''}>${trigger}</option>`
-          ).join('')}
-        </select>
-        <button class="secondary remove-sticker-btn" data-emote="${emoteKey}" style="padding: 6px 12px; font-size: 0.75rem;">🗑️</button>
-      </div>
-    `;
-  }).join('');
+function findStickerKeyForAnimationTrigger(trigger) {
+  const match = getStickerEntries().find(entry => (entry.trigger || '') === trigger);
+  return match ? match.key : '';
+}
 
-  // Animation change handler
-  list.querySelectorAll('.sticker-animation').forEach(select => {
-    select.addEventListener('change', (e) => {
-      const emote = e.target.dataset.emote;
-      const trigger = e.target.value;
-      
-      if (trigger) {
-        // Update mapping
-        if (typeof stickerMappings[emote] === 'object') {
-          stickerMappings[emote].trigger = trigger;
-        } else {
-          stickerMappings[emote] = trigger;
-        }
-        console.log(`✓ Mapped sticker: ${emote} → ${trigger}`);
-      } else {
-        // Remove mapping but keep the sticker entry
-        if (typeof stickerMappings[emote] === 'object') {
-          stickerMappings[emote].trigger = '';
-        } else {
-          stickerMappings[emote] = '';
-        }
-        console.log(`✓ Unmapped sticker: ${emote}`);
-      }
-      
-      saveStickerMappings();
-    });
+function findFirstStickerNameForAnimationTrigger(trigger) {
+  const key = findStickerKeyForAnimationTrigger(trigger);
+  if (!key) return '';
+  const data = normalizeStickerMappingEntry(key, stickerMappings[key]);
+  return data.name || key;
+}
+
+function hasStickerForAnimationTrigger(trigger) {
+  return Boolean(findStickerKeyForAnimationTrigger(trigger));
+}
+
+function moveStickerAnimationReferences(oldTrigger, newTrigger) {
+  if (!oldTrigger || !newTrigger || oldTrigger === newTrigger) return;
+  Object.entries(stickerMappings).forEach(([key, data]) => {
+    const normalized = normalizeStickerMappingEntry(key, data);
+    if (normalized.trigger === oldTrigger) {
+      normalized.trigger = newTrigger;
+      stickerMappings[key] = normalized;
+    }
+  });
+}
+
+function removeStickerAnimationReferences(trigger) {
+  if (!trigger) return;
+  Object.entries(stickerMappings).forEach(([key, data]) => {
+    const normalized = normalizeStickerMappingEntry(key, data);
+    if (normalized.trigger === trigger) {
+      normalized.trigger = '';
+      stickerMappings[key] = normalized;
+    }
+  });
+}
+
+function setStickerForAnimationTrigger(trigger, stickerKey) {
+  if (!trigger) return;
+
+  Object.entries(stickerMappings).forEach(([key, data]) => {
+    const normalized = normalizeStickerMappingEntry(key, data);
+    if (normalized.trigger === trigger) {
+      normalized.trigger = '';
+      stickerMappings[key] = normalized;
+    }
   });
 
-  // Remove button handler
-  list.querySelectorAll('.remove-sticker-btn').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      const emote = e.target.dataset.emote;
-      delete stickerMappings[emote];
-      saveStickerMappings();
-      renderStickerMappings();
-    });
+  if (!stickerKey) return;
+  const selected = normalizeStickerMappingEntry(stickerKey, stickerMappings[stickerKey]);
+  selected.trigger = trigger;
+  stickerMappings[stickerKey] = selected;
+}
+
+function populateAnimationPopupStickerOptions(selectedKey = '') {
+  if (!animationPopupSticker) return;
+  const options = getAvailableStickerOptions();
+  animationPopupSticker.innerHTML = '<option value="">No sticker assigned</option>';
+  options.forEach(entry => {
+    const option = document.createElement('option');
+    option.value = entry.key;
+    option.textContent = `${entry.name || entry.key}${entry.trigger ? ` (${entry.trigger})` : ''}`;
+    if (selectedKey && selectedKey === entry.key) {
+      option.selected = true;
+    }
+    animationPopupSticker.appendChild(option);
   });
+  if (!selectedKey) animationPopupSticker.value = '';
 }
 
 function handleStickerAnimation(msg) {
@@ -2907,14 +2845,25 @@ function handleStickerAnimation(msg) {
     };
     
     saveStickerMappings();
-    renderStickerMappings();
     
     addChatMessage('SYSTEM', `📚 New sticker captured: ${emoteKey.slice(0, 12)}... Assign an animation!`, 'SYSTEM', false);
+  } else {
+    const existing = normalizeStickerMappingEntry(emoteKey, stickerMappings[emoteKey]);
+    let changed = false;
+    if (msg.emoteName && existing.name !== msg.emoteName) {
+      existing.name = msg.emoteName;
+      changed = true;
+    }
+    if (msg.emoteImage && existing.image !== msg.emoteImage) {
+      existing.image = msg.emoteImage;
+      changed = true;
+    }
+    stickerMappings[emoteKey] = existing;
+    if (changed) saveStickerMappings();
   }
   
   // Trigger animation if mapped
-  const data = stickerMappings[emoteKey];
-  const animTrigger = typeof data === 'string' ? data : (data.trigger || '');
+  const animTrigger = getStickerTriggerForKey(emoteKey);
   
   if (animTrigger) {
     console.log(`🎬 Sticker triggered animation: ${emoteKey} → ${animTrigger}`);
@@ -3077,6 +3026,10 @@ let animationMappings = {}; // trigger → filename
 let availableAnimations = []; // List of .MOV files
 const animationVolumeSlider = document.getElementById('animationVolumeSlider');
 const animationVolumeValue = document.getElementById('animationVolumeValue');
+const animationSortSelect = document.getElementById('animationSortSelect');
+const animationMapFilterSelect = document.getElementById('animationMapFilterSelect');
+const animationStickerFilterSelect = document.getElementById('animationStickerFilterSelect');
+let animationThumbnailObserver = null;
 
 function getAnimationVolumePercent() {
   if (!animationVolumeSlider) return 100;
@@ -3151,10 +3104,165 @@ function buildUniqueAnimationTrigger(base, source = animationMappings, ignoreTri
   return candidate;
 }
 
+function isGiftAnimationMapping(entry, trigger) {
+  if (!entry || entry.type !== 'animation') return false;
+  const values = toAnimationTriggerList(entry.value);
+  return values.includes(trigger);
+}
+
+function findFirstGiftNameForAnimationTrigger(trigger) {
+  for (const [giftName, entry] of Object.entries(giftMappings.byName || {})) {
+    if (isGiftAnimationMapping(entry, trigger)) return giftName;
+  }
+  return '';
+}
+
+function findFirstGiftValueForAnimationTrigger(trigger) {
+  for (const [diamondValue, entry] of Object.entries(giftMappings.byValue || {})) {
+    if (isGiftAnimationMapping(entry, trigger)) return String(diamondValue);
+  }
+  return '';
+}
+
+function findGiftNamesForAnimationTrigger(trigger) {
+  const matches = [];
+  Object.entries(giftMappings.byName || {}).forEach(([giftName, entry]) => {
+    if (isGiftAnimationMapping(entry, trigger)) {
+      matches.push(giftName);
+    }
+  });
+  return matches;
+}
+
+function findGiftValuesForAnimationTrigger(trigger) {
+  const matches = [];
+  Object.entries(giftMappings.byValue || {}).forEach(([diamondValue, entry]) => {
+    if (isGiftAnimationMapping(entry, trigger)) {
+      matches.push(String(diamondValue));
+    }
+  });
+  return matches.sort((a, b) => Number(a) - Number(b));
+}
+
+function trimBadgeLabel(value, maxLength = 16) {
+  const text = String(value || '').trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function renderAnimationVisibilityBadges(trigger) {
+  const giftNames = findGiftNamesForAnimationTrigger(trigger);
+  const giftValues = findGiftValuesForAnimationTrigger(trigger);
+  const nonDefaultValues = giftValues.filter(value => value !== '1');
+  const stickerName = findFirstStickerNameForAnimationTrigger(trigger);
+  const isDefaultGiftAnimation = isGiftAnimationMapping(giftMappings.byValue?.['1'], trigger);
+  const badges = [];
+
+  if (stickerName) {
+    badges.push(`<span class="animation-visibility-badge sticker" title="Sticker mapping: ${escapeAttribute(stickerName)}">🎭 ${escapeAttribute(trimBadgeLabel(stickerName, 14))}</span>`);
+  }
+
+  if (giftNames.length > 0) {
+    const extraCount = giftNames.length - 1;
+    const label = `🎁 ${trimBadgeLabel(giftNames[0])}${extraCount > 0 ? ` +${extraCount}` : ''}`;
+    badges.push(`<span class="animation-visibility-badge gift-name" title="Gift name mappings: ${escapeAttribute(giftNames.join(', '))}">${escapeAttribute(label)}</span>`);
+  }
+
+  if (nonDefaultValues.length > 0) {
+    const extraCount = nonDefaultValues.length - 1;
+    const label = `💎 ${nonDefaultValues[0]}${extraCount > 0 ? ` +${extraCount}` : ''}`;
+    badges.push(`<span class="animation-visibility-badge gift-value" title="Diamond value mappings: ${escapeAttribute(nonDefaultValues.join(', '))}">${escapeAttribute(label)}</span>`);
+  }
+
+  if (isDefaultGiftAnimation) {
+    badges.push('<span class="animation-visibility-badge default-gift" title="Included in default gift animation rotation (diamond value 1)">Default</span>');
+  }
+
+  if (badges.length === 0) {
+    badges.push('<span class="animation-visibility-badge unmapped" title="No gift or sticker mapping configured">Unmapped</span>');
+  }
+
+  return `<div class="animation-card-badges">${badges.join('')}</div>`;
+}
+
+function moveGiftAnimationReferences(oldTrigger, newTrigger) {
+  if (!oldTrigger || !newTrigger || oldTrigger === newTrigger) return;
+
+  Object.entries(giftMappings.byName || {}).forEach(([giftName, entry]) => {
+    if (!isGiftAnimationMapping(entry, oldTrigger)) return;
+    const values = toAnimationTriggerList(entry.value).map(v => (v === oldTrigger ? newTrigger : v));
+    const unique = Array.from(new Set(values));
+    giftMappings.byName[giftName].value = unique.length > 1 ? unique : (unique[0] || '');
+  });
+
+  Object.entries(giftMappings.byValue || {}).forEach(([diamondValue, entry]) => {
+    if (!isGiftAnimationMapping(entry, oldTrigger)) return;
+    const values = toAnimationTriggerList(entry.value).map(v => (v === oldTrigger ? newTrigger : v));
+    const unique = Array.from(new Set(values));
+    giftMappings.byValue[diamondValue].value = unique.length > 1 ? unique : (unique[0] || '');
+  });
+}
+
+function removeGiftAnimationReferences(trigger) {
+  if (!trigger) return;
+
+  Object.entries(giftMappings.byName || {}).forEach(([giftName, entry]) => {
+    if (!isGiftAnimationMapping(entry, trigger)) return;
+    const nextValues = toAnimationTriggerList(entry.value).filter(v => v !== trigger);
+    if (nextValues.length === 0) {
+      delete giftMappings.byName[giftName];
+      return;
+    }
+    giftMappings.byName[giftName].value = nextValues.length > 1 ? nextValues : nextValues[0];
+  });
+
+  Object.entries(giftMappings.byValue || {}).forEach(([diamondValue, entry]) => {
+    if (!isGiftAnimationMapping(entry, trigger)) return;
+    const nextValues = toAnimationTriggerList(entry.value).filter(v => v !== trigger);
+    if (nextValues.length === 0) {
+      delete giftMappings.byValue[diamondValue];
+      return;
+    }
+    giftMappings.byValue[diamondValue].value = nextValues.length > 1 ? nextValues : nextValues[0];
+  });
+}
+
+function addGiftAnimationReference(group, key, trigger) {
+  if (!key || !trigger) return;
+
+  const current = normalizeGiftAction(group[key] || { type: 'animation', value: '' });
+  if (current.type !== 'animation') {
+    group[key] = { type: 'animation', value: trigger };
+    return;
+  }
+
+  const values = toAnimationTriggerList(current.value);
+  if (!values.includes(trigger)) values.push(trigger);
+  group[key] = {
+    type: 'animation',
+    value: values.length > 1 ? values : (values[0] || '')
+  };
+}
+
+function removeGiftAnimationReferenceForKey(group, key, trigger) {
+  if (!key || !group[key]) return;
+  const entry = group[key];
+  if (entry.type !== 'animation') return;
+
+  const values = toAnimationTriggerList(entry.value).filter(v => v !== trigger);
+  if (values.length === 0) {
+    delete group[key];
+    return;
+  }
+
+  group[key].value = values.length > 1 ? values : values[0];
+}
+
 async function syncAnimationMappingsFromFiles({ showAlert = false } = {}) {
   const fileSet = new Set(availableAnimations.map(anim => anim.filename));
   const nextMappings = {};
   const usedFiles = new Set();
+  const triggerRenames = [];
   let created = 0;
   let removed = 0;
   let deduped = 0;
@@ -3172,7 +3280,10 @@ async function syncAnimationMappingsFromFiles({ showAlert = false } = {}) {
 
     const normalized = toAnimationMappingObject(rawData, file);
     const safeTrigger = buildUniqueAnimationTrigger(trigger, nextMappings);
-    if (safeTrigger !== trigger) deduped += 1;
+    if (safeTrigger !== trigger) {
+      deduped += 1;
+      triggerRenames.push([trigger, safeTrigger]);
+    }
 
     nextMappings[safeTrigger] = {
       file: file,
@@ -3196,8 +3307,21 @@ async function syncAnimationMappingsFromFiles({ showAlert = false } = {}) {
   const changed = before !== after;
 
   if (changed) {
+    const removedTriggers = Object.keys(animationMappings).filter(trigger => !Object.prototype.hasOwnProperty.call(nextMappings, trigger));
+    triggerRenames.forEach(([fromTrigger, toTrigger]) => {
+      moveGiftAnimationReferences(fromTrigger, toTrigger);
+      moveStickerAnimationReferences(fromTrigger, toTrigger);
+    });
+    removedTriggers.forEach(trigger => {
+      removeGiftAnimationReferences(trigger);
+      removeStickerAnimationReferences(trigger);
+    });
+
     animationMappings = nextMappings;
     await saveAnimationMappings();
+    saveGiftMappings();
+    saveStickerMappings();
+    renderGiftMappings();
   }
 
   if (showAlert) {
@@ -3220,7 +3344,6 @@ function loadAnimationMappings() {
       animationMappings = normalized;
       console.log('✓ Loaded animation mappings:', Object.keys(animationMappings).length);
       renderAnimationMappings();
-      renderStickerMappings();
     } catch (e) {
       console.error('Error loading animation mappings:', e);
     }
@@ -3268,13 +3391,56 @@ async function loadAvailableAnimations() {
     const data = await response.json();
     availableAnimations = (data.animations || []).sort((a, b) => a.name.localeCompare(b.name));
     console.log(`✓ Loaded ${availableAnimations.length} animation files`);
-    await syncAnimationMappingsFromFiles();
     renderAnimationMappings();
+    syncAnimationMappingsFromFiles()
+      .then(({ changed }) => {
+        if (changed) renderAnimationMappings();
+      })
+      .catch(err => {
+        console.error('Animation sync error:', err);
+      });
   } catch (e) {
     console.error('Error loading animations:', e);
     availableAnimations = [];
     renderAnimationMappings();
   }
+}
+
+function ensureAnimationVideoSource(video) {
+  if (!video) return;
+  if (video.dataset.src && !video.getAttribute('src')) {
+    video.setAttribute('src', video.dataset.src);
+    video.load();
+  }
+}
+
+function wireThumbnailLazyLoading(container) {
+  if (animationThumbnailObserver) {
+    animationThumbnailObserver.disconnect();
+    animationThumbnailObserver = null;
+  }
+
+  const videos = container.querySelectorAll('.animation-thumb-video');
+  if (videos.length === 0) return;
+
+  if (typeof IntersectionObserver === 'undefined') {
+    videos.forEach(video => ensureAnimationVideoSource(video));
+    return;
+  }
+
+  animationThumbnailObserver = new IntersectionObserver((entries, observer) => {
+    entries.forEach(entry => {
+      if (!entry.isIntersecting) return;
+      ensureAnimationVideoSource(entry.target);
+      observer.unobserve(entry.target);
+    });
+  }, {
+    root: container,
+    rootMargin: '160px 0px',
+    threshold: 0.01
+  });
+
+  videos.forEach(video => animationThumbnailObserver.observe(video));
 }
 
 function wireThumbnailHoverPlayback(container) {
@@ -3285,6 +3451,7 @@ function wireThumbnailHoverPlayback(container) {
     if (!video) return;
 
     const play = () => {
+      ensureAnimationVideoSource(video);
       video.play().catch(() => {});
     };
 
@@ -3305,6 +3472,61 @@ function wireThumbnailHoverPlayback(container) {
   });
 }
 
+function getFilteredSortedAnimationCards() {
+  const sortMode = animationSortSelect?.value || 'name';
+  const mapFilter = animationMapFilterSelect?.value || 'all';
+  const stickerFilter = animationStickerFilterSelect?.value || 'all';
+
+  const cards = availableAnimations.map(anim => {
+    const mapped = findAnimationMappingEntryByFile(anim.filename);
+    const trigger = mapped ? mapped.trigger : normalizeTriggerFromFilename(anim.filename);
+    const giftNames = findGiftNamesForAnimationTrigger(trigger);
+    const giftValues = findGiftValuesForAnimationTrigger(trigger);
+    const hasDefaultGift = isGiftAnimationMapping(giftMappings.byValue?.['1'], trigger);
+    const numericGiftValues = giftValues
+      .map(value => Number(value))
+      .filter(value => Number.isFinite(value) && value > 0);
+    if (hasDefaultGift && !numericGiftValues.includes(1)) {
+      numericGiftValues.push(1);
+    }
+    const hasGiftMapping = giftNames.length > 0 || giftValues.length > 0 || hasDefaultGift;
+    const hasStickerMapping = hasStickerForAnimationTrigger(trigger);
+    const mappedAny = hasGiftMapping || hasStickerMapping;
+
+    return {
+      anim,
+      trigger,
+      giftSortKey: (giftNames[0] || '').toLowerCase(),
+      valueSortKey: numericGiftValues.length > 0 ? Math.min(...numericGiftValues) : Number.POSITIVE_INFINITY,
+      hasStickerMapping,
+      mappedAny
+    };
+  });
+
+  const filtered = cards.filter(card => {
+    if (mapFilter === 'mapped' && !card.mappedAny) return false;
+    if (mapFilter === 'unmapped' && card.mappedAny) return false;
+    if (stickerFilter === 'with-sticker' && !card.hasStickerMapping) return false;
+    if (stickerFilter === 'without-sticker' && card.hasStickerMapping) return false;
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    if (sortMode === 'gift') {
+      if (a.giftSortKey && !b.giftSortKey) return -1;
+      if (!a.giftSortKey && b.giftSortKey) return 1;
+      const byGift = a.giftSortKey.localeCompare(b.giftSortKey);
+      if (byGift !== 0) return byGift;
+    } else if (sortMode === 'value') {
+      const byValue = a.valueSortKey - b.valueSortKey;
+      if (byValue !== 0) return byValue;
+    }
+    return a.trigger.localeCompare(b.trigger);
+  });
+
+  return filtered;
+}
+
 // Render animation mappings list
 function renderAnimationMappings() {
   const list = document.getElementById('animationMappingsList');
@@ -3315,24 +3537,31 @@ function renderAnimationMappings() {
     return;
   }
 
-  list.innerHTML = availableAnimations.map(anim => {
-    const mapped = findAnimationMappingEntryByFile(anim.filename);
-    const trigger = mapped ? mapped.trigger : normalizeTriggerFromFilename(anim.filename);
+  const cards = getFilteredSortedAnimationCards();
+  if (cards.length === 0) {
+    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem; grid-column: 1 / -1;">No animations match current sort/filter.</div>';
+    return;
+  }
+
+  list.innerHTML = cards.map(({ anim, trigger }) => {
     const safeTrigger = escapeAttribute(trigger);
     const safeFilename = escapeAttribute(anim.filename);
     const fileUrl = `/animations/${encodeURIComponent(anim.filename)}`;
+    const visibilityBadges = renderAnimationVisibilityBadges(trigger);
     
     return `
     <div class="animation-mapping-card" title="${safeTrigger}">
       <button class="secondary animation-thumb-btn preview-mapping-btn" data-trigger="${safeTrigger}" title="${safeTrigger}">
-        <video class="animation-thumb-video" src="${fileUrl}" muted loop playsinline preload="metadata"></video>
-        <span class="animation-thumb-overlay">▶</span>
+        <video class="animation-thumb-video" data-src="${fileUrl}" muted loop playsinline preload="none"></video>
+        ${visibilityBadges}
+        <span class="animation-thumb-overlay">▶ Play</span>
       </button>
       <button class="secondary animation-gear-btn open-animation-settings-btn" data-trigger="${safeTrigger}" data-file="${safeFilename}" title="Settings">⚙️</button>
     </div>
   `;
   }).join('');
 
+  wireThumbnailLazyLoading(list);
   wireThumbnailHoverPlayback(list);
 
   // Thumbnail preview click handler (test trigger)
@@ -3372,8 +3601,6 @@ function renderAnimationMappings() {
       openAnimationCardPopup(btn.dataset.trigger, btn.dataset.file);
     });
   });
-
-  renderStickerMappings();
 }
 
 const uploadAnimationBtn = document.getElementById('uploadAnimationBtn');
@@ -3434,16 +3661,48 @@ if (syncAnimationsBtn) {
   });
 }
 
+function initAnimationListControls() {
+  const controls = [
+    { element: animationSortSelect, key: 'animation_sort_mode', fallback: 'name' },
+    { element: animationMapFilterSelect, key: 'animation_map_filter', fallback: 'all' },
+    { element: animationStickerFilterSelect, key: 'animation_sticker_filter', fallback: 'all' }
+  ];
+
+  controls.forEach(({ element, key, fallback }) => {
+    if (!element) return;
+    const saved = settingsStore.getItem(key);
+    if (saved && Array.from(element.options).some(opt => opt.value === saved)) {
+      element.value = saved;
+    } else {
+      element.value = fallback;
+    }
+    element.addEventListener('change', () => {
+      settingsStore.setItem(key, element.value);
+      renderAnimationMappings();
+    });
+  });
+}
+
+initAnimationListControls();
+
 const animationCardPopup = document.getElementById('animationCardPopup');
 const animationPopupName = document.getElementById('animationPopupName');
 const animationPopupPositionGrid = document.getElementById('animationPopupPositionGrid');
 const animationPopupScale = document.getElementById('animationPopupScale');
+const animationPopupGiftName = document.getElementById('animationPopupGiftName');
+const animationPopupGiftValue = document.getElementById('animationPopupGiftValue');
+const animationPopupSticker = document.getElementById('animationPopupSticker');
+const animationPopupMakeDefault = document.getElementById('animationPopupMakeDefault');
 const animationPopupScaleUpBtn = document.getElementById('animationPopupScaleUpBtn');
 const animationPopupScaleDownBtn = document.getElementById('animationPopupScaleDownBtn');
 const animationPopupSaveBtn = document.getElementById('animationPopupSaveBtn');
 const animationPopupDeleteBtn = document.getElementById('animationPopupDeleteBtn');
 const animationPopupCancelBtn = document.getElementById('animationPopupCancelBtn');
 const animationPopupBackdrop = animationCardPopup?.querySelector('.animation-card-popup-backdrop');
+const openAnimationGeneralSettingsBtn = document.getElementById('openAnimationGeneralSettingsBtn');
+const animationGeneralSettingsPopup = document.getElementById('animationGeneralSettingsPopup');
+const animationGeneralSettingsCloseBtn = document.getElementById('animationGeneralSettingsCloseBtn');
+const animationGeneralSettingsBackdrop = animationGeneralSettingsPopup?.querySelector('.animation-card-popup-backdrop');
 let activeAnimationPopup = null;
 let activeAnimationPopupPosition = 'bottom-left';
 
@@ -3485,15 +3744,33 @@ function closeAnimationCardPopup() {
   activeAnimationPopup = null;
 }
 
+function closeAnimationGeneralSettingsPopup() {
+  if (!animationGeneralSettingsPopup) return;
+  animationGeneralSettingsPopup.style.display = 'none';
+}
+
+function openAnimationGeneralSettingsPopupPanel() {
+  if (!animationGeneralSettingsPopup) return;
+  animationGeneralSettingsPopup.style.display = 'flex';
+}
+
 function openAnimationCardPopup(trigger, filename) {
   if (!animationCardPopup || !animationPopupName || !animationPopupScale) return;
 
   const currentData = toAnimationMappingObject(animationMappings[trigger], filename);
+  const currentGiftName = findFirstGiftNameForAnimationTrigger(trigger);
+  const currentGiftValue = findFirstGiftValueForAnimationTrigger(trigger);
+  const currentStickerKey = findStickerKeyForAnimationTrigger(trigger);
+  const isDefaultGiftAnimation = isGiftAnimationMapping(giftMappings.byValue?.['1'], trigger);
   activeAnimationPopup = { trigger, filename };
 
   animationPopupName.value = trigger;
   setAnimationPopupPosition(currentData.position || 'bottom-left');
   setAnimationPopupScaleValue(currentData.scale ?? 1.0);
+  if (animationPopupGiftName) animationPopupGiftName.value = currentGiftName;
+  if (animationPopupGiftValue) animationPopupGiftValue.value = currentGiftValue;
+  populateAnimationPopupStickerOptions(currentStickerKey);
+  if (animationPopupMakeDefault) animationPopupMakeDefault.checked = isDefaultGiftAnimation;
   animationCardPopup.style.display = 'flex';
   animationPopupName.focus();
 }
@@ -3503,6 +3780,18 @@ if (animationPopupCancelBtn) {
 }
 if (animationPopupBackdrop) {
   animationPopupBackdrop.addEventListener('click', closeAnimationCardPopup);
+}
+if (openAnimationGeneralSettingsBtn) {
+  openAnimationGeneralSettingsBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    openAnimationGeneralSettingsPopupPanel();
+  });
+}
+if (animationGeneralSettingsCloseBtn) {
+  animationGeneralSettingsCloseBtn.addEventListener('click', closeAnimationGeneralSettingsPopup);
+}
+if (animationGeneralSettingsBackdrop) {
+  animationGeneralSettingsBackdrop.addEventListener('click', closeAnimationGeneralSettingsPopup);
 }
 if (animationPopupPositionGrid) {
   animationPopupPositionGrid.querySelectorAll('.animation-position-btn').forEach(btn => {
@@ -3540,19 +3829,60 @@ if (animationPopupSaveBtn) {
       alert(`Name "${desiredTrigger}" already exists. Using "${uniqueTrigger}" instead.`);
     }
     const scaleValue = getAnimationPopupScaleValue();
+    const nextGiftName = animationPopupGiftName ? animationPopupGiftName.value.trim() : '';
+    const nextGiftValueRaw = animationPopupGiftValue ? animationPopupGiftValue.value.trim() : '';
+    const hasGiftValueInput = nextGiftValueRaw.length > 0;
+    const parsedGiftValue = Number(nextGiftValueRaw);
+    if (hasGiftValueInput && (!Number.isFinite(parsedGiftValue) || parsedGiftValue <= 0)) {
+      alert('Diamond value must be a positive number.');
+      return;
+    }
+    const makeDefaultGiftAnimation = Boolean(animationPopupMakeDefault?.checked);
+    const nextGiftValue = hasGiftValueInput ? String(Math.floor(parsedGiftValue)) : '';
+    const nextStickerKey = animationPopupSticker ? animationPopupSticker.value : '';
     const currentData = toAnimationMappingObject(animationMappings[oldTrigger], filename);
+    const prevGiftName = findFirstGiftNameForAnimationTrigger(oldTrigger);
+    const prevGiftValue = findFirstGiftValueForAnimationTrigger(oldTrigger);
     const updatedData = {
       file: filename,
       position: activeAnimationPopupPosition || currentData.position || 'bottom-left',
       scale: Number.isFinite(scaleValue) ? scaleValue : currentData.scale
     };
 
+    moveGiftAnimationReferences(oldTrigger, uniqueTrigger);
+    moveStickerAnimationReferences(oldTrigger, uniqueTrigger);
+
     if (oldTrigger !== uniqueTrigger) {
       delete animationMappings[oldTrigger];
     }
     animationMappings[uniqueTrigger] = updatedData;
 
+    if (prevGiftName && prevGiftName !== nextGiftName) {
+      removeGiftAnimationReferenceForKey(giftMappings.byName, prevGiftName, uniqueTrigger);
+    }
+    if (nextGiftName) {
+      addGiftAnimationReference(giftMappings.byName, nextGiftName, uniqueTrigger);
+    }
+
+    if (prevGiftValue && prevGiftValue !== nextGiftValue) {
+      removeGiftAnimationReferenceForKey(giftMappings.byValue, prevGiftValue, uniqueTrigger);
+    }
+    if (nextGiftValue) {
+      addGiftAnimationReference(giftMappings.byValue, nextGiftValue, uniqueTrigger);
+    }
+
+    if (makeDefaultGiftAnimation) {
+      addGiftAnimationReference(giftMappings.byValue, '1', uniqueTrigger);
+    } else if (nextGiftValue !== '1') {
+      removeGiftAnimationReferenceForKey(giftMappings.byValue, '1', uniqueTrigger);
+    }
+
+    setStickerForAnimationTrigger(uniqueTrigger, nextStickerKey);
+
     await saveAnimationMappings();
+    saveGiftMappings();
+    saveStickerMappings();
+    renderGiftMappings();
     renderAnimationMappings();
     closeAnimationCardPopup();
   });
@@ -3576,11 +3906,16 @@ if (animationPopupDeleteBtn) {
 
       Object.keys(animationMappings).forEach(trigger => {
         if (getAnimationFileFromMapping(animationMappings[trigger]) === filename) {
+          removeGiftAnimationReferences(trigger);
+          removeStickerAnimationReferences(trigger);
           delete animationMappings[trigger];
         }
       });
 
       await saveAnimationMappings();
+      saveGiftMappings();
+      saveStickerMappings();
+      renderGiftMappings();
       await loadAvailableAnimations();
       closeAnimationCardPopup();
     } catch (err) {
@@ -3702,9 +4037,9 @@ function triggerAnimation(trigger, platform, author) {
 }
 
 // Initialize animation system
-loadAvailableAnimations();
-loadAnimationMappings();
 loadStickerMappings();
+loadAnimationMappings();
+loadAvailableAnimations();
 
 console.log('🎬 Animation system initialized');
 

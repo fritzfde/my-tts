@@ -241,18 +241,10 @@
                 </div>
             </div>
 
-            <div style="display: flex; gap: 12px;">
-                <!-- ElevenLabs field hidden - not currently used
-                <div class="input-group" style="margin-bottom: 0; flex: 1;">
-                    <label>ElevenLabs API Key (Optional)</label>
-                    <input type="text" id="elevenLabsKey" placeholder="For AI voices...">
-                </div>
-                -->
-                <div style="flex: 1;"></div>
-                <div style="flex: 0 0 auto; display: flex; align-items: flex-end;">
-                    <button id="manageVoicesBtn" class="secondary">👤 User Voices</button>
-                </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+                <button id="manageVoicesBtn" class="secondary" style="padding: 6px 10px; font-size: 0.75rem;">⚙️ User Voices</button>
             </div>
+
         </div>
 
         <!-- TikTok Overlays & Sounds -->
@@ -261,32 +253,45 @@
                 <span style="color: #00f2ea;">🎁</span> TikTok Gifts & Overlays
             </h3>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                <div class="input-group" style="margin-bottom: 0;">
-                    <label>Gift Sound Effect</label>
-                    <select id="giftSoundSelect">
-                        <option value="">🔇 No Sound</option>
-                        <optgroup label="Classic">
-                            <option value="ding">🔔 Ding</option>
-                            <option value="coin">💰 Coin Drop</option>
-                            <option value="chime">🎵 Chime</option>
-                            <option value="applause">👏 Applause</option>
-                        </optgroup>
-                        <optgroup label="Anime">
-                            <option value="anime-sparkle">✨ Anime Sparkle</option>
-                            <option value="anime-powerup">⚡ Power-Up</option>
-                            <option value="anime-notification">📢 Notification Beep</option>
-                            <option value="anime-coin">🪙 Mario Coin</option>
-                            <option value="anime-victory">🎊 Victory Jingle</option>
-                        </optgroup>
-                    </select>
+            <div class="input-group gift-sound-settings-card" style="margin-bottom: 12px;">
+                <div class="gift-sound-main-row">
+                    <div class="input-group" style="margin-bottom: 0;">
+                        <label>Gift Sound Effect</label>
+                        <select id="giftSoundSelect">
+                            <option value="">🔇 No Sound</option>
+                            <optgroup label="Classic">
+                                <option value="ding">🔔 Ding</option>
+                                <option value="coin">💰 Coin Drop</option>
+                                <option value="chime">🎵 Chime</option>
+                                <option value="applause">👏 Applause</option>
+                            </optgroup>
+                            <optgroup label="Anime">
+                                <option value="anime-sparkle">✨ Anime Sparkle</option>
+                                <option value="anime-powerup">⚡ Power-Up</option>
+                                <option value="anime-notification">📢 Notification Beep</option>
+                                <option value="anime-coin">🪙 Mario Coin</option>
+                                <option value="anime-victory">🎊 Victory Jingle</option>
+                            </optgroup>
+                        </select>
+                    </div>
+                    <div class="input-group gift-sound-default-wrap" style="margin-bottom: 0;">
+                        <label style="text-transform: none; letter-spacing: normal;">Default Gift Sound</label>
+                        <select id="defaultGiftValue" style="font-size: 0.875rem; padding: 8px;">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
                 </div>
 
-                <div class="input-group" style="margin-bottom: 0;">
-                    <label>Upload Custom Sound</label>
-                    <div style="display: flex; gap: 8px;">
-                        <input type="file" id="customSoundUpload" accept=".mp3,.wav,.ogg" style="flex: 1; font-size: 0.75rem; padding: 6px;">
-                        <button id="uploadSoundBtn" class="secondary" style="flex: none; padding: 8px 16px; font-size: 0.8125rem;">Upload</button>
+                <div class="gift-sound-manage-grid">
+                    <div class="gift-sound-upload-row">
+                        <input type="file" id="customSoundUpload" accept=".mp3,.wav,.ogg" style="font-size: 0.75rem; padding: 6px;">
+                        <button id="uploadSoundBtn" class="secondary" style="padding: 8px 14px; font-size: 0.8125rem;">Upload</button>
+                    </div>
+                    <div class="gift-sound-delete-row">
+                        <select id="customSoundManageSelect" style="font-size: 0.8125rem;">
+                            <option value="">Custom sounds...</option>
+                        </select>
+                        <button id="deleteCustomSoundBtn" class="secondary" style="padding: 8px 14px; font-size: 0.8125rem;">🗑️ Delete</button>
                     </div>
                 </div>
             </div>
@@ -294,56 +299,10 @@
             <div class="input-group" style="margin-bottom: 12px;">
                 <label>Gift Triggers (Sounds & Animations)</label>
                 <div style="margin-bottom: 8px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                    <strong>Priority:</strong> Gift Name > Diamond Value > Default<br>
-                    Map specific gifts or value ranges to sounds or animations.
+                    <strong>Priority:</strong> Gift Name > Diamond Value > Default Sound<br>
+                    Gift-to-animation mappings are now set directly from each animation card (⚙️ popup).
                 </div>
                 
-                <!-- Default Setting -->
-                <div style="margin-bottom: 16px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px;">
-                    <label style="font-size: 0.875rem; margin-bottom: 8px; display: block;">Default Gift Action</label>
-                    <div style="display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center;">
-                        <select id="defaultGiftType" style="font-size: 0.875rem; padding: 8px;">
-                            <option value="sound">🔊 Sound</option>
-                            <option value="animation">🎬 Animation</option>
-                        </select>
-                        <select id="defaultGiftValue" style="font-size: 0.875rem; padding: 8px;">
-                            <!-- Populated dynamically -->
-                        </select>
-                    </div>
-                </div>
-                
-                <!-- By Gift Name -->
-                <div style="margin-bottom: 16px;">
-                    <label style="font-size: 0.875rem; margin-bottom: 8px; display: block;">By Gift Name</label>
-                    <div id="giftNameMappingsList" style="display: grid; gap: 8px; max-height: 200px; overflow-y: auto;">
-                        <!-- Gift name mappings -->
-                    </div>
-                    <button id="addGiftNameMappingBtn" class="secondary" style="width: 100%; margin-top: 8px;">+ Add Gift Name Mapping</button>
-                </div>
-                
-                <!-- By Diamond Value -->
-                <div style="margin-bottom: 0;">
-                    <label style="font-size: 0.875rem; margin-bottom: 8px; display: block;">By Diamond Value</label>
-                    <div id="giftValueMappingsList" style="display: grid; gap: 8px; max-height: 200px; overflow-y: auto;">
-                        <!-- Value mappings -->
-                    </div>
-                    <button id="addGiftValueMappingBtn" class="secondary" style="width: 100%; margin-top: 8px;">+ Add Value Mapping</button>
-                </div>
-            </div>
-
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>OBS Overlay URLs <span style="color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: normal;">(Add these as Browser Source in OBS)</span></label>
-                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px;">
-                    <input type="text" id="giftOverlayUrl" readonly value="http://localhost:3000/overlay/gifts" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
-                    <button class="secondary copy-btn" data-target="giftOverlayUrl" style="flex: none; padding: 8px 16px;">📋 Copy</button>
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px;">
-                    <input type="text" id="likerOverlayUrl" readonly value="http://localhost:3000/overlay/likers" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
-                    <button class="secondary copy-btn" data-target="likerOverlayUrl" style="flex: none; padding: 8px 16px;">📋 Copy</button>
-                </div>
-                <div style="margin-top: 8px; padding: 10px; background: rgba(0, 242, 234, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                    <strong style="color: #00f2ea;">💡 Setup:</strong> Copy URL → OBS → Add Browser Source → Paste URL → Width: 1920, Height: 300 (gifts) or 400 (likers)
-                </div>
             </div>
         </div>
 
@@ -351,16 +310,45 @@
         <div style="padding-top: 24px; border-top: 1px solid var(--border);">
             <h3 style="color: var(--text-primary); font-size: 0.875rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; justify-content: space-between;">
                 <span><span style="color: #ff6b6b;">🎬</span> Animation Overlay (YouTube & TikTok)</span>
-                <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,107,107,0.1); border-radius: 6px;">
-                    <input type="checkbox" id="animationsEnabled" checked>
-                    <span style="font-size: 0.75rem;">Enable Animations</span>
-                </label>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <button id="openAnimationGeneralSettingsBtn" class="secondary" style="padding: 6px 10px; font-size: 0.75rem;" title="Animation General Settings">⚙️ Settings</button>
+                    <label class="checkbox-label" style="padding: 6px 12px; margin: 0; background: rgba(255,107,107,0.1); border-radius: 6px;">
+                        <input type="checkbox" id="animationsEnabled" checked>
+                        <span style="font-size: 0.75rem;">Enable Animations</span>
+                    </label>
+                </div>
             </h3>
 
             <div class="input-group" style="margin-bottom: 12px;">
-                <label>Animation Trigger Mappings</label>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px;">
+                    <label style="margin: 0;">Animation Trigger Mappings</label>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <label class="checkbox-label" style="padding: 4px 10px; margin: 0; background: rgba(255,107,107,0.08); border-radius: 6px; font-size: 0.75rem;" title="Allow all viewers to trigger animations using stickers, unless blocked per user.">
+                            <input type="checkbox" id="globalAnimationTrigger" checked title="Allow all viewers to trigger animations using stickers, unless blocked per user.">
+                            <span style="font-size: 0.75rem;">Allow sticker triggers globally</span>
+                        </label>
+                        <button id="manageAnimationPermissionsBtn" class="secondary" style="padding: 6px 10px; font-size: 0.75rem;" title="Manage per-user permissions for sticker-triggered animations">⚙️ Per-user permissions</button>
+                    </div>
+                </div>
                 <div style="margin-bottom: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
                     Map emojis/stickers to .MOV files. For YouTube, uses LLM to detect emotions. For TikTok, uses actual emote names.
+                </div>
+                <div class="animation-controls-row">
+                    <select id="animationSortSelect" style="font-size: 0.8125rem;">
+                        <option value="name">Sort: Name</option>
+                        <option value="gift">Sort: Gift Name</option>
+                        <option value="value">Sort: Value</option>
+                    </select>
+                    <select id="animationMapFilterSelect" style="font-size: 0.8125rem;">
+                        <option value="all">All Mappings</option>
+                        <option value="mapped">Mapped Only</option>
+                        <option value="unmapped">Unmapped Only</option>
+                    </select>
+                    <select id="animationStickerFilterSelect" style="font-size: 0.8125rem;">
+                        <option value="all">All Stickers</option>
+                        <option value="with-sticker">With Sticker</option>
+                        <option value="without-sticker">Without Sticker</option>
+                    </select>
                 </div>
                 <div id="animationMappingsList" class="animation-mappings-grid" style="max-height: 500px; overflow-y: auto; padding-right: 5px;">
                     <!-- Mapping items will be added here dynamically -->
@@ -370,14 +358,11 @@
                     <button id="syncAnimationsBtn" class="secondary">🔄 Sync all</button>
                 </div>
                 <input type="file" id="uploadAnimationInput" accept=".mov,.mp4,.webm,.avi" style="display: none;">
-                <div style="margin-top: 8px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                    Hover a card to see its animation name. Click thumbnail to preview. Use ⚙️ for rename, scale, or delete file.
-                </div>
 
                 <div id="animationCardPopup" class="animation-card-popup" style="display: none;">
                     <div class="animation-card-popup-backdrop"></div>
                     <div class="animation-card-popup-panel">
-                        <h4>Animation Settings</h4>
+                        <h4>Animation Card Settings</h4>
                         <div class="input-group" style="margin-bottom: 10px;">
                             <div class="animation-popup-top-row">
                                 <div>
@@ -408,6 +393,20 @@
                                 <button type="button" class="secondary animation-position-btn" data-position="bottom-right" title="Bottom Right">↘</button>
                             </div>
                         </div>
+                        <div class="input-group" style="margin-bottom: 14px;">
+                            <label>Gift Mapping (Optional)</label>
+                            <div class="animation-popup-gift-row">
+                                <input type="text" id="animationPopupGiftName" placeholder="Gift name (e.g. Rose)">
+                                <input type="number" id="animationPopupGiftValue" min="1" step="1" placeholder="Diamond value">
+                            </div>
+                            <select id="animationPopupSticker" style="margin-top: 8px;">
+                                <option value="">No sticker assigned</option>
+                            </select>
+                            <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
+                                <input type="checkbox" id="animationPopupMakeDefault" style="width: auto; margin-right: 8px;">
+                                Make default gift animation (adds to diamond value 1 round-robin)
+                            </label>
+                        </div>
                         <div class="animation-card-popup-actions">
                             <button id="animationPopupSaveBtn">Save</button>
                             <button id="animationPopupDeleteBtn" class="secondary">🗑️ Delete File</button>
@@ -415,67 +414,65 @@
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <div class="input-group" style="margin-bottom: 12px;">
-                <label>Chroma Key Settings (Green Screen Removal)</label>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                    <div>
-                        <label style="text-transform: none; font-size: 0.75rem; color: var(--text-secondary);">Green Threshold: <span id="greenThresholdValue">100</span></label>
-                        <input type="range" id="greenThreshold" min="50" max="150" value="100" style="width: 100%;">
-                        <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px;">Higher = stricter green detection</div>
+                <div id="animationGeneralSettingsPopup" class="animation-card-popup" style="display: none;">
+                    <div class="animation-card-popup-backdrop"></div>
+                    <div class="animation-card-popup-panel animation-general-settings-panel">
+                        <h4>Animation General Settings</h4>
+                        <div class="input-group" style="margin-bottom: 12px;">
+                            <label style="text-transform: none; letter-spacing: normal;">Chroma Key (Green Screen)</label>
+                            <div class="animation-slider-wrap">
+                                <input type="range" id="greenThreshold" min="50" max="150" value="100" class="animation-range-input">
+                                <span class="animation-slider-inline-label">Green Threshold</span>
+                                <span class="animation-slider-inline-value" id="greenThresholdValue">100</span>
+                            </div>
+                            <div class="animation-slider-wrap">
+                                <input type="range" id="chromaTolerance" min="10" max="100" value="50" class="animation-range-input">
+                                <span class="animation-slider-inline-label">Tolerance</span>
+                                <span class="animation-slider-inline-value" id="chromaToleranceValue">50</span>
+                            </div>
+                        </div>
+                        <div class="input-group" style="margin-bottom: 12px;">
+                            <label style="text-transform: none; letter-spacing: normal;">Animation Volume</label>
+                            <div class="animation-slider-wrap">
+                                <input type="range" id="animationVolumeSlider" min="0" max="100" value="100" class="animation-range-input">
+                                <span class="animation-slider-inline-label">Animation Volume</span>
+                                <span class="animation-slider-inline-value" id="animationVolumeValue">100%</span>
+                            </div>
+                        </div>
+                        <div class="input-group" style="margin-bottom: 12px;">
+                            <label style="text-transform: none; letter-spacing: normal;">Overlay URLs (OBS Browser Source)</label>
+                            <div class="overlay-url-row">
+                                <input type="text" id="animationOverlayUrl" readonly value="http://localhost:3000/overlay/animations?config=default" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
+                                <button class="secondary copy-btn" data-target="animationOverlayUrl">📋 Copy</button>
+                            </div>
+                            <div class="overlay-url-row">
+                                <input type="text" id="giftOverlayUrl" readonly value="http://localhost:3000/overlay/gifts" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
+                                <button class="secondary copy-btn" data-target="giftOverlayUrl">📋 Copy</button>
+                            </div>
+                            <div class="overlay-url-row">
+                                <input type="text" id="likerOverlayUrl" readonly value="http://localhost:3000/overlay/likers" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
+                                <button class="secondary copy-btn" data-target="likerOverlayUrl">📋 Copy</button>
+                            </div>
+                            <div style="margin-top: 8px; padding: 10px; background: rgba(255,107,107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
+                                <strong style="color: #ff6b6b;">💡 Setup:</strong> Copy URL → OBS → Add Browser Source → Paste URL. Suggested: 1920x1080 (animations), 1920x300 (gifts), 1920x400 (likers).
+                            </div>
+                        </div>
+                        <div class="animation-card-popup-actions">
+                            <button id="animationGeneralSettingsCloseBtn">Done</button>
+                        </div>
                     </div>
-                    <div>
-                        <label style="text-transform: none; font-size: 0.75rem; color: var(--text-secondary);">Tolerance: <span id="chromaToleranceValue">50</span></label>
-                        <input type="range" id="chromaTolerance" min="10" max="100" value="50" style="width: 100%;">
-                        <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px;">Higher = accepts non-pure greens</div>
-                    </div>
                 </div>
-            </div>
-
-            <div class="input-group" style="margin-bottom: 12px;">
-                <label>Animation Volume <span id="animationVolumeValue" style="color: var(--text-secondary); font-weight: 400;">100%</span></label>
-                <input type="range" id="animationVolumeSlider" min="0" max="100" value="100" style="width: 100%;">
-            </div>
-
-            <div class="input-group" style="margin-bottom: 0;">
-                <label>Animation Overlay URL</label>
-                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px;">
-                    <input type="text" id="animationOverlayUrl" readonly value="http://localhost:3000/overlay/animations?config=default" style="font-family: monospace; font-size: 0.75rem; background: var(--bg-primary);">
-                    <button class="secondary copy-btn" data-target="animationOverlayUrl">📋 Copy</button>
-                </div>
-                <div style="margin-top: 8px; padding: 10px; background: rgba(255,107,107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                    <strong style="color: #ff6b6b;">💡 Setup:</strong> OBS → Add Browser Source → Paste URL → Width: 1920, Height: 1080 → Press D in preview to see debug info
-                </div>
-            </div>
-        </div>
-        
-        <div class="input-group" style="margin-bottom: 12px;">
-            <label>TikTok Sticker Mappings <span style="color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: normal;">(Auto-captured from chat)</span></label>
-            <div style="margin-bottom: 8px; padding: 10px; background: rgba(0, 242, 234, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                Stickers are automatically captured when sent in TikTok chat. Assign animations to trigger them automatically.
-            </div>
-            <div id="stickerMappingsList" style="display: grid; gap: 8px; max-height: 300px; overflow-y: auto; padding-right: 5px;">
-                <!-- Sticker mappings will be added here -->
             </div>
         </div>
 
         <div class="input-group" style="margin-bottom: 12px;">
-            <label>
-                <input type="checkbox" id="globalAnimationTrigger" checked style="width: auto; margin-right: 8px;">
-                🎬 Allow stickers to trigger animations (global)
-            </label>
-            <div style="margin-top: 8px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                When enabled, any user can trigger animations with stickers. You can override per-user below.
+            <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px;">
+                <label style="margin: 0;">Per-User Animation Permissions</label>
             </div>
-        </div>
-
-        <div class="input-group" style="margin-bottom: 12px;">
-            <label>Per-User Animation Permissions</label>
             <div id="animationPermissionsList" style="display: grid; gap: 8px; max-height: 200px; overflow-y: auto; padding-right: 5px;">
                 <!-- User permissions will appear here -->
             </div>
-            <button id="manageAnimationPermissionsBtn" class="secondary" style="width: 100%; margin-top: 8px;">👤 Manage User Permissions</button>
         </div>
 
         <div id="status" class="status">
@@ -495,8 +492,8 @@
     <div id="voiceModal" class="modal-overlay" style="display: none;">
         <div class="modal">
             <button class="modal-close" onclick="closeVoiceModal()">&times;</button>
-            <h3>Manage User Voices</h3>
-            <p style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 16px;">
+            <h3 id="voiceModalTitle">Manage User Voices</h3>
+            <p id="voiceModalSubtitle" style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 16px;">
                 Assign specific voices to users from any platform.
             </p>
             <div id="userVoiceList" class="user-voice-list"></div>
