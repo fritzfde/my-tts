@@ -14,6 +14,7 @@ scripts/        # Startup/orchestration scripts
 
 - App settings are persisted server-side in SQLite at `apps/web/data/app-settings.sqlite`.
 - Animation overlay configs are also stored in the same SQLite DB.
+- Storage backend is selected by `DB_DRIVER` in `.env` (`sqlite` implemented, `postgres` planned).
 
 ## ✨ Features
 
