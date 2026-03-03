@@ -10,6 +10,11 @@ services/tts/   # Python TTS service code
 scripts/        # Startup/orchestration scripts
 ```
 
+## Settings Persistence
+
+- App settings are persisted server-side in SQLite at `apps/web/data/app-settings.sqlite`.
+- Animation overlay configs are also stored in the same SQLite DB.
+
 ## ✨ Features
 
 - 🎯 **Real YouTube Live Chat Integration** - Reads actual chat messages from your streams
@@ -163,7 +168,7 @@ Each operation uses approximately:
 
 ## Privacy & Security
 
-- API keys are stored in browser localStorage (not transmitted)
+- API keys and app settings are stored server-side in local SQLite (`apps/web/data/app-settings.sqlite`)
 - Your data never leaves your computer except for API calls
 - The proxy server only forwards requests to YouTube/ElevenLabs APIs
 

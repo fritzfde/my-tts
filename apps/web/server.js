@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { execFileSync } = require('child_process');
 
 const app = express();
 const PORT = 3000;
@@ -35,12 +36,201 @@ loadRootEnv();
 
 const TTS_SERVER_URL = (process.env.TTS_SERVER_URL || 'http://127.0.0.1:5000').replace(/\/+$/, '');
 const TTS_TIMEOUT_MS = 60000;
+const DEFAULT_SETTINGS_SCOPE = process.env.SETTINGS_SCOPE || 'local-dev';
+const SETTINGS_DB_DIR = path.join(__dirname, 'data');
+const SETTINGS_DB_FILE = path.join(SETTINGS_DB_DIR, 'app-settings.sqlite');
+const LEGACY_ANIMATION_CONFIG_FILE = path.join(__dirname, 'animation-config.json');
+
+const DEFAULT_ANIMATION_CONFIG = {
+  enabled: true,
+  mappings: {},
+  globalPosition: 'bottom-left',
+  globalScale: 1.0,
+  animationVolume: 100,
+  chroma: {
+    greenThreshold: 70,
+    tolerance: 60,
+    spillReduction: 0.5
+  }
+};
+
+function sqlQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function parseJsonRows(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return [];
+  return JSON.parse(text);
+}
+
+function runSql(sql, options = {}) {
+  const args = [];
+  if (options.json) args.push('-json');
+  args.push(SETTINGS_DB_FILE);
+  return execFileSync('sqlite3', args, {
+    input: sql,
+    encoding: 'utf8'
+  });
+}
+
+function normalizeAnimationConfig(config = {}) {
+  return {
+    enabled: config.enabled ?? true,
+    mappings: config.mappings || {},
+    globalPosition: config.globalPosition || 'bottom-left',
+    globalScale: config.globalScale || 1.0,
+    animationVolume: config.animationVolume ?? 100,
+    chroma: config.chroma || { greenThreshold: 70, tolerance: 60, spillReduction: 0.5 }
+  };
+}
+
+function getScopeSettings(scope = DEFAULT_SETTINGS_SCOPE) {
+  const rows = parseJsonRows(runSql(
+    `SELECT key, value FROM app_settings WHERE scope = ${sqlQuote(scope)};`,
+    { json: true }
+  ));
+
+  const settings = {};
+  rows.forEach((row) => {
+    settings[row.key] = row.value;
+  });
+
+  return settings;
+}
+
+function saveScopeSettings(scope = DEFAULT_SETTINGS_SCOPE, settings = {}) {
+  const entries = Object.entries(settings);
+  const statements = [
+    'BEGIN;',
+    `DELETE FROM app_settings WHERE scope = ${sqlQuote(scope)};`
+  ];
+
+  entries.forEach(([key, value]) => {
+    statements.push(
+      `INSERT INTO app_settings(scope, key, value, updated_at) VALUES(${sqlQuote(scope)}, ${sqlQuote(key)}, ${sqlQuote(value)}, CURRENT_TIMESTAMP);`
+    );
+  });
+
+  statements.push('COMMIT;');
+  runSql(statements.join('\n'));
+}
+
+function getAnimationConfig(name) {
+  const rows = parseJsonRows(runSql(
+    `SELECT config_json FROM animation_configs WHERE name = ${sqlQuote(name)} LIMIT 1;`,
+    { json: true }
+  ));
+
+  if (rows.length === 0 && name !== 'default') {
+    return getAnimationConfig('default');
+  }
+
+  if (rows.length === 0) {
+    return DEFAULT_ANIMATION_CONFIG;
+  }
+
+  return normalizeAnimationConfig(JSON.parse(rows[0].config_json));
+}
+
+function saveAnimationConfig(name, config) {
+  const normalized = normalizeAnimationConfig(config);
+  runSql(`
+    INSERT INTO animation_configs(name, config_json, updated_at)
+    VALUES(${sqlQuote(name)}, ${sqlQuote(JSON.stringify(normalized))}, CURRENT_TIMESTAMP)
+    ON CONFLICT(name) DO UPDATE SET
+      config_json = excluded.config_json,
+      updated_at = CURRENT_TIMESTAMP;
+  `);
+  return normalized;
+}
+
+function listAnimationConfigNames() {
+  const rows = parseJsonRows(runSql(
+    'SELECT name FROM animation_configs ORDER BY name ASC;',
+    { json: true }
+  ));
+  return rows.map((row) => row.name);
+}
+
+function deleteAnimationConfig(name) {
+  runSql(`DELETE FROM animation_configs WHERE name = ${sqlQuote(name)};`);
+}
+
+function initSettingsDb() {
+  fs.mkdirSync(SETTINGS_DB_DIR, { recursive: true });
+  runSql(`
+    PRAGMA journal_mode=WAL;
+    CREATE TABLE IF NOT EXISTS app_settings (
+      scope TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(scope, key)
+    );
+    CREATE TABLE IF NOT EXISTS animation_configs (
+      name TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  const configCount = Number(String(runSql('SELECT COUNT(*) FROM animation_configs;')).trim() || '0');
+  if (configCount > 0) return;
+
+  let seedConfigs = { default: DEFAULT_ANIMATION_CONFIG };
+  if (fs.existsSync(LEGACY_ANIMATION_CONFIG_FILE)) {
+    try {
+      const legacyRaw = fs.readFileSync(LEGACY_ANIMATION_CONFIG_FILE, 'utf8');
+      const legacyParsed = JSON.parse(legacyRaw);
+      if (legacyParsed && typeof legacyParsed === 'object' && Object.keys(legacyParsed).length > 0) {
+        seedConfigs = legacyParsed;
+        console.log('✓ Imported animation configs from legacy animation-config.json into SQLite');
+      }
+    } catch (err) {
+      console.warn('Failed to import legacy animation-config.json, using defaults:', err.message);
+    }
+  }
+
+  Object.entries(seedConfigs).forEach(([name, config]) => {
+    saveAnimationConfig(name, config);
+  });
+}
 
 const { WebcastPushConnection } = require('tiktok-live-connector');
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
+initSettingsDb();
+
+app.get('/api/settings', (req, res) => {
+  try {
+    const scope = String(req.query.scope || DEFAULT_SETTINGS_SCOPE);
+    const settings = getScopeSettings(scope);
+    res.json({ scope, settings });
+  } catch (err) {
+    console.error('Settings load error:', err);
+    res.status(500).json({ error: 'Failed to load settings' });
+  }
+});
+
+app.put('/api/settings', (req, res) => {
+  try {
+    const scope = String(req.body.scope || req.query.scope || DEFAULT_SETTINGS_SCOPE);
+    const settings = req.body.settings;
+
+    if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
+      return res.status(400).json({ error: 'settings must be an object' });
+    }
+
+    saveScopeSettings(scope, settings);
+    res.json({ success: true, scope, count: Object.keys(settings).length });
+  } catch (err) {
+    console.error('Settings save error:', err);
+    res.status(500).json({ error: 'Failed to save settings' });
+  }
+});
 
 // Proxy endpoint for YouTube API
 app.get('/api/youtube/*', async (req, res) => {
@@ -533,40 +723,12 @@ app.get('/api/sounds/list', (req, res) => {
 
 // ─── ANIMATION OVERLAY ENDPOINTS ────────────────────────────────────
 
-// ─── Animation Config Storage ───────────────────────────────────────
-
-const CONFIG_FILE = path.join(__dirname, 'animation-config.json');
-
-// Initialize config file if it doesn't exist
-function initConfigFile() {
-  if (!fs.existsSync(CONFIG_FILE)) {
-    const defaultConfig = {
-      "default": {
-        "enabled": true,
-        "mappings": {},
-        "globalPosition": "bottom-left",
-        "globalScale": 1.0,
-        "animationVolume": 100,
-        "chroma": {
-          "greenThreshold": 70,
-          "tolerance": 60,
-          "spillReduction": 0.5
-        }
-      }
-    };
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(defaultConfig, null, 2));
-    console.log('✓ Created animation-config.json');
-  }
-}
-
-// Initialize on server start
-initConfigFile();
+// ─── Animation Config Storage (SQLite) ──────────────────────────────
 
 // Load animation config
 app.get('/api/animations/config/:name', (req, res) => {
   try {
-    const allConfigs = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    const config = allConfigs[req.params.name] || allConfigs['default'];
+    const config = getAnimationConfig(req.params.name);
     res.json(config);
   } catch (err) {
     console.error('Config load error:', err);
@@ -577,25 +739,10 @@ app.get('/api/animations/config/:name', (req, res) => {
 // Save animation config
 app.post('/api/animations/config/:name', (req, res) => {
   try {
-    let allConfigs = {};
-    if (fs.existsSync(CONFIG_FILE)) {
-      allConfigs = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    }
-
-    // Ensure we are saving a clean object
-    allConfigs[req.params.name] = {
-        enabled: req.body.enabled ?? true,
-        mappings: req.body.mappings || {},
-        globalPosition: req.body.globalPosition || 'bottom-left',
-        globalScale: req.body.globalScale || 1.0,
-        animationVolume: req.body.animationVolume ?? 100,
-        chroma: req.body.chroma || { greenThreshold: 70, tolerance: 60, spillReduction: 0.5 }
-    };
-
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(allConfigs, null, 2));
+    const savedConfig = saveAnimationConfig(req.params.name, req.body || {});
     console.log(`✓ Saved animation config: ${req.params.name}`);
 
-    const payload = JSON.stringify({ type: 'config', config: allConfigs[req.params.name] });
+    const payload = JSON.stringify({ type: 'config', config: savedConfig });
     animationClients.forEach(client => {
       try {
         client.res.write(`data: ${payload}\n\n`);
@@ -614,8 +761,8 @@ app.post('/api/animations/config/:name', (req, res) => {
 // List all available configs
 app.get('/api/animations/configs', (req, res) => {
   try {
-    const allConfigs = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    res.json({ configs: Object.keys(allConfigs) });
+    const configs = listAnimationConfigNames();
+    res.json({ configs });
   } catch (err) {
     res.status(500).json({ error: 'Failed to list configs' });
   }
@@ -628,9 +775,7 @@ app.delete('/api/animations/config/:name', (req, res) => {
       return res.status(400).json({ error: 'Cannot delete default config' });
     }
 
-    const allConfigs = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    delete allConfigs[req.params.name];
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(allConfigs, null, 2));
+    deleteAnimationConfig(req.params.name);
 
     console.log(`✓ Deleted config: ${req.params.name}`);
     res.json({ success: true });

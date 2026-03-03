@@ -1,3 +1,100 @@
+// Server-backed settings store (SQLite via backend API)
+const SETTINGS_SCOPE = new URLSearchParams(window.location.search).get('scope') || 'local-dev';
+const SETTINGS_SYNC_DEBOUNCE_MS = 400;
+let settingsSyncReady = false;
+let settingsSyncTimer = null;
+const settingsMap = new Map();
+
+function getSettingsSnapshot() {
+  const snapshot = {};
+  settingsMap.forEach((value, key) => {
+    snapshot[key] = value;
+  });
+  return snapshot;
+}
+
+function persistSettingsToServer() {
+  const payload = {
+    scope: SETTINGS_SCOPE,
+    settings: getSettingsSnapshot()
+  };
+
+  return fetch('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).catch((err) => {
+    console.error('Failed to persist settings to server DB:', err);
+  });
+}
+
+function scheduleSettingsSync() {
+  if (!settingsSyncReady) return;
+  if (settingsSyncTimer) clearTimeout(settingsSyncTimer);
+  settingsSyncTimer = setTimeout(() => {
+    settingsSyncTimer = null;
+    persistSettingsToServer();
+  }, SETTINGS_SYNC_DEBOUNCE_MS);
+}
+
+function loadSettingsFromServerSync() {
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', `/api/settings?scope=${encodeURIComponent(SETTINGS_SCOPE)}`, false);
+    xhr.send();
+
+    if (xhr.status < 200 || xhr.status >= 300) {
+      console.warn('Settings DB load failed:', xhr.status);
+      return null;
+    }
+
+    const data = JSON.parse(xhr.responseText || '{}');
+    if (!data.settings || typeof data.settings !== 'object') return {};
+    return data.settings;
+  } catch (err) {
+    console.warn('Settings DB not available at startup, continuing with empty settings store:', err);
+    return null;
+  }
+}
+
+const settingsStore = {
+  get length() {
+    return settingsMap.size;
+  },
+  key(index) {
+    return Array.from(settingsMap.keys())[index] || null;
+  },
+  getItem(key) {
+    return settingsMap.has(key) ? settingsMap.get(key) : null;
+  },
+  setItem(key, value) {
+    settingsMap.set(String(key), String(value));
+    scheduleSettingsSync();
+  },
+  removeItem(key) {
+    settingsMap.delete(String(key));
+    scheduleSettingsSync();
+  },
+  clear() {
+    settingsMap.clear();
+    scheduleSettingsSync();
+  }
+};
+
+function hydrateSettingsStoreFromServer() {
+  const serverSettings = loadSettingsFromServerSync();
+  if (!serverSettings) return;
+
+  settingsMap.clear();
+  Object.entries(serverSettings).forEach(([key, value]) => {
+    settingsMap.set(key, String(value));
+  });
+  console.log(`✓ Loaded ${settingsMap.size} settings from server DB`);
+}
+
+hydrateSettingsStoreFromServer();
+settingsSyncReady = true;
+
 // TTS Configuration
 const synth = window.speechSynthesis;
 let voices = [];
@@ -18,7 +115,7 @@ let userAnimationPermissions = {}; // username → 'allow' | 'deny'
 
 // Load permissions
 function loadAnimationPermissions() {
-  const saved = localStorage.getItem('animation_permissions');
+  const saved = settingsStore.getItem('animation_permissions');
   if (saved) {
     try {
       const data = JSON.parse(saved);
@@ -32,7 +129,7 @@ function loadAnimationPermissions() {
 
 // Save permissions
 function saveAnimationPermissions() {
-  localStorage.setItem('animation_permissions', JSON.stringify({
+  settingsStore.setItem('animation_permissions', JSON.stringify({
     global: globalAnimationTriggerEnabled,
     users: userAnimationPermissions
   }));
@@ -407,8 +504,8 @@ function loadVoices() {
   });
 
   // Restore saved preferences
-  const savedYTVoice = localStorage.getItem('youtube_default_voice');
-  const savedTTVoice = localStorage.getItem('tiktok_default_voice');
+  const savedYTVoice = settingsStore.getItem('youtube_default_voice');
+  const savedTTVoice = settingsStore.getItem('tiktok_default_voice');
 
   if (savedYTVoice && Array.from(ytSelect.options).some(opt => opt.value === savedYTVoice)) {
     ytSelect.value = savedYTVoice;
@@ -449,14 +546,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (ytSelect) {
     ytSelect.addEventListener('change', () => {
-      localStorage.setItem('youtube_default_voice', ytSelect.value);
+      settingsStore.setItem('youtube_default_voice', ytSelect.value);
       console.log('Saved YouTube default voice:', ytSelect.value);
     });
   }
 
   if (ttSelect) {
     ttSelect.addEventListener('change', () => {
-      localStorage.setItem('tiktok_default_voice', ttSelect.value);
+      settingsStore.setItem('tiktok_default_voice', ttSelect.value);
       console.log('Saved TikTok default voice:', ttSelect.value);
     });
   }
@@ -464,7 +561,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Load user voice mappings
 function loadUserVoices() {
-  const saved = localStorage.getItem('user_voices');
+  const saved = settingsStore.getItem('user_voices');
   if (saved) {
     try {
       userVoices = JSON.parse(saved);
@@ -473,7 +570,7 @@ function loadUserVoices() {
     }
   }
 
-  const savedRecentUsers = localStorage.getItem('recent_users');
+  const savedRecentUsers = settingsStore.getItem('recent_users');
   if (savedRecentUsers) {
     try {
       recentUsers = JSON.parse(savedRecentUsers);
@@ -485,8 +582,8 @@ function loadUserVoices() {
 
 // Save user voice mappings
 function saveUserVoices() {
-  localStorage.setItem('user_voices', JSON.stringify(userVoices));
-  localStorage.setItem('recent_users', JSON.stringify(recentUsers));
+  settingsStore.setItem('user_voices', JSON.stringify(userVoices));
+  settingsStore.setItem('recent_users', JSON.stringify(recentUsers));
 }
 
 // Get voice for specific user (with platform)
@@ -524,19 +621,19 @@ function addRecentUser(userKey) {
     if (recentUsers.length > 20) {
       recentUsers = recentUsers.slice(0, 20);
     }
-    localStorage.setItem('recent_users', JSON.stringify(recentUsers));
+    settingsStore.setItem('recent_users', JSON.stringify(recentUsers));
   }
 }
 
 // Load saved settings
 function loadSettings() {
   // API keys — stored as JSON array; fall back to legacy comma-separated string
-  const savedKeys = localStorage.getItem('yt_tts_api_keys');
+  const savedKeys = settingsStore.getItem('yt_tts_api_keys');
   if (savedKeys) {
     try { apiKeys = JSON.parse(savedKeys); } catch(e) { apiKeys = []; }
   } else {
     // Legacy single-key fallback
-    const legacy = localStorage.getItem('yt_tts_api_key');
+    const legacy = settingsStore.getItem('yt_tts_api_key');
     if (legacy) {
       apiKeys = legacy.split(',').map(k => k.trim()).filter(k => k.length > 0);
     } else {
@@ -545,30 +642,30 @@ function loadSettings() {
   }
   renderApiKeyTags();
 
-  const savedChannelUrl = localStorage.getItem('yt_tts_channel_url');
+  const savedChannelUrl = settingsStore.getItem('yt_tts_channel_url');
   channelUrlInput.value = savedChannelUrl || 'https://www.youtube.com/@TESLAbot-CODM';
 
-  const savedStreamUrl = localStorage.getItem('yt_tts_stream_url');
+  const savedStreamUrl = settingsStore.getItem('yt_tts_stream_url');
   if (savedStreamUrl) streamUrlInput.value = savedStreamUrl;
 
-  const savedTikTokUsername = localStorage.getItem('tiktok_username_cache');
+  const savedTikTokUsername = settingsStore.getItem('tiktok_username_cache');
   if (savedTikTokUsername) document.getElementById('tiktokUsername').value = savedTikTokUsername;
 
-  const savedTestMessage = localStorage.getItem('yt_tts_test_message');
+  const savedTestMessage = settingsStore.getItem('yt_tts_test_message');
   testMessageInput.value = savedTestMessage || 'Are you already subscribe to my YouTube? Wait, what!? Bro!';
 
-  const savedVolume = localStorage.getItem('yt_tts_volume');
+  const savedVolume = settingsStore.getItem('yt_tts_volume');
   volumeSlider.value = savedVolume || '100';
   volumeValue.textContent = volumeSlider.value + '%';
 }
 
 // Save settings
 function saveSettings() {
-  localStorage.setItem('yt_tts_api_keys', JSON.stringify(apiKeys));
+  settingsStore.setItem('yt_tts_api_keys', JSON.stringify(apiKeys));
   const channelUrl    = channelUrlInput.value.trim();
   const streamUrl     = streamUrlInput.value.trim();
-  if (channelUrl)    localStorage.setItem('yt_tts_channel_url', channelUrl);
-  if (streamUrl)     localStorage.setItem('yt_tts_stream_url', streamUrl);
+  if (channelUrl)    settingsStore.setItem('yt_tts_channel_url', channelUrl);
+  if (streamUrl)     settingsStore.setItem('yt_tts_stream_url', streamUrl);
 }
 
 // Auto-save when fields change
@@ -578,12 +675,12 @@ streamUrlInput.addEventListener('change', saveSettings);
 // Volume slider live update
 volumeSlider.addEventListener('input', () => {
   volumeValue.textContent = volumeSlider.value + '%';
-  localStorage.setItem('yt_tts_volume', volumeSlider.value);
+  settingsStore.setItem('yt_tts_volume', volumeSlider.value);
 });
 
 // Test message auto-save
 testMessageInput.addEventListener('change', () => {
-  localStorage.setItem('yt_tts_test_message', testMessageInput.value);
+  settingsStore.setItem('yt_tts_test_message', testMessageInput.value);
 });
 
 // Extract channel ID
@@ -1210,7 +1307,7 @@ document.getElementById('connectTikTokBtn').addEventListener('click', async () =
     return;
   }
 
-  localStorage.setItem('tiktok_username_cache', username);
+  settingsStore.setItem('tiktok_username_cache', username);
 
   const connectBtn = document.getElementById('connectTikTokBtn');
   const disconnectBtn = document.getElementById('disconnectTikTokBtn');
@@ -1788,7 +1885,7 @@ if (uploadSoundBtn) {
         giftSoundSelect.appendChild(option);
         giftSoundSelect.value = option.value;
 
-        localStorage.setItem('gift_sound_preference', option.value);
+        settingsStore.setItem('gift_sound_preference', option.value);
 
         updateStatus(`✓ Sound uploaded: ${data.filename}`, false);
         customSoundUpload.value = '';
@@ -1822,7 +1919,7 @@ async function loadCustomSounds() {
       });
     }
 
-    const savedSound = localStorage.getItem('gift_sound_preference');
+    const savedSound = settingsStore.getItem('gift_sound_preference');
     if (giftSoundSelect && savedSound) {
       const hasOption = Array.from(giftSoundSelect.options).some(opt => opt.value === savedSound);
       if (hasOption) giftSoundSelect.value = savedSound;
@@ -1836,7 +1933,7 @@ async function loadCustomSounds() {
 // Save sound preference
 if (giftSoundSelect) {
   giftSoundSelect.addEventListener('change', () => {
-    localStorage.setItem('gift_sound_preference', giftSoundSelect.value);
+    settingsStore.setItem('gift_sound_preference', giftSoundSelect.value);
   });
 }
 
@@ -1883,10 +1980,10 @@ const femaleVoiceSelect = document.getElementById('femaleVoiceSelect');
 // Gender cache (persistent across sessions)
 let genderCache = {};
 
-// Load gender cache from localStorage
+// Load gender cache from settingsStore
 function loadGenderCache() {
   try {
-    const saved = localStorage.getItem('gender_cache');
+    const saved = settingsStore.getItem('gender_cache');
     if (saved) genderCache = JSON.parse(saved);
   } catch (e) {
     console.error('Error loading gender cache:', e);
@@ -1894,10 +1991,10 @@ function loadGenderCache() {
   }
 }
 
-// Save gender cache to localStorage
+// Save gender cache to settingsStore
 function saveGenderCache() {
   try {
-    localStorage.setItem('gender_cache', JSON.stringify(genderCache));
+    settingsStore.setItem('gender_cache', JSON.stringify(genderCache));
   } catch (e) {
     console.error('Error saving gender cache:', e);
   }
@@ -1949,8 +2046,8 @@ function populateGenderVoiceSelects() {
   );
 
   // Restore saved preferences or use auto-detected
-  const savedMale = localStorage.getItem('default_male_voice');
-  const savedFemale = localStorage.getItem('default_female_voice');
+  const savedMale = settingsStore.getItem('default_male_voice');
+  const savedFemale = settingsStore.getItem('default_female_voice');
 
   if (savedMale && Array.from(maleVoiceSelect.options).some(opt => opt.value === savedMale)) {
     maleVoiceSelect.value = savedMale;
@@ -1970,14 +2067,14 @@ function populateGenderVoiceSelects() {
 // Save preferences when changed
 if (maleVoiceSelect) {
   maleVoiceSelect.addEventListener('change', () => {
-    localStorage.setItem('default_male_voice', maleVoiceSelect.value);
+    settingsStore.setItem('default_male_voice', maleVoiceSelect.value);
     console.log('Saved default male voice:', maleVoiceSelect.value);
   });
 }
 
 if (femaleVoiceSelect) {
   femaleVoiceSelect.addEventListener('change', () => {
-    localStorage.setItem('default_female_voice', femaleVoiceSelect.value);
+    settingsStore.setItem('default_female_voice', femaleVoiceSelect.value);
     console.log('Saved default female voice:', femaleVoiceSelect.value);
   });
 }
@@ -2631,7 +2728,7 @@ let giftMappings = {
 
 // Load gift mappings
 function loadGiftMappings() {
-  const saved = localStorage.getItem('gift_mappings');
+  const saved = settingsStore.getItem('gift_mappings');
   if (saved) {
     try {
       giftMappings = JSON.parse(saved);
@@ -2644,7 +2741,7 @@ function loadGiftMappings() {
 
 // Save gift mappings
 function saveGiftMappings() {
-  localStorage.setItem('gift_mappings', JSON.stringify(giftMappings));
+  settingsStore.setItem('gift_mappings', JSON.stringify(giftMappings));
 }
 
 // Get action for a gift (returns { type, value } or null)
@@ -2705,7 +2802,7 @@ let stickerMappings = {}; // emoteId or emoteName → animation trigger
 
 // Load sticker mappings
 function loadStickerMappings() {
-  const saved = localStorage.getItem('sticker_mappings');
+  const saved = settingsStore.getItem('sticker_mappings');
   if (saved) {
     try {
       stickerMappings = JSON.parse(saved);
@@ -2718,7 +2815,7 @@ function loadStickerMappings() {
 
 // Save sticker mappings
 function saveStickerMappings() {
-  localStorage.setItem('sticker_mappings', JSON.stringify(stickerMappings));
+  settingsStore.setItem('sticker_mappings', JSON.stringify(stickerMappings));
 }
 
 // Render sticker mappings
@@ -2909,13 +3006,13 @@ if (speechSynthesis.onvoiceschanged !== undefined) {
 // Save auto-detection preference
 if (autoGenderDetectionCheckbox) {
   // Load saved preference
-  const savedPref = localStorage.getItem('auto_gender_detection');
+  const savedPref = settingsStore.getItem('auto_gender_detection');
   if (savedPref === 'true') {
     autoGenderDetectionCheckbox.checked = true;
   }
 
   autoGenderDetectionCheckbox.addEventListener('change', () => {
-    localStorage.setItem('auto_gender_detection', autoGenderDetectionCheckbox.checked);
+    settingsStore.setItem('auto_gender_detection', autoGenderDetectionCheckbox.checked);
     console.log('Auto gender detection:', autoGenderDetectionCheckbox.checked ? 'enabled' : 'disabled');
   });
 }
@@ -2992,9 +3089,9 @@ function updateAnimationVolumeLabel() {
   animationVolumeValue.textContent = `${animationVolumeSlider.value}%`;
 }
 
-// Load animation mappings from localStorage
+// Load animation mappings from settingsStore
 function loadAnimationMappings() {
-  const saved = localStorage.getItem('animation_mappings');
+  const saved = settingsStore.getItem('animation_mappings');
   if (saved) {
     try {
       animationMappings = JSON.parse(saved);
@@ -3007,10 +3104,10 @@ function loadAnimationMappings() {
   }
 }
 
-// Save animation mappings to server AND localStorage
+// Save animation mappings to server AND settingsStore
 async function saveAnimationMappings() {
-  // Save to localStorage (backup)
-  localStorage.setItem('animation_mappings', JSON.stringify(animationMappings));
+  // Save to settingsStore (backup)
+  settingsStore.setItem('animation_mappings', JSON.stringify(animationMappings));
   
   // Save to server
   try {
@@ -3233,26 +3330,26 @@ if (addAnimationMappingBtn) {
 const animationsEnabledCheckbox = document.getElementById('animationsEnabled');
 if (animationsEnabledCheckbox) {
   // Load saved state
-  const saved = localStorage.getItem('animations_enabled');
+  const saved = settingsStore.getItem('animations_enabled');
   if (saved !== null) {
     animationsEnabledCheckbox.checked = saved === 'true';
   }
 
   animationsEnabledCheckbox.addEventListener('change', () => {
-    localStorage.setItem('animations_enabled', animationsEnabledCheckbox.checked);
+    settingsStore.setItem('animations_enabled', animationsEnabledCheckbox.checked);
     console.log('Animations:', animationsEnabledCheckbox.checked ? 'enabled ✅' : 'disabled ❌');
   });
 }
 
 if (animationVolumeSlider) {
-  const savedAnimationVolume = localStorage.getItem('animation_volume');
+  const savedAnimationVolume = settingsStore.getItem('animation_volume');
   if (savedAnimationVolume !== null) {
     animationVolumeSlider.value = savedAnimationVolume;
   }
   updateAnimationVolumeLabel();
 
   animationVolumeSlider.addEventListener('input', () => {
-    localStorage.setItem('animation_volume', animationVolumeSlider.value);
+    settingsStore.setItem('animation_volume', animationVolumeSlider.value);
     updateAnimationVolumeLabel();
     saveAnimationMappings();
   });
@@ -3264,7 +3361,7 @@ const chromaToleranceSlider = document.getElementById('chromaTolerance');
 
 if (greenThresholdSlider && chromaToleranceSlider) {
   // Load saved values
-  const savedChroma = localStorage.getItem('chroma_key_settings');
+  const savedChroma = settingsStore.getItem('chroma_key_settings');
   if (savedChroma) {
     try {
       const settings = JSON.parse(savedChroma);
@@ -3295,7 +3392,7 @@ if (greenThresholdSlider && chromaToleranceSlider) {
       tolerance: parseInt(chromaToleranceSlider.value),
       spillReduction: 0.5
     };
-    localStorage.setItem('chroma_key_settings', JSON.stringify(settings));
+    settingsStore.setItem('chroma_key_settings', JSON.stringify(settings));
     console.log('✓ Chroma key settings saved:', settings);
   }
 
@@ -3358,9 +3455,9 @@ const showAllVoicesBtn = document.getElementById('showAllVoicesBtn');
 const hiddenVoicesContainer = document.getElementById('hiddenVoicesContainer');
 const hiddenVoicesList = document.getElementById('hiddenVoicesList');
 
-// Load hidden voices from localStorage
+// Load hidden voices from settingsStore
 function loadHiddenVoices() {
-  const saved = localStorage.getItem('hidden_voices');
+  const saved = settingsStore.getItem('hidden_voices');
   if (saved) {
     try {
       hiddenVoices = new Set(JSON.parse(saved));
@@ -3371,9 +3468,9 @@ function loadHiddenVoices() {
   }
 }
 
-// Save hidden voices to localStorage
+// Save hidden voices to settingsStore
 function saveHiddenVoices() {
-  localStorage.setItem('hidden_voices', JSON.stringify(Array.from(hiddenVoices)));
+  settingsStore.setItem('hidden_voices', JSON.stringify(Array.from(hiddenVoices)));
   console.log(`✓ Saved ${hiddenVoices.size} hidden voices`);
 }
 
@@ -3520,8 +3617,8 @@ document.querySelectorAll('.lang-filter').forEach(checkbox => {
       enabledLanguages.delete(lang);
     }
 
-    // Save to localStorage
-    localStorage.setItem('enabled_languages', JSON.stringify(Array.from(enabledLanguages)));
+    // Save to settingsStore
+    settingsStore.setItem('enabled_languages', JSON.stringify(Array.from(enabledLanguages)));
 
     console.log(`✓ Language filter updated: ${lang} ${e.target.checked ? 'enabled' : 'disabled'}`);
 
@@ -3532,7 +3629,7 @@ document.querySelectorAll('.lang-filter').forEach(checkbox => {
 
 // Load saved language filters
 function loadLanguageFilters() {
-  const saved = localStorage.getItem('enabled_languages');
+  const saved = settingsStore.getItem('enabled_languages');
   if (saved) {
     try {
       const langs = JSON.parse(saved);
@@ -3602,14 +3699,14 @@ console.log('✓ Language filter system initialized');
 const animationPositionSelect = document.getElementById('animationPosition');
 if (animationPositionSelect) {
   // Load saved position
-  const savedPosition = localStorage.getItem('animation_position');
+  const savedPosition = settingsStore.getItem('animation_position');
   if (savedPosition) {
     animationPositionSelect.value = savedPosition;
   }
 
   // Save on change
   animationPositionSelect.addEventListener('change', () => {
-    localStorage.setItem('animation_position', animationPositionSelect.value);
+    settingsStore.setItem('animation_position', animationPositionSelect.value);
     console.log('✓ Animation position saved:', animationPositionSelect.value);
   });
 }

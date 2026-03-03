@@ -44,4 +44,7 @@ animation-config.json
 apps/web/animations/*
 !apps/web/animations/elon.mov
 !apps/web/animations/trump.mov
+apps/web/data/*.sqlite
+apps/web/data/*.sqlite-shm
+apps/web/data/*.sqlite-wal
 copilot-instructions.md
