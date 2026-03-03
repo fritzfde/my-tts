@@ -365,15 +365,55 @@
                 <div id="animationMappingsList" class="animation-mappings-grid" style="max-height: 500px; overflow-y: auto; padding-right: 5px;">
                     <!-- Mapping items will be added here dynamically -->
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 8px;">
-                    <select id="newAnimationMappingFile" style="font-size: 0.875rem; padding: 8px;">
-                        <option value="">Select animation file</option>
-                    </select>
-                    <button id="addAnimationMappingBtn" class="secondary">+ Add Mapping</button>
-                    <button id="autoMapAnimationsBtn" class="secondary">⚡ Auto-Map All</button>
+                <div style="display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 8px;">
+                    <button id="uploadAnimationBtn" class="secondary">⬆️ Upload Animation</button>
+                    <button id="syncAnimationsBtn" class="secondary">🔄 Sync all</button>
                 </div>
+                <input type="file" id="uploadAnimationInput" accept=".mov,.mp4,.webm,.avi" style="display: none;">
                 <div style="margin-top: 8px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                    ⚠️ Auto-map and filename-based add use trigger names from file names. If a trigger already exists, that mapping will be overwritten.
+                    Hover a card to see its animation name. Click thumbnail to preview. Use ⚙️ for rename, scale, or delete file.
+                </div>
+
+                <div id="animationCardPopup" class="animation-card-popup" style="display: none;">
+                    <div class="animation-card-popup-backdrop"></div>
+                    <div class="animation-card-popup-panel">
+                        <h4>Animation Settings</h4>
+                        <div class="input-group" style="margin-bottom: 10px;">
+                            <div class="animation-popup-top-row">
+                                <div>
+                                    <label>Name</label>
+                                    <input type="text" id="animationPopupName" placeholder="Animation name">
+                                </div>
+                                <div class="animation-popup-scale-wrap">
+                                    <label class="animation-popup-scale-label">Scale</label>
+                                    <div class="animation-popup-scale-controls">
+                                        <input type="number" id="animationPopupScale" class="animation-popup-scale-input" min="0.5" max="3" step="0.25">
+                                        <button type="button" id="animationPopupScaleDownBtn" class="secondary animation-scale-btn" title="Decrease scale">▼</button>
+                                        <button type="button" id="animationPopupScaleUpBtn" class="secondary animation-scale-btn" title="Increase scale">▲</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="input-group" style="margin-bottom: 14px;">
+                            <label>Position</label>
+                            <div id="animationPopupPositionGrid" class="animation-position-grid">
+                                <button type="button" class="secondary animation-position-btn" data-position="top-left" title="Top Left">↖</button>
+                                <button type="button" class="secondary animation-position-btn" data-position="top-center" title="Top Center">↑</button>
+                                <button type="button" class="secondary animation-position-btn" data-position="top-right" title="Top Right">↗</button>
+                                <button type="button" class="secondary animation-position-btn" data-position="center-left" title="Center Left">←</button>
+                                <button type="button" class="secondary animation-position-btn" data-position="center" title="Center">•</button>
+                                <button type="button" class="secondary animation-position-btn" data-position="center-right" title="Center Right">→</button>
+                                <button type="button" class="secondary animation-position-btn" data-position="bottom-left" title="Bottom Left">↙</button>
+                                <button type="button" class="secondary animation-position-btn" data-position="bottom-center" title="Bottom Center">↓</button>
+                                <button type="button" class="secondary animation-position-btn" data-position="bottom-right" title="Bottom Right">↘</button>
+                            </div>
+                        </div>
+                        <div class="animation-card-popup-actions">
+                            <button id="animationPopupSaveBtn">Save</button>
+                            <button id="animationPopupDeleteBtn" class="secondary">🗑️ Delete File</button>
+                            <button id="animationPopupCancelBtn" class="secondary">Cancel</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 

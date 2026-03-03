@@ -628,34 +628,37 @@ input[type="range"] {
 /* Animation mapping cards and thumbnails */
 .animation-mappings-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 10px;
 }
 
 .animation-mapping-card {
-  display: grid;
-  grid-template-rows: auto auto;
-  gap: 8px;
-  padding: 8px;
+  position: relative;
+  aspect-ratio: 1 / 1;
   background: rgba(255, 255, 255, 0.03);
   border-radius: 8px;
-  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.animation-mapping-card:hover {
+  border-color: #3b82f6;
 }
 
 .animation-thumb-btn {
-  position: relative;
+  position: absolute;
+  inset: 0;
   width: 100%;
-  height: 110px;
+  height: 100%;
   padding: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: none;
+  border-radius: 0;
   background: #111;
   cursor: pointer;
 }
 
 .animation-thumb-btn:hover {
-  border-color: #3b82f6;
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.6);
 }
 
 .animation-thumb-video {
@@ -668,71 +671,138 @@ input[type="range"] {
 
 .animation-thumb-overlay {
   position: absolute;
-  right: 6px;
-  bottom: 6px;
-  padding: 2px 7px;
+  left: 8px;
+  bottom: 8px;
+  right: 8px;
+  padding: 3px 8px;
   border-radius: 999px;
   background: rgba(0, 0, 0, 0.65);
   color: #fff;
   font-size: 0.7rem;
   letter-spacing: 0.02em;
-}
-
-.animation-mapping-bottom {
-  display: grid;
-  grid-template-columns: 1fr minmax(120px, 140px);
-  gap: 6px;
-}
-
-.animation-mapping-left {
-  display: grid;
-  grid-template-rows: auto auto;
-  gap: 6px;
-}
-
-.animation-mapping-right {
-  display: grid;
-  grid-template-rows: auto auto;
-  gap: 6px;
-}
-
-.animation-mapping-actions {
-  display: grid;
-  grid-template-columns: 68px 1fr;
-  gap: 6px;
-  align-items: center;
-}
-
-.animation-mapping-actions .mapping-scale {
-  width: 100%;
-}
-
-.animation-mapping-actions .remove-mapping-btn {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-@media (max-width: 1200px) {
-  .animation-mappings-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
+.animation-gear-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(4px);
 }
 
-@media (max-width: 980px) {
-  .animation-mappings-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
+.animation-gear-btn:hover {
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.animation-card-popup {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+
+.animation-card-popup-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.animation-card-popup-panel {
+  position: relative;
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #141922;
+  z-index: 1;
+}
+
+.animation-card-popup-panel h4 {
+  margin: 0 0 12px;
+  font-size: 0.95rem;
+}
+
+.animation-popup-top-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.animation-popup-scale-wrap {
+  display: grid;
+  gap: 4px;
+}
+
+.animation-popup-scale-label {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.animation-popup-scale-controls {
+  display: grid;
+  grid-template-columns: 84px 42px 42px;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.animation-popup-scale-input {
+  text-align: center;
+  min-height: 40px;
+}
+
+.animation-scale-btn {
+  min-height: 40px;
+  padding: 0;
+  font-size: 1rem;
+}
+
+.animation-position-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.animation-position-btn {
+  min-height: 34px;
+  padding: 6px 0;
+  font-size: 0.95rem;
+}
+
+.animation-position-btn.active {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.25);
+  color: #fff;
+}
+
+.animation-card-popup-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
 }
 
 @media (max-width: 640px) {
-  .animation-mappings-grid {
+  .animation-popup-top-row {
     grid-template-columns: 1fr;
   }
 
-  .animation-mapping-bottom {
+  .animation-card-popup-actions {
     grid-template-columns: 1fr;
-  }
-
-  .animation-mapping-actions {
-    grid-template-columns: 68px 1fr;
   }
 }

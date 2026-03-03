@@ -527,7 +527,7 @@ const soundStorage = multer.diskStorage({
     }
 });
 
-const upload = multer({
+const soundUpload = multer({
     storage: soundStorage,
     fileFilter: (req, file, cb) => {
         const allowed = ['.mp3', '.wav', '.ogg'];
@@ -541,7 +541,7 @@ const upload = multer({
     limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
 });
 
-app.post('/api/sounds/upload', upload.single('sound'), (req, res) => {
+app.post('/api/sounds/upload', soundUpload.single('sound'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -693,19 +693,135 @@ app.post('/api/animations/trigger', (req, res) => {
   res.json({ success: true, clients: animationClients.length });
 });
 
-// List available animation files
-app.get('/api/animations/list', (req, res) => {
-  const animationsDir = path.join(__dirname, 'animations');
+const ALLOWED_ANIMATION_EXTENSIONS = new Set(['.mov', '.mp4', '.webm', '.avi']);
 
+function getAnimationsDir() {
+  return path.join(__dirname, 'animations');
+}
+
+function ensureAnimationsDir() {
+  const animationsDir = getAnimationsDir();
   if (!fs.existsSync(animationsDir)) {
     fs.mkdirSync(animationsDir, { recursive: true });
   }
+  return animationsDir;
+}
+
+function sanitizeFileBaseName(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 64) || 'animation';
+}
+
+function buildUniqueFilename(dir, baseName, ext) {
+  let counter = 0;
+  let candidate = `${baseName}${ext}`;
+  while (fs.existsSync(path.join(dir, candidate))) {
+    counter += 1;
+    candidate = `${baseName}-${counter}${ext}`;
+  }
+  return candidate;
+}
+
+const animationUploadStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, ensureAnimationsDir()),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const safeExt = ALLOWED_ANIMATION_EXTENSIONS.has(ext) ? ext : '.mov';
+    cb(null, `upload-${Date.now()}-${Math.random().toString(36).slice(2, 9)}${safeExt}`);
+  }
+});
+
+const animationUpload = multer({
+  storage: animationUploadStorage,
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!ALLOWED_ANIMATION_EXTENSIONS.has(ext)) {
+      cb(new Error('Only video files (.mov, .mp4, .webm, .avi) are allowed'));
+      return;
+    }
+    cb(null, true);
+  },
+  limits: { fileSize: 200 * 1024 * 1024 } // 200MB
+});
+
+app.post('/api/animations/upload', (req, res) => {
+  animationUpload.single('animation')(req, res, (uploadErr) => {
+    if (uploadErr) {
+      return res.status(400).json({ error: uploadErr.message || 'Upload failed' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    try {
+      const animationsDir = ensureAnimationsDir();
+      const ext = path.extname(req.file.filename).toLowerCase();
+      const requestedName = String(req.body?.name || '').trim();
+      const originalBase = path.basename(req.file.originalname, path.extname(req.file.originalname));
+      const baseName = sanitizeFileBaseName(requestedName || originalBase);
+      const finalFilename = buildUniqueFilename(animationsDir, baseName, ext);
+      const finalPath = path.join(animationsDir, finalFilename);
+
+      fs.renameSync(req.file.path, finalPath);
+
+      res.json({
+        success: true,
+        filename: finalFilename,
+        name: path.basename(finalFilename, ext),
+        path: `/animations/${finalFilename}`
+      });
+    } catch (err) {
+      try {
+        if (req.file?.path && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+      } catch (cleanupErr) {
+        console.error('Animation upload cleanup error:', cleanupErr);
+      }
+      console.error('Animation upload error:', err);
+      res.status(500).json({ error: 'Failed to save uploaded animation' });
+    }
+  });
+});
+
+app.delete('/api/animations/file/:filename', (req, res) => {
+  try {
+    const animationsDir = ensureAnimationsDir();
+    const filename = path.basename(String(req.params.filename || ''));
+    if (!filename) {
+      return res.status(400).json({ error: 'Filename is required' });
+    }
+
+    const ext = path.extname(filename).toLowerCase();
+    if (!ALLOWED_ANIMATION_EXTENSIONS.has(ext)) {
+      return res.status(400).json({ error: 'Invalid animation file type' });
+    }
+
+    const filePath = path.join(animationsDir, filename);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Animation file not found' });
+    }
+
+    fs.unlinkSync(filePath);
+    res.json({ success: true, filename });
+  } catch (err) {
+    console.error('Animation delete error:', err);
+    res.status(500).json({ error: 'Failed to delete animation file' });
+  }
+});
+
+// List available animation files
+app.get('/api/animations/list', (req, res) => {
+  const animationsDir = ensureAnimationsDir();
 
   try {
     const files = fs.readdirSync(animationsDir)
       .filter(file => {
         const ext = path.extname(file).toLowerCase();
-        return ['.mov', '.mp4', '.webm', '.avi'].includes(ext);
+        return ALLOWED_ANIMATION_EXTENSIONS.has(ext);
       })
       .map(filename => ({
         filename: filename,

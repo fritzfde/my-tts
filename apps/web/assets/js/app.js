@@ -3116,29 +3116,95 @@ function toAnimationMappingObject(data, fallbackFilename = '') {
   return createDefaultAnimationMapping(typeof data === 'string' ? data : fallbackFilename);
 }
 
-function renderNewAnimationFileOptions() {
-  const select = document.getElementById('newAnimationMappingFile');
-  if (!select) return;
+function escapeAttribute(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
 
-  if (availableAnimations.length === 0) {
-    select.innerHTML = '<option value="">Select a file</option>';
-    select.disabled = true;
-    return;
+function getAnimationFileFromMapping(data) {
+  if (typeof data === 'string') return data;
+  if (typeof data === 'object' && data !== null) return data.file || '';
+  return '';
+}
+
+function findAnimationMappingEntryByFile(filename, source = animationMappings) {
+  for (const [trigger, data] of Object.entries(source)) {
+    if (getAnimationFileFromMapping(data) === filename) {
+      return { trigger, data: toAnimationMappingObject(data, filename) };
+    }
+  }
+  return null;
+}
+
+function buildUniqueAnimationTrigger(base, source = animationMappings, ignoreTrigger = '') {
+  const cleanBase = (base || 'animation').trim().toLowerCase();
+  let candidate = cleanBase || 'animation';
+  let index = 1;
+  while (Object.prototype.hasOwnProperty.call(source, candidate) && candidate !== ignoreTrigger) {
+    candidate = `${cleanBase}-${index}`;
+    index += 1;
+  }
+  return candidate;
+}
+
+async function syncAnimationMappingsFromFiles({ showAlert = false } = {}) {
+  const fileSet = new Set(availableAnimations.map(anim => anim.filename));
+  const nextMappings = {};
+  const usedFiles = new Set();
+  let created = 0;
+  let removed = 0;
+  let deduped = 0;
+
+  Object.entries(animationMappings).forEach(([trigger, rawData]) => {
+    const file = getAnimationFileFromMapping(rawData);
+    if (!file || !fileSet.has(file)) {
+      removed += 1;
+      return;
+    }
+    if (usedFiles.has(file)) {
+      deduped += 1;
+      return;
+    }
+
+    const normalized = toAnimationMappingObject(rawData, file);
+    const safeTrigger = buildUniqueAnimationTrigger(trigger, nextMappings);
+    if (safeTrigger !== trigger) deduped += 1;
+
+    nextMappings[safeTrigger] = {
+      file: file,
+      position: normalized.position,
+      scale: normalized.scale
+    };
+    usedFiles.add(file);
+  });
+
+  availableAnimations.forEach(anim => {
+    if (usedFiles.has(anim.filename)) return;
+    const baseTrigger = normalizeTriggerFromFilename(anim.filename) || 'animation';
+    const uniqueTrigger = buildUniqueAnimationTrigger(baseTrigger, nextMappings);
+    nextMappings[uniqueTrigger] = createDefaultAnimationMapping(anim.filename);
+    usedFiles.add(anim.filename);
+    created += 1;
+  });
+
+  const before = JSON.stringify(animationMappings);
+  const after = JSON.stringify(nextMappings);
+  const changed = before !== after;
+
+  if (changed) {
+    animationMappings = nextMappings;
+    await saveAnimationMappings();
   }
 
-  const previousValue = select.value;
-  select.innerHTML = [
-    '<option value="">Select a file</option>',
-    ...availableAnimations.map(anim => `<option value="${anim.filename}">${anim.name}</option>`)
-  ].join('');
-
-  if (previousValue && availableAnimations.some(anim => anim.filename === previousValue)) {
-    select.value = previousValue;
-  } else {
-    select.value = '';
+  if (showAlert) {
+    alert(`Sync complete.\nAdded: ${created}\nRemoved stale mappings: ${removed}\nDeduplicated: ${deduped}`);
   }
 
-  select.disabled = false;
+  return { changed, created, removed, deduped };
 }
 
 // Load animation mappings from settingsStore
@@ -3147,6 +3213,11 @@ function loadAnimationMappings() {
   if (saved) {
     try {
       animationMappings = JSON.parse(saved);
+      const normalized = {};
+      Object.entries(animationMappings).forEach(([trigger, data]) => {
+        normalized[trigger] = toAnimationMappingObject(data, getAnimationFileFromMapping(data));
+      });
+      animationMappings = normalized;
       console.log('✓ Loaded animation mappings:', Object.keys(animationMappings).length);
       renderAnimationMappings();
       renderStickerMappings();
@@ -3195,112 +3266,74 @@ async function loadAvailableAnimations() {
   try {
     const response = await fetch('/api/animations/list');
     const data = await response.json();
-    availableAnimations = data.animations;
+    availableAnimations = (data.animations || []).sort((a, b) => a.name.localeCompare(b.name));
     console.log(`✓ Loaded ${availableAnimations.length} animation files`);
-    renderNewAnimationFileOptions();
+    await syncAnimationMappingsFromFiles();
     renderAnimationMappings();
   } catch (e) {
     console.error('Error loading animations:', e);
     availableAnimations = [];
-    renderNewAnimationFileOptions();
+    renderAnimationMappings();
   }
+}
+
+function wireThumbnailHoverPlayback(container) {
+  const cardButtons = container.querySelectorAll('.preview-mapping-btn');
+
+  cardButtons.forEach(btn => {
+    const video = btn.querySelector('.animation-thumb-video');
+    if (!video) return;
+
+    const play = () => {
+      video.play().catch(() => {});
+    };
+
+    const stop = () => {
+      video.pause();
+      try {
+        video.currentTime = 0;
+      } catch (err) {
+        // Some browsers may block currentTime until metadata is available.
+      }
+    };
+
+    stop();
+    btn.addEventListener('mouseenter', play);
+    btn.addEventListener('mouseleave', stop);
+    btn.addEventListener('focus', play);
+    btn.addEventListener('blur', stop);
+  });
 }
 
 // Render animation mappings list
 function renderAnimationMappings() {
   const list = document.getElementById('animationMappingsList');
   if (!list) return;
-  renderNewAnimationFileOptions();
 
   if (availableAnimations.length === 0) {
-    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No .MOV files found in /animations folder. Add some animation files first!</div>';
+    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem; grid-column: 1 / -1;">No animation files found in /animations folder. Upload one to get started.</div>';
     return;
   }
 
-  if (Object.keys(animationMappings).length === 0) {
-    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem;">No mappings yet. Click "+ Add Mapping" to create one.</div>';
-    return;
-  }
-
-  list.innerHTML = Object.entries(animationMappings).map(([trigger, data]) => {
-    // Handle old format (string) vs new format (object)
-    const fileValue = typeof data === 'string' ? data : data.file;
-    const position = typeof data === 'object' ? data.position : 'bottom-left';
-    const scale = typeof data === 'object' ? data.scale : 1.0;
-    const fileUrl = `/animations/${encodeURIComponent(fileValue || '')}`;
+  list.innerHTML = availableAnimations.map(anim => {
+    const mapped = findAnimationMappingEntryByFile(anim.filename);
+    const trigger = mapped ? mapped.trigger : normalizeTriggerFromFilename(anim.filename);
+    const safeTrigger = escapeAttribute(trigger);
+    const safeFilename = escapeAttribute(anim.filename);
+    const fileUrl = `/animations/${encodeURIComponent(anim.filename)}`;
     
     return `
-    <div class="animation-mapping-card">
-      <button class="secondary animation-thumb-btn preview-mapping-btn" data-trigger="${trigger}" title="Preview and test: ${trigger}">
-        <video class="animation-thumb-video" src="${fileUrl}" muted loop autoplay playsinline preload="metadata"></video>
-        <span class="animation-thumb-overlay">Preview</span>
+    <div class="animation-mapping-card" title="${safeTrigger}">
+      <button class="secondary animation-thumb-btn preview-mapping-btn" data-trigger="${safeTrigger}" title="${safeTrigger}">
+        <video class="animation-thumb-video" src="${fileUrl}" muted loop playsinline preload="metadata"></video>
+        <span class="animation-thumb-overlay">▶</span>
       </button>
-      <div class="animation-mapping-bottom">
-        <div class="animation-mapping-left">
-          <input type="text" value="${trigger}" data-trigger="${trigger}" class="mapping-trigger" placeholder="Trigger" style="font-size: 0.875rem; padding: 8px;">
-          <select data-trigger="${trigger}" class="mapping-file" style="font-size: 0.875rem; padding: 8px;">
-            ${availableAnimations.map(anim =>
-              `<option value="${anim.filename}" ${anim.filename === fileValue ? 'selected' : ''}>${anim.name}</option>`
-            ).join('')}
-          </select>
-        </div>
-        <div class="animation-mapping-right">
-          <select data-trigger="${trigger}" class="mapping-position" style="font-size: 0.75rem; padding: 6px;">
-            <option value="top-left" ${position === 'top-left' ? 'selected' : ''}>⬆️⬅️</option>
-            <option value="top-center" ${position === 'top-center' ? 'selected' : ''}>⬆️</option>
-            <option value="top-right" ${position === 'top-right' ? 'selected' : ''}>⬆️➡️</option>
-            <option value="center-left" ${position === 'center-left' ? 'selected' : ''}>⬅️</option>
-            <option value="center" ${position === 'center' ? 'selected' : ''}>🎯</option>
-            <option value="center-right" ${position === 'center-right' ? 'selected' : ''}>➡️</option>
-            <option value="bottom-left" ${position === 'bottom-left' ? 'selected' : ''}>⬇️⬅️</option>
-            <option value="bottom-center" ${position === 'bottom-center' ? 'selected' : ''}>⬇️</option>
-            <option value="bottom-right" ${position === 'bottom-right' ? 'selected' : ''}>⬇️➡️</option>
-          </select>
-          <div class="animation-mapping-actions">
-            <input type="number" min="0.5" max="3" step="0.1" value="${scale}" data-trigger="${trigger}" class="mapping-scale" placeholder="Scale" style="font-size: 0.75rem; padding: 6px;">
-            <button class="secondary remove-mapping-btn" data-trigger="${trigger}" style="padding: 6px 12px; font-size: 0.75rem;">🗑️ Delete</button>
-          </div>
-        </div>
-      </div>
+      <button class="secondary animation-gear-btn open-animation-settings-btn" data-trigger="${safeTrigger}" data-file="${safeFilename}" title="Settings">⚙️</button>
     </div>
   `;
   }).join('');
-  
-  // Position change handler
-  list.querySelectorAll('.mapping-position').forEach(select => {
-    select.addEventListener('change', (e) => {
-      const trigger = e.target.dataset.trigger;
-      const currentData = animationMappings[trigger];
-      const fileValue = typeof currentData === 'string' ? currentData : currentData.file;
-      
-      animationMappings[trigger] = {
-        file: fileValue,
-        position: e.target.value,
-        scale: typeof currentData === 'object' ? currentData.scale : 1.0
-      };
-      
-      saveAnimationMappings();
-      console.log(`✓ Updated position: ${trigger} → ${e.target.value}`);
-    });
-  });
 
-  // Scale change handler
-  list.querySelectorAll('.mapping-scale').forEach(input => {
-    input.addEventListener('change', (e) => {
-      const trigger = e.target.dataset.trigger;
-      const currentData = animationMappings[trigger];
-      const fileValue = typeof currentData === 'string' ? currentData : currentData.file;
-      
-      animationMappings[trigger] = {
-        file: fileValue,
-        position: typeof currentData === 'object' ? currentData.position : 'bottom-left',
-        scale: parseFloat(e.target.value)
-      };
-      
-      saveAnimationMappings();
-      console.log(`✓ Updated scale: ${trigger} → ${e.target.value}x`);
-    });
-  });
+  wireThumbnailHoverPlayback(list);
 
   // Thumbnail preview click handler (test trigger)
   list.querySelectorAll('.preview-mapping-btn').forEach(btn => {
@@ -3332,136 +3365,228 @@ function renderAnimationMappings() {
     });
   });
 
-  // Add event listeners
-  list.querySelectorAll('.mapping-trigger').forEach(input => {
-    input.addEventListener('change', (e) => {
-      const oldTrigger = e.target.dataset.trigger;
-      const newTrigger = e.target.value.trim().toLowerCase();
-
-      if (newTrigger && newTrigger !== oldTrigger) {
-        const filename = animationMappings[oldTrigger];
-        delete animationMappings[oldTrigger];
-        animationMappings[newTrigger] = filename;
-        saveAnimationMappings();
-        renderAnimationMappings();
-      }
-    });
-  });
-
-  list.querySelectorAll('.mapping-file').forEach(select => {
-    select.addEventListener('change', (e) => {
-      const trigger = e.target.dataset.trigger;
-      const currentData = animationMappings[trigger];
-      const updated = toAnimationMappingObject(currentData, e.target.value);
-      updated.file = e.target.value;
-      animationMappings[trigger] = updated;
-      saveAnimationMappings();
-      console.log(`✓ Updated mapping: ${trigger} → ${e.target.value}`);
-    });
-  });
-
-  list.querySelectorAll('.remove-mapping-btn').forEach(btn => {
+  list.querySelectorAll('.open-animation-settings-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
-      const trigger = e.target.dataset.trigger;
-      delete animationMappings[trigger];
-      saveAnimationMappings();
-      renderAnimationMappings();
+      e.preventDefault();
+      e.stopPropagation();
+      openAnimationCardPopup(btn.dataset.trigger, btn.dataset.file);
     });
   });
 
   renderStickerMappings();
 }
 
-// Add new mapping button
-const addAnimationMappingBtn = document.getElementById('addAnimationMappingBtn');
-if (addAnimationMappingBtn) {
-  addAnimationMappingBtn.addEventListener('click', () => {
-    if (availableAnimations.length === 0) {
-      alert('No animation files found!\n\nPlease add .MOV files to the /animations folder first.');
+const uploadAnimationBtn = document.getElementById('uploadAnimationBtn');
+const uploadAnimationInput = document.getElementById('uploadAnimationInput');
+if (uploadAnimationBtn && uploadAnimationInput) {
+  uploadAnimationBtn.addEventListener('click', () => uploadAnimationInput.click());
+  uploadAnimationInput.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const defaultName = normalizeTriggerFromFilename(file.name) || 'animation';
+    const nameInput = prompt('Animation name:', defaultName);
+    if (nameInput === null) {
+      uploadAnimationInput.value = '';
       return;
     }
 
-    const fileSelect = document.getElementById('newAnimationMappingFile');
-    const selectedFile = fileSelect?.value;
-    if (!selectedFile) {
-      alert('Select a file first.');
-      return;
-    }
+    const customName = nameInput.trim() || defaultName;
+    const formData = new FormData();
+    formData.append('animation', file);
+    formData.append('name', customName);
 
-    const trigger = normalizeTriggerFromFilename(selectedFile);
-    if (!trigger) {
-      alert('Could not create trigger name from selected file.');
-      return;
-    }
+    try {
+      const response = await fetch('/api/animations/upload', {
+        method: 'POST',
+        body: formData
+      });
 
-    const exists = Object.prototype.hasOwnProperty.call(animationMappings, trigger);
-    if (exists) {
-      const shouldOverwrite = confirm(`Mapping "${trigger}" already exists and will be overwritten. Continue?`);
-      if (!shouldOverwrite) return;
-    }
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Upload failed');
+      }
 
-    animationMappings[trigger] = createDefaultAnimationMapping(selectedFile);
-    saveAnimationMappings();
-    renderAnimationMappings();
+      await loadAvailableAnimations();
+      alert(`Uploaded animation: ${customName}`);
+    } catch (err) {
+      console.error('Animation upload error:', err);
+      alert(`Upload failed: ${err.message}`);
+    } finally {
+      uploadAnimationInput.value = '';
+    }
   });
 }
 
-const autoMapAnimationsBtn = document.getElementById('autoMapAnimationsBtn');
-if (autoMapAnimationsBtn) {
-  autoMapAnimationsBtn.addEventListener('click', () => {
-    if (availableAnimations.length === 0) {
-      alert('No animation files found!\n\nPlease add .MOV files to the /animations folder first.');
+const syncAnimationsBtn = document.getElementById('syncAnimationsBtn');
+if (syncAnimationsBtn) {
+  syncAnimationsBtn.addEventListener('click', async () => {
+    try {
+      const response = await fetch('/api/animations/list');
+      const data = await response.json();
+      availableAnimations = (data.animations || []).sort((a, b) => a.name.localeCompare(b.name));
+      await syncAnimationMappingsFromFiles({ showAlert: true });
+      renderAnimationMappings();
+    } catch (err) {
+      console.error('Sync animations error:', err);
+      alert('Failed to sync animations');
+    }
+  });
+}
+
+const animationCardPopup = document.getElementById('animationCardPopup');
+const animationPopupName = document.getElementById('animationPopupName');
+const animationPopupPositionGrid = document.getElementById('animationPopupPositionGrid');
+const animationPopupScale = document.getElementById('animationPopupScale');
+const animationPopupScaleUpBtn = document.getElementById('animationPopupScaleUpBtn');
+const animationPopupScaleDownBtn = document.getElementById('animationPopupScaleDownBtn');
+const animationPopupSaveBtn = document.getElementById('animationPopupSaveBtn');
+const animationPopupDeleteBtn = document.getElementById('animationPopupDeleteBtn');
+const animationPopupCancelBtn = document.getElementById('animationPopupCancelBtn');
+const animationPopupBackdrop = animationCardPopup?.querySelector('.animation-card-popup-backdrop');
+let activeAnimationPopup = null;
+let activeAnimationPopupPosition = 'bottom-left';
+
+function clampAnimationScale(value) {
+  const min = 0.5;
+  const max = 3;
+  if (!Number.isFinite(value)) return 1;
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatAnimationScale(value) {
+  const rounded = Math.round(value * 100) / 100;
+  const text = rounded.toFixed(2);
+  return text.replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+}
+
+function getAnimationPopupScaleValue() {
+  if (!animationPopupScale) return 1;
+  const raw = parseFloat(animationPopupScale.value);
+  return clampAnimationScale(raw);
+}
+
+function setAnimationPopupScaleValue(value) {
+  if (!animationPopupScale) return;
+  animationPopupScale.value = formatAnimationScale(clampAnimationScale(value));
+}
+
+function setAnimationPopupPosition(position) {
+  activeAnimationPopupPosition = position || 'bottom-left';
+  if (!animationPopupPositionGrid) return;
+  animationPopupPositionGrid.querySelectorAll('.animation-position-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.position === activeAnimationPopupPosition);
+  });
+}
+
+function closeAnimationCardPopup() {
+  if (!animationCardPopup) return;
+  animationCardPopup.style.display = 'none';
+  activeAnimationPopup = null;
+}
+
+function openAnimationCardPopup(trigger, filename) {
+  if (!animationCardPopup || !animationPopupName || !animationPopupScale) return;
+
+  const currentData = toAnimationMappingObject(animationMappings[trigger], filename);
+  activeAnimationPopup = { trigger, filename };
+
+  animationPopupName.value = trigger;
+  setAnimationPopupPosition(currentData.position || 'bottom-left');
+  setAnimationPopupScaleValue(currentData.scale ?? 1.0);
+  animationCardPopup.style.display = 'flex';
+  animationPopupName.focus();
+}
+
+if (animationPopupCancelBtn) {
+  animationPopupCancelBtn.addEventListener('click', closeAnimationCardPopup);
+}
+if (animationPopupBackdrop) {
+  animationPopupBackdrop.addEventListener('click', closeAnimationCardPopup);
+}
+if (animationPopupPositionGrid) {
+  animationPopupPositionGrid.querySelectorAll('.animation-position-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      setAnimationPopupPosition(btn.dataset.position);
+    });
+  });
+}
+if (animationPopupScaleUpBtn) {
+  animationPopupScaleUpBtn.addEventListener('click', () => {
+    const nextValue = getAnimationPopupScaleValue() + 0.25;
+    setAnimationPopupScaleValue(nextValue);
+  });
+}
+if (animationPopupScaleDownBtn) {
+  animationPopupScaleDownBtn.addEventListener('click', () => {
+    const nextValue = getAnimationPopupScaleValue() - 0.25;
+    setAnimationPopupScaleValue(nextValue);
+  });
+}
+if (animationPopupSaveBtn) {
+  animationPopupSaveBtn.addEventListener('click', async () => {
+    if (!activeAnimationPopup) return;
+    const oldTrigger = activeAnimationPopup.trigger;
+    const filename = activeAnimationPopup.filename;
+
+    const desiredTrigger = normalizeTriggerFromFilename(animationPopupName?.value || oldTrigger);
+    if (!desiredTrigger) {
+      alert('Name cannot be empty.');
       return;
     }
 
-    const overlapCount = availableAnimations.reduce((count, anim) => {
-      const trigger = normalizeTriggerFromFilename(anim.filename);
-      if (!trigger) return count;
-      return count + (Object.prototype.hasOwnProperty.call(animationMappings, trigger) ? 1 : 0);
-    }, 0);
-
-    const shouldProceed = confirm(
-      `Auto-map all animation files using file names as triggers?\n\n` +
-      `Files found: ${availableAnimations.length}\n` +
-      `Existing mappings to overwrite: ${overlapCount}`
-    );
-    if (!shouldProceed) return;
-
-    let overwriteExisting = false;
-    if (overlapCount > 0) {
-      overwriteExisting = confirm(
-        'Overwrite existing mappings when trigger names overlap?\n\n' +
-        'OK = overwrite existing\n' +
-        'Cancel = keep existing and only add new files'
-      );
+    const uniqueTrigger = buildUniqueAnimationTrigger(desiredTrigger, animationMappings, oldTrigger);
+    if (uniqueTrigger !== desiredTrigger) {
+      alert(`Name "${desiredTrigger}" already exists. Using "${uniqueTrigger}" instead.`);
     }
+    const scaleValue = getAnimationPopupScaleValue();
+    const currentData = toAnimationMappingObject(animationMappings[oldTrigger], filename);
+    const updatedData = {
+      file: filename,
+      position: activeAnimationPopupPosition || currentData.position || 'bottom-left',
+      scale: Number.isFinite(scaleValue) ? scaleValue : currentData.scale
+    };
 
-    let created = 0;
-    let overwritten = 0;
-    let skipped = 0;
-    const nextMappings = { ...animationMappings };
+    if (oldTrigger !== uniqueTrigger) {
+      delete animationMappings[oldTrigger];
+    }
+    animationMappings[uniqueTrigger] = updatedData;
 
-    availableAnimations.forEach(anim => {
-      const trigger = normalizeTriggerFromFilename(anim.filename);
-      if (!trigger) return;
+    await saveAnimationMappings();
+    renderAnimationMappings();
+    closeAnimationCardPopup();
+  });
+}
+if (animationPopupDeleteBtn) {
+  animationPopupDeleteBtn.addEventListener('click', async () => {
+    if (!activeAnimationPopup) return;
+    const { filename } = activeAnimationPopup;
+    const shouldDelete = confirm(`Delete file "${filename}" from /animations?`);
+    if (!shouldDelete) return;
 
-      if (Object.prototype.hasOwnProperty.call(nextMappings, trigger)) {
-        if (!overwriteExisting) {
-          skipped += 1;
-          return;
-        }
-        overwritten += 1;
-      } else {
-        created += 1;
+    try {
+      const response = await fetch(`/api/animations/file/${encodeURIComponent(filename)}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Delete failed');
       }
 
-      nextMappings[trigger] = createDefaultAnimationMapping(anim.filename);
-    });
+      Object.keys(animationMappings).forEach(trigger => {
+        if (getAnimationFileFromMapping(animationMappings[trigger]) === filename) {
+          delete animationMappings[trigger];
+        }
+      });
 
-    animationMappings = nextMappings;
-    saveAnimationMappings();
-    renderAnimationMappings();
-    alert(`Auto-mapping complete.\nCreated: ${created}\nOverwritten: ${overwritten}\nSkipped: ${skipped}`);
+      await saveAnimationMappings();
+      await loadAvailableAnimations();
+      closeAnimationCardPopup();
+    } catch (err) {
+      console.error('Animation delete error:', err);
+      alert(`Failed to delete animation: ${err.message}`);
+    }
   });
 }
 
