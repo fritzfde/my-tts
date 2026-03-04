@@ -387,6 +387,10 @@
             try {
                 const d = JSON.parse(e.data);
                 if (d.type === 'animation' && d.trigger) playAnimation(d.trigger);
+                if (d.type === 'stop') {
+                    console.log('Received stop event, stopping active animations');
+                    stopAllAnimations();
+                }
                 if (d.type === 'config' && d.config) {
                     animationVolume = d.config.animationVolume ?? animationVolume;
                     applyVolumeToAllActiveAnimations();

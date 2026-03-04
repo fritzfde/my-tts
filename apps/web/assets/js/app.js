@@ -3958,6 +3958,7 @@ const animationVolumeValue = document.getElementById('animationVolumeValue');
 const animationSortSelect = document.getElementById('animationSortSelect');
 const animationMapFilterSelect = document.getElementById('animationMapFilterSelect');
 const animationStickerFilterSelect = document.getElementById('animationStickerFilterSelect');
+const stopAnimationBtn = document.getElementById('stopAnimationBtn');
 let animationThumbnailObserver = null;
 let animationPlaybackTicker = null;
 const ANIMATION_PLAYBACK_FALLBACK_SECONDS = 4;
@@ -4140,6 +4141,11 @@ function setAnimationCardPlaybackState(trigger, filename, durationSeconds, start
   updateAnimationPlaybackUi();
 }
 
+function updateStopAnimationButtonState() {
+  if (!stopAnimationBtn) return;
+  stopAnimationBtn.disabled = activeAnimationCardPlayback.size === 0;
+}
+
 function markAnimationCardPlaying(trigger) {
   if (!trigger || !animationMappings[trigger]) return;
 
@@ -4178,6 +4184,43 @@ function clearAnimationCardPlaybackIfMatches(trigger, startedAtMs) {
   if (Number.isFinite(startedAtMs) && state.startedAtMs !== startedAtMs) return;
   activeAnimationCardPlayback.delete(trigger);
   updateAnimationPlaybackUi();
+}
+
+async function stopAllActiveAnimations() {
+  const hadActiveAnimations = activeAnimationCardPlayback.size > 0;
+
+  try {
+    const response = await fetch('/api/animations/stop', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'dashboard',
+        reason: 'manual-stop'
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    const totalClients = Number(payload?.clients || 0);
+    const obsClients = Number(payload?.obsClients || 0);
+    console.log(`⏹️ Stop broadcast delivered to ${totalClients} animation overlay client(s), OBS: ${obsClients}`);
+    if (totalClients > 0 && obsClients === 0) {
+      console.warn('No OBS animation overlay clients detected. If OBS keeps playing, refresh the Browser Source URL/cache.');
+    }
+
+    activeAnimationCardPlayback.clear();
+    updateAnimationPlaybackUi();
+    return true;
+  } catch (err) {
+    console.error('❌ Failed to stop active animations:', err);
+    if (hadActiveAnimations) {
+      alert('Failed to stop animation overlay. Please check server/overlay connection.');
+    }
+    return false;
+  }
 }
 
 function updateAnimationPlaybackUi() {
@@ -4224,6 +4267,8 @@ function updateAnimationPlaybackUi() {
     clearInterval(animationPlaybackTicker);
     animationPlaybackTicker = null;
   }
+
+  updateStopAnimationButtonState();
 }
 
 function getAnimationFileFromMapping(data) {
@@ -4712,6 +4757,8 @@ function renderAnimationMappings() {
   const list = document.getElementById('animationMappingsList');
   if (!list) return;
 
+  updateStopAnimationButtonState();
+
   if (availableAnimations.length === 0) {
     list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem; grid-column: 1 / -1;">No animation files found in /animations folder. Upload one to get started.</div>';
     return;
@@ -4843,6 +4890,15 @@ if (syncAnimationsBtn) {
       console.error('Sync animations error:', err);
       alert('Failed to sync animations');
     }
+  });
+}
+
+if (stopAnimationBtn) {
+  updateStopAnimationButtonState();
+  stopAnimationBtn.addEventListener('click', async () => {
+    stopAnimationBtn.disabled = true;
+    await stopAllActiveAnimations();
+    updateStopAnimationButtonState();
   });
 }
 

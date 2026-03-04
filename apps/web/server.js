@@ -810,16 +810,18 @@ app.get('/overlay/animations/stream', (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   const clientId = Date.now();
-  const newClient = { id: clientId, res };
+  const userAgent = String(req.headers['user-agent'] || '');
+  const clientKind = userAgent.toLowerCase().includes('obs') ? 'obs' : 'browser';
+  const newClient = { id: clientId, res, userAgent, kind: clientKind };
   animationClients.push(newClient);
 
-  console.log(`✓ Animation overlay connected (${animationClients.length} total)`);
+  console.log(`✓ Animation overlay connected (${animationClients.length} total, kind=${clientKind})`);
 
   res.write('data: {"type":"connected"}\n\n');
 
   req.on('close', () => {
     animationClients = animationClients.filter(client => client.id !== clientId);
-    console.log(`✗ Animation overlay disconnected (${animationClients.length} remaining)`);
+    console.log(`✗ Animation overlay disconnected (${animationClients.length} remaining, kind=${clientKind})`);
   });
 });
 
@@ -849,6 +851,37 @@ app.post('/api/animations/trigger', (req, res) => {
   });
 
   res.json({ success: true, clients: animationClients.length });
+});
+
+// Stop active animations endpoint
+app.post('/api/animations/stop', (req, res) => {
+  const { source, reason } = req.body || {};
+  console.log(`⏹️ Animation stop requested (${reason || 'manual'}) from ${source || 'unknown'}`);
+
+  const event = {
+    type: 'stop',
+    source: source || 'unknown',
+    reason: reason || 'manual-stop',
+    timestamp: Date.now()
+  };
+
+  const eventData = `data: ${JSON.stringify(event)}\n\n`;
+  animationClients.forEach(client => {
+    try {
+      client.res.write(eventData);
+    } catch (err) {
+      console.error('Error sending stop to animation client:', err);
+    }
+  });
+
+  const obsClients = animationClients.filter(client => client.kind === 'obs').length;
+  const browserClients = animationClients.length - obsClients;
+  res.json({
+    success: true,
+    clients: animationClients.length,
+    obsClients,
+    browserClients
+  });
 });
 
 const ALLOWED_ANIMATION_EXTENSIONS = new Set(['.mov', '.mp4', '.webm', '.avi']);
