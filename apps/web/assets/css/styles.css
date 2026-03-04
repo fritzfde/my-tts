@@ -519,6 +519,12 @@ button.secondary:hover:not(:disabled) {
   overflow-y: auto;
 }
 
+#voiceModal .modal.voice-modal-wide {
+  width: min(1100px, 94vw);
+  max-width: min(1100px, 94vw);
+  overflow-x: hidden;
+}
+
 .modal h3 {
   margin-bottom: 16px;
   color: var(--text-primary);
@@ -548,6 +554,16 @@ button.secondary:hover:not(:disabled) {
   gap: 10px;
 }
 
+.user-voice-list.voice-grid-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  align-items: start;
+}
+
+.user-voice-empty {
+  grid-column: 1 / -1;
+}
+
 .user-voice-item {
   display: flex;
   align-items: center;
@@ -557,11 +573,69 @@ button.secondary:hover:not(:disabled) {
   border-radius: 8px;
 }
 
+.user-voice-item.voice-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--border);
+}
+
 .user-voice-item .username {
   flex: 1;
   color: var(--accent);
   font-weight: 600;
   font-size: 0.875rem;
+}
+
+.user-voice-item.voice-card .username {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.user-voice-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+
+.user-voice-name-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-voice-group-hint {
+  margin-left: auto;
+  flex: none;
+  color: var(--text-tertiary);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.user-voice-controls-grid {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) minmax(0, 1.2fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.user-voice-group-select,
+.user-voice-select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 0.78rem;
 }
 
 .user-voice-item select {
@@ -570,6 +644,7 @@ button.secondary:hover:not(:disabled) {
   font-size: 0.8125rem;
 }
 
+.user-voice-remove-btn,
 .user-voice-item button {
   flex: none;
   padding: 6px 12px;
@@ -577,6 +652,7 @@ button.secondary:hover:not(:disabled) {
   background: var(--error);
 }
 
+.user-voice-remove-btn:hover,
 .user-voice-item button:hover {
   background: #dc2626;
 }
@@ -942,11 +1018,13 @@ input[type="range"] {
 }
 
 .voice-preview-list {
-  max-height: 300px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  max-height: none;
+  overflow: visible;
+  overflow-x: hidden;
+  column-count: 4;
+  column-gap: 10px;
+  column-fill: balance;
+  padding-right: 2px;
 }
 
 .voice-list-empty {
@@ -956,10 +1034,29 @@ input[type="range"] {
   font-size: 0.8125rem;
 }
 
+.voice-preview-list .voice-list-empty {
+  display: block;
+}
+
 .voice-filter-group {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
+  display: block;
+  margin: 0 0 10px;
+  /*break-inside: avoid-column;*/
+}
+
+@media (max-width: 1400px) {
+  .voice-preview-list {
+    column-count: 3;
+  }
+}
+
+@media (max-width: 1000px) {
+  .voice-preview-list {
+    column-count: 2;
+  }
 }
 
 .voice-filter-group-header {
@@ -1000,6 +1097,7 @@ input[type="range"] {
   flex-direction: column;
   gap: 5px;
   padding: 7px;
+  overflow: visible;
 }
 
 .voice-preview-item {
@@ -1604,6 +1702,14 @@ input[type="range"] {
 }
 
 @media (max-width: 640px) {
+  .user-voice-list.voice-grid-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .user-voice-controls-grid {
+    grid-template-columns: 1fr;
+  }
+
   .voice-user-controls-row {
     grid-template-columns: 1fr;
   }
@@ -1630,6 +1736,10 @@ input[type="range"] {
   .voice-filter-group-actions {
     width: 100%;
     justify-content: space-between;
+  }
+
+  .voice-preview-list {
+    column-count: 1;
   }
 
   .voice-preview-item {

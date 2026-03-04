@@ -182,7 +182,7 @@
                     🤖 Auto-detect user gender (AI-powered voice assignment)
                 </label>
                 <div style="margin-top: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                    Uses local LLM to detect gender from usernames (e.g., "xXS4r4hXx" → Sarah → female voice). Results are cached for instant future assignments. If Ollama is offline, fallback pattern matching is used.
+                    Uses local LLM (Ollama) to detect gender from usernames (e.g., "xXS4r4hXx" → Sarah → female voice). Results are cached for instant future assignments. Auto-detection runs only when Ollama is online.
                 </div>
                 <div id="ollamaStatus" class="ollama-status">Ollama: checking...</div>
             </div>

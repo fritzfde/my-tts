@@ -1606,11 +1606,217 @@ function disconnectTikTok() {
 
 document.getElementById('disconnectTikTokBtn').addEventListener('click', disconnectTikTok);
 
+function parseRecentUserKey(userKey) {
+  const text = String(userKey || '');
+  const separatorIndex = text.indexOf(':');
+  if (separatorIndex < 0) {
+    return { platform: 'youtube', username: text };
+  }
+  return {
+    platform: text.slice(0, separatorIndex) || 'youtube',
+    username: text.slice(separatorIndex + 1)
+  };
+}
+
+function getVoiceGroupsForModal() {
+  return buildVoiceGroups({ includeHidden: false });
+}
+
+function getVoiceGroupKeyForVoiceId(voiceId) {
+  const entry = findVoiceEntryById(voiceId);
+  if (entry?.groupKey) return entry.groupKey;
+  const firstGroup = getVoiceGroupsForModal()[0];
+  return firstGroup ? firstGroup.key : '';
+}
+
+function buildVoiceGroupOptionsMarkup(selectedGroupKey = '') {
+  const groups = getVoiceGroupsForModal();
+  if (groups.length === 0) {
+    return { markup: '<option value="">No language groups</option>', selectedGroupKey: '' };
+  }
+
+  const resolvedGroupKey = groups.some((group) => group.key === selectedGroupKey)
+    ? selectedGroupKey
+    : groups[0].key;
+
+  const markup = groups.map((group) => {
+    const selectedAttr = group.key === resolvedGroupKey ? ' selected' : '';
+    return `<option value="${escapeAttribute(group.key)}"${selectedAttr}>${escapeHtml(group.label)}</option>`;
+  }).join('');
+
+  return { markup, selectedGroupKey: resolvedGroupKey };
+}
+
+function buildVoiceOptionsMarkupForGroup(groupKey = '', selectedVoiceId = '') {
+  const groups = getVoiceGroupsForModal();
+  if (groups.length === 0) {
+    return {
+      markup: '<option value="">No voices available</option>',
+      selectedVoiceId: '',
+      resolvedGroupKey: ''
+    };
+  }
+
+  const targetGroup = groups.find((group) => group.key === groupKey) || groups[0];
+  const hasSelectedVoice = selectedVoiceId
+    ? targetGroup.voices.some((entry) => entry.id === selectedVoiceId)
+    : false;
+  const resolvedVoiceId = hasSelectedVoice
+    ? selectedVoiceId
+    : (targetGroup.voices[0]?.id || '');
+
+  const markup = targetGroup.voices.length > 0
+    ? targetGroup.voices.map((entry) => {
+      const selectedAttr = entry.id === resolvedVoiceId ? ' selected' : '';
+      return `<option value="${escapeAttribute(entry.id)}"${selectedAttr}>${escapeHtml(entry.name)}</option>`;
+    }).join('')
+    : '<option value="">No voices in this group</option>';
+
+  return {
+    markup,
+    selectedVoiceId: resolvedVoiceId,
+    resolvedGroupKey: targetGroup.key
+  };
+}
+
+function bindManageVoicesModalControls(container) {
+  if (!container) return;
+
+  container.querySelectorAll('.user-voice-group-select').forEach((groupSelect) => {
+    groupSelect.addEventListener('change', () => {
+      const card = groupSelect.closest('.user-voice-item');
+      if (!card) return;
+
+      const voiceSelect = card.querySelector('.user-voice-select');
+      if (!voiceSelect) return;
+
+      const username = card.dataset.username || '';
+      const platform = card.dataset.platform || '';
+      const previousVoice = voiceSelect.value || '';
+      const nextGroup = groupSelect.value || '';
+      const nextOptions = buildVoiceOptionsMarkupForGroup(nextGroup, previousVoice);
+      const groupHint = card.querySelector('.user-voice-group-hint');
+
+      voiceSelect.innerHTML = nextOptions.markup;
+      if (nextOptions.selectedVoiceId) {
+        voiceSelect.value = nextOptions.selectedVoiceId;
+      }
+      if (groupHint) {
+        groupHint.textContent = VOICE_GROUP_LABELS[nextOptions.resolvedGroupKey] || 'Voices';
+      }
+
+      if (
+        nextOptions.selectedVoiceId &&
+        nextOptions.selectedVoiceId !== previousVoice &&
+        username &&
+        platform
+      ) {
+        setVoiceForUser(username, platform, nextOptions.selectedVoiceId);
+      }
+    });
+  });
+
+  container.querySelectorAll('.user-voice-select').forEach((voiceSelect) => {
+    voiceSelect.addEventListener('change', () => {
+      const card = voiceSelect.closest('.user-voice-item');
+      if (!card) return;
+
+      const username = card.dataset.username || '';
+      const platform = card.dataset.platform || '';
+      const selectedVoice = voiceSelect.value || '';
+      if (!username || !platform || !selectedVoice) return;
+
+      setVoiceForUser(username, platform, selectedVoice);
+    });
+  });
+
+  container.querySelectorAll('.user-voice-remove-btn').forEach((removeBtn) => {
+    removeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const card = removeBtn.closest('.user-voice-item');
+      if (!card) return;
+
+      const username = card.dataset.username || '';
+      const platform = card.dataset.platform || '';
+      if (!username || !platform) return;
+      removeUserVoice(username, platform);
+    });
+  });
+}
+
+function renderManageUserVoicesModal() {
+  const modal = document.getElementById('voiceModal');
+  const list = document.getElementById('userVoiceList');
+  setVoiceModalWideLayout(true);
+  setVoiceModalHeader(
+    'Manage User Voices',
+    'Assign voices by language group, then pick a specific voice.'
+  );
+
+  if (!list || !modal) return;
+  list.classList.add('voice-grid-layout');
+
+  if (recentUsers.length === 0) {
+    list.innerHTML = '<p class="user-voice-empty" style="color: var(--text-secondary); text-align: center; padding: 20px;">No recent users yet.</p>';
+    modal.style.display = 'flex';
+    return;
+  }
+
+  const usersWithGroups = recentUsers.map((userKey) => {
+    const { platform, username } = parseRecentUserKey(userKey);
+    const currentVoice = getVoiceForUser(username, platform);
+    const initialGroup = getVoiceGroupKeyForVoiceId(currentVoice);
+    return { platform, username, currentVoice, initialGroup };
+  }).sort((a, b) => {
+    const aIndex = Math.max(0, VOICE_GROUP_ORDER.indexOf(a.initialGroup));
+    const bIndex = Math.max(0, VOICE_GROUP_ORDER.indexOf(b.initialGroup));
+    if (aIndex !== bIndex) return aIndex - bIndex;
+    if (a.platform !== b.platform) return a.platform.localeCompare(b.platform);
+    return a.username.localeCompare(b.username, undefined, { sensitivity: 'base', numeric: true });
+  });
+
+  list.innerHTML = usersWithGroups.map(({ platform, username, currentVoice, initialGroup }) => {
+    const groupOptions = buildVoiceGroupOptionsMarkup(initialGroup);
+    const voiceOptions = buildVoiceOptionsMarkupForGroup(groupOptions.selectedGroupKey, currentVoice);
+    const groupLabel = VOICE_GROUP_LABELS[groupOptions.selectedGroupKey] || 'Voices';
+
+    const platformBadge = platform === 'youtube'
+      ? '<span class="platform-badge youtube">YouTube</span>'
+      : '<span class="platform-badge tiktok">TikTok</span>';
+
+    return `
+      <div class="user-voice-item voice-card" data-platform="${escapeAttribute(platform)}" data-username="${escapeAttribute(username)}">
+        <div class="username">
+          <span class="user-voice-name">
+            ${platformBadge}
+            <span class="user-voice-name-text">${escapeHtml(username)}</span>
+          </span>
+          <span class="user-voice-group-hint" title="Current language group">${escapeHtml(groupLabel)}</span>
+        </div>
+        <div class="user-voice-controls-grid">
+          <select class="user-voice-group-select" title="Language group">
+            ${groupOptions.markup}
+          </select>
+          <select class="user-voice-select" title="Voice">
+            ${voiceOptions.markup}
+          </select>
+          <button class="user-voice-remove-btn" title="Remove custom voice">Remove</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  bindManageVoicesModalControls(list);
+  modal.style.display = 'flex';
+}
+
 // Voice assignment modal
 window.openVoiceAssignment = function(username, platform) {
   const currentVoice = getVoiceForUser(username, platform);
   const modal = document.getElementById('voiceModal');
   const list = document.getElementById('userVoiceList');
+  setVoiceModalWideLayout(false);
+  if (list) list.classList.remove('voice-grid-layout');
 
   const platformBadge = platform === 'youtube'
     ? '<span class="platform-badge youtube">YouTube</span>'
@@ -1647,48 +1853,21 @@ function setVoiceModalHeader(title, subtitle) {
   if (subtitleEl) subtitleEl.textContent = subtitle;
 }
 
+function setVoiceModalWideLayout(enabled) {
+  const modalPanel = document.querySelector('#voiceModal .modal');
+  if (!modalPanel) return;
+  modalPanel.classList.toggle('voice-modal-wide', Boolean(enabled));
+}
+
 // Manage voices button
-document.getElementById('manageVoicesBtn').addEventListener('click', function() {
-  const modal = document.getElementById('voiceModal');
-  const list = document.getElementById('userVoiceList');
-  setVoiceModalHeader(
-    'Manage User Voices',
-    'Assign specific voices to users from any platform.'
-  );
-
-  if (recentUsers.length === 0) {
-    list.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 20px;">No recent users yet.</p>';
-  } else {
-    list.innerHTML = recentUsers.map(userKey => {
-      const [platform, username] = userKey.split(':');
-      const currentVoice = getVoiceForUser(username, platform);
-
-      const platformBadge = platform === 'youtube'
-        ? '<span class="platform-badge youtube">YouTube</span>'
-        : '<span class="platform-badge tiktok">TikTok</span>';
-      const optionsMarkup = buildVoiceOptionsMarkup(currentVoice);
-
-      return `
-        <div class="user-voice-item">
-          <div class="username">${platformBadge}${username}</div>
-          <select onchange="setVoiceForUser('${username.replace(/'/g, "\\'")}', '${platform}', this.value)">
-            ${optionsMarkup}
-          </select>
-          <button onclick="removeUserVoice('${username.replace(/'/g, "\\'")}', '${platform}')">Remove</button>
-        </div>
-      `;
-    }).join('');
-  }
-
-  modal.style.display = 'flex';
-});
+document.getElementById('manageVoicesBtn').addEventListener('click', renderManageUserVoicesModal);
 
 window.removeUserVoice = function(username, platform) {
   const userKey = `${platform}:${username}`;
   delete userVoices[userKey];
   saveUserVoices();
   addChatMessage('SYSTEM', `Voice for "${username}" (${platform}) removed`, 'SYSTEM', false);
-  document.getElementById('manageVoicesBtn').click();
+  renderManageUserVoicesModal();
 };
 
 // Close modal on overlay click
@@ -1714,6 +1893,8 @@ if (globalAnimationTriggerCheckbox) {
 document.getElementById('manageAnimationPermissionsBtn')?.addEventListener('click', () => {
   const modal = document.getElementById('voiceModal');
   const list = document.getElementById('userVoiceList');
+  setVoiceModalWideLayout(false);
+  if (list) list.classList.remove('voice-grid-layout');
   setVoiceModalHeader(
     'Per-User Animation Permissions',
     'Control which users can trigger animations with stickers.'
@@ -2308,6 +2489,7 @@ const femaleVoiceSelect = document.getElementById('femaleVoiceSelect');
 
 // Gender cache (persistent across sessions)
 let genderCache = {};
+let ollamaOnline = false;
 
 // Load gender cache from settingsStore
 function loadGenderCache() {
@@ -2330,6 +2512,7 @@ function saveGenderCache() {
 }
 
 function setOllamaStatus(online) {
+  ollamaOnline = Boolean(online);
   if (!ollamaStatusEl) return;
   ollamaStatusEl.classList.remove('online', 'offline');
   if (online) {
@@ -2337,7 +2520,7 @@ function setOllamaStatus(online) {
     ollamaStatusEl.textContent = 'Ollama: online (LLM detection active)';
   } else {
     ollamaStatusEl.classList.add('offline');
-    ollamaStatusEl.textContent = 'Ollama: offline (fallback pattern detection)';
+    ollamaStatusEl.textContent = 'Ollama: offline (start ollama serve to enable auto-detection)';
   }
 }
 
@@ -2414,6 +2597,8 @@ if (femaleVoiceSelect) {
 
 // Detect gender using LLM (Ollama)
 async function detectGenderWithLLM(username) {
+  if (!ollamaOnline) return null;
+
   const prompt = `Username: "${username}"
 
 Task: Predict user's gender based on this username. Consider:
@@ -2459,26 +2644,12 @@ Answer:`;
     }
 
     console.warn(`⚠️ Invalid LLM response for ${username}: "${answer}"`);
-    return 'neutral';
+    return null;
 
   } catch (error) {
     console.error('❌ LLM gender detection error:', error.message);
-    // Fallback to pattern matching
-    return quickPatternCheck(username);
+    return null;
   }
-}
-
-// Quick pattern check (fallback when LLM is offline)
-function quickPatternCheck(username) {
-  const lower = username.toLowerCase().replace(/[^a-z]/g, '');
-
-  // Very obvious female patterns
-  if (/girl|queen|princess|lady|miss|goddess|waifu/.test(lower)) return 'female';
-
-  // Very obvious male patterns
-  if (/boy|king|lord|dude|bro|master|emperor/.test(lower)) return 'male';
-
-  return 'neutral';
 }
 
 // Main gender detection (with caching)
@@ -2493,6 +2664,7 @@ async function detectGender(username) {
 
   // Detect with LLM
   const gender = await detectGenderWithLLM(username);
+  if (!gender) return null;
 
   // Cache result
   genderCache[cacheKey] = gender;
@@ -2510,6 +2682,7 @@ async function autoAssignVoiceIfNeeded(author, platform) {
 
   // Skip if auto-detection disabled
   if (!autoGenderDetectionCheckbox || !autoGenderDetectionCheckbox.checked) return;
+  if (!ollamaOnline) return;
 
   // Skip if gender voice selects aren't populated yet
   if (!maleVoiceSelect || !femaleVoiceSelect) return;
@@ -2517,6 +2690,7 @@ async function autoAssignVoiceIfNeeded(author, platform) {
   try {
     // Detect gender (cached if seen before)
     const gender = await detectGender(author);
+    if (!gender) return;
 
     let assignedVoice = null;
 
@@ -4908,6 +5082,7 @@ if (hideAllVoicesBtn) {
 // Populate visible voices list
 function populateVoicePreviewList() {
   if (!voicePreviewList) return;
+  voicePreviewList.style.removeProperty('column-count');
 
   const groups = buildVoiceGroups({ includeHidden: true });
   if (groups.length === 0) {
@@ -4998,6 +5173,7 @@ function populateVoicePreviewList() {
       populateHiddenVoicesList();
     });
   });
+
 }
 
 // Preview a voice
