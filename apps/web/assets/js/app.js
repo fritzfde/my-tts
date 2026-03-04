@@ -105,6 +105,140 @@ let clonedVoices = [];
 
 // Track hidden voices
 let hiddenVoices = new Set();
+const VOICE_GROUP_ORDER = ['custom', 'en', 'de', 'es', 'uk', 'ru'];
+const VOICE_GROUP_LABELS = {
+  custom: '🎙️ Custom Voices',
+  en: '🇺🇸 English',
+  de: '🇩🇪 German',
+  es: '🇪🇸 Spanish',
+  uk: '🇺🇦 Ukrainian',
+  ru: '🇷🇺 Russian'
+};
+let enabledLanguages = new Set(VOICE_GROUP_ORDER.filter((code) => code !== 'custom'));
+
+function getVoiceLanguageCode(lang) {
+  const code = String(lang || '').toLowerCase().substring(0, 2);
+  return VOICE_GROUP_ORDER.includes(code) ? code : null;
+}
+
+function buildVoiceGroups({ includeHidden = true, ignoreLanguageFilters = false } = {}) {
+  const grouped = new Map();
+  VOICE_GROUP_ORDER.forEach((groupKey) => grouped.set(groupKey, []));
+
+  const sortedClonedVoices = [...clonedVoices].sort((a, b) => (
+    String(a).localeCompare(String(b), undefined, { sensitivity: 'base', numeric: true })
+  ));
+
+  sortedClonedVoices.forEach((voiceName) => {
+    const voiceId = `cloned-${voiceName}`;
+    const isHidden = hiddenVoices.has(voiceId);
+    if (!includeHidden && isHidden) return;
+    grouped.get('custom').push({
+      id: voiceId,
+      name: voiceName,
+      groupKey: 'custom',
+      isCloned: true,
+      isHidden
+    });
+  });
+
+  voices.forEach((voice, index) => {
+    const groupKey = getVoiceLanguageCode(voice.lang);
+    if (!groupKey) return;
+    if (!ignoreLanguageFilters && enabledLanguages.size > 0 && !enabledLanguages.has(groupKey)) return;
+
+    const voiceId = `system-${index}`;
+    const isHidden = hiddenVoices.has(voiceId);
+    if (!includeHidden && isHidden) return;
+
+    grouped.get(groupKey).push({
+      id: voiceId,
+      name: voice.name,
+      groupKey,
+      isCloned: false,
+      isHidden
+    });
+  });
+
+  grouped.forEach((groupVoices) => {
+    groupVoices.sort((a, b) => (
+      String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base', numeric: true })
+    ));
+  });
+
+  return VOICE_GROUP_ORDER
+    .map((groupKey) => ({
+      key: groupKey,
+      label: VOICE_GROUP_LABELS[groupKey],
+      voices: grouped.get(groupKey) || []
+    }))
+    .filter((group) => group.voices.length > 0);
+}
+
+function getAllVoiceEntries(options = {}) {
+  return buildVoiceGroups(options).flatMap((group) => group.voices);
+}
+
+function findVoiceEntryById(voiceId) {
+  if (!voiceId) return null;
+  return getAllVoiceEntries({ includeHidden: true, ignoreLanguageFilters: true })
+    .find((entry) => entry.id === voiceId) || null;
+}
+
+function populateVoiceSelectElement(select, preferredVoiceId = '') {
+  if (!select) return '';
+
+  select.innerHTML = '';
+  const groups = buildVoiceGroups({ includeHidden: false });
+
+  groups.forEach((group) => {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = group.label;
+
+    group.voices.forEach((entry) => {
+      const option = document.createElement('option');
+      option.value = entry.id;
+      option.textContent = entry.name;
+      optgroup.appendChild(option);
+    });
+
+    if (optgroup.children.length > 0) {
+      select.appendChild(optgroup);
+    }
+  });
+
+  const options = Array.from(select.querySelectorAll('option'));
+  if (options.length === 0) {
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = 'No voices available';
+    placeholder.disabled = true;
+    placeholder.selected = true;
+    select.appendChild(placeholder);
+    return '';
+  }
+
+  const targetValue = preferredVoiceId && options.some((opt) => opt.value === preferredVoiceId)
+    ? preferredVoiceId
+    : options[0].value;
+  select.value = targetValue;
+  return targetValue;
+}
+
+function buildVoiceOptionsMarkup(selectedVoiceId = '') {
+  const groups = buildVoiceGroups({ includeHidden: false });
+  if (groups.length === 0) {
+    return '<option value="" disabled selected>No voices available</option>';
+  }
+
+  return groups.map((group) => {
+    const optionsMarkup = group.voices.map((entry) => (
+      `<option value="${escapeAttribute(entry.id)}"${entry.id === selectedVoiceId ? ' selected' : ''}>${escapeHtml(entry.name)}</option>`
+    )).join('');
+
+    return `<optgroup label="${escapeAttribute(group.label)}">${optionsMarkup}</optgroup>`;
+  }).join('');
+}
 
 // Keep audio playing in background tabs
 let wakeLock = null;
@@ -274,6 +408,27 @@ const readLinksCheckbox = document.getElementById('readLinks');
 const testMessageInput = document.getElementById('testMessage');
 const testVoiceYouTubeBtn = document.getElementById('testVoiceYouTubeBtn');
 const testVoiceTikTokBtn = document.getElementById('testVoiceTikTokBtn');
+const ollamaStatusEl = document.getElementById('ollamaStatus');
+const onlineYouTubeCountEl = document.getElementById('onlineYouTubeCount');
+const onlineTikTokCountEl = document.getElementById('onlineTikTokCount');
+const onlineYouTubeUsersEl = document.getElementById('onlineYouTubeUsers');
+const onlineTikTokUsersEl = document.getElementById('onlineTikTokUsers');
+const stickerAssignModal = document.getElementById('stickerAssignModal');
+const stickerAssignPreviewImage = document.getElementById('stickerAssignPreviewImage');
+const stickerAssignName = document.getElementById('stickerAssignName');
+const stickerAssignCurrent = document.getElementById('stickerAssignCurrent');
+const stickerAssignAnimationSelect = document.getElementById('stickerAssignAnimationSelect');
+const stickerAssignSaveBtn = document.getElementById('stickerAssignSaveBtn');
+const stickerAssignCancelBtn = document.getElementById('stickerAssignCancelBtn');
+const DEFAULT_TEST_MESSAGE = 'Are you already subscribe to my YouTube? Wait, what!? Bro!';
+
+const ONLINE_USER_TTL_MS = 60000;
+const onlineUsers = {
+  youtube: new Map(),
+  tiktok: new Map()
+};
+let tiktokLiveViewerCount = 0;
+let activeStickerAssignKey = '';
 
 // ─── API Key tag manager ────────────────────────────────────────────
 let apiKeys = []; // source of truth
@@ -424,102 +579,18 @@ function loadVoices() {
   voiceSelectYouTube = ytSelect;
   voiceSelectTikTok = ttSelect;
 
-  ytSelect.innerHTML = '';
-  ttSelect.innerHTML = '';
-
-  const allowedLanguages = ['en', 'de', 'es', 'uk', 'ru'];
-
-  const filteredVoices = voices.filter(voice => {
-    const lang = voice.lang.toLowerCase().substring(0, 2);
-    return allowedLanguages.includes(lang);
-  });
-
-  const voicesByLang = { 'en': [], 'de': [], 'es': [], 'uk': [], 'ru': [] };
-
-  filteredVoices.forEach(voice => {
-    const lang = voice.lang.toLowerCase().substring(0, 2);
-    if (voicesByLang[lang]) {
-      voicesByLang[lang].push({ voice, index: voices.indexOf(voice) });
-    }
-  });
-
-  const langNames = {
-    'en': '🇺🇸 English',
-    'de': '🇩🇪 German',
-    'es': '🇪🇸 Spanish',
-    'uk': '🇺🇦 Ukrainian',
-    'ru': '🇷🇺 Russian'
-  };
-
-  [ytSelect, ttSelect].forEach(select => {
-    // ── 1. Custom (cloned) voices first ──
-    if (clonedVoices.length > 0) {
-      const header = document.createElement('option');
-      header.disabled = true;
-      header.textContent = '── 🎙️ Custom Voices ──';
-      select.appendChild(header);
-
-      clonedVoices.forEach(voiceName => {
-        const option = document.createElement('option');
-        option.value = `cloned-${voiceName}`;
-        option.textContent = `  ${voiceName}`;
-        select.appendChild(option);
-      });
-    }
-
-    // ── 2. System voices grouped by language ──
-    const hasSomethingAbove = clonedVoices.length > 0;
-    allowedLanguages.forEach((langCode, idx) => {
-      const langVoices = voicesByLang[langCode];
-      if (!langVoices || langVoices.length === 0) return;
-
-      // Separator before first system group if custom voices are above
-      if (idx === 0 && hasSomethingAbove) {
-        const sep = document.createElement('option');
-        sep.disabled = true;
-        sep.textContent = '──────────────';
-        select.appendChild(sep);
-      }
-
-      const header = document.createElement('option');
-      header.disabled = true;
-      header.textContent = `── ${langNames[langCode]} ──`;
-      select.appendChild(header);
-
-      langVoices.forEach(({ voice, index }) => {
-        const voiceId = `system-${index}`;
-        // Skip hidden voices
-        if (hiddenVoices && hiddenVoices.has(voiceId)) return;
-
-        const option = document.createElement('option');
-        option.value = voiceId;
-        option.textContent = `  ${voice.name}`;
-        select.appendChild(option);
-      });
-    });
-
-    // ── 3. ElevenLabs ──
-    // Only add this section if an ElevenLabs key is configured and voices have been fetched.
-    // For now the section is intentionally omitted — system + custom voices are sufficient.
-  });
-
-  // Restore saved preferences
   const savedYTVoice = settingsStore.getItem('youtube_default_voice');
   const savedTTVoice = settingsStore.getItem('tiktok_default_voice');
+  const selectedYT = populateVoiceSelectElement(ytSelect, savedYTVoice || ytSelect.value);
+  const selectedTT = populateVoiceSelectElement(ttSelect, savedTTVoice || ttSelect.value);
 
-  if (savedYTVoice && Array.from(ytSelect.options).some(opt => opt.value === savedYTVoice)) {
-    ytSelect.value = savedYTVoice;
-  } else {
-    // Default to first custom voice if available, otherwise first system voice
-    const firstSelectable = Array.from(ytSelect.options).find(opt => !opt.disabled);
-    if (firstSelectable) ytSelect.value = firstSelectable.value;
+  // Only persist defaults automatically when no saved value exists yet.
+  // This avoids overwriting user's saved choice during early/partial voice loading.
+  if (!savedYTVoice && selectedYT) {
+    settingsStore.setItem('youtube_default_voice', selectedYT);
   }
-
-  if (savedTTVoice && Array.from(ttSelect.options).some(opt => opt.value === savedTTVoice)) {
-    ttSelect.value = savedTTVoice;
-  } else {
-    const firstSelectable = Array.from(ttSelect.options).find(opt => !opt.disabled);
-    if (firstSelectable) ttSelect.value = firstSelectable.value;
+  if (!savedTTVoice && selectedTT) {
+    settingsStore.setItem('tiktok_default_voice', selectedTT);
   }
 
   console.log('Loaded voices for both platforms');
@@ -611,7 +682,12 @@ function getVoiceName(voiceId) {
     option = Array.from(ttSelect.options).find(opt => opt.value === voiceId);
   }
 
-  return option ? option.textContent.trim() : voiceId;
+  if (option) return option.textContent.trim();
+
+  const entry = findVoiceEntryById(voiceId);
+  if (entry) return entry.name;
+
+  return voiceId;
 }
 
 // Add user to recent users list (with platform prefix)
@@ -622,6 +698,139 @@ function addRecentUser(userKey) {
       recentUsers = recentUsers.slice(0, 20);
     }
     settingsStore.setItem('recent_users', JSON.stringify(recentUsers));
+  }
+}
+
+function formatUserSeenAgo(lastSeenTs) {
+  const seconds = Math.max(0, Math.floor((Date.now() - lastSeenTs) / 1000));
+  if (seconds < 60) return 'now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h`;
+}
+
+function pruneOnlineUsers() {
+  const cutoff = Date.now() - ONLINE_USER_TTL_MS;
+  ['youtube', 'tiktok'].forEach((platform) => {
+    onlineUsers[platform].forEach((value, username) => {
+      if (!value || value.lastSeen < cutoff) {
+        onlineUsers[platform].delete(username);
+      }
+    });
+  });
+}
+
+function renderOnlineUsers() {
+  pruneOnlineUsers();
+
+  const renderPlatformList = (platform, listEl, countEl) => {
+    if (!listEl || !countEl) return;
+
+    const entries = Array.from(onlineUsers[platform].entries())
+      .sort((a, b) => (b[1]?.lastSeen || 0) - (a[1]?.lastSeen || 0));
+
+    if (platform === 'tiktok' && tiktokLiveViewerCount > 0) {
+      countEl.textContent = String(tiktokLiveViewerCount);
+      countEl.title = `Tracked active users: ${entries.length}`;
+    } else {
+      countEl.textContent = String(entries.length);
+      countEl.title = '';
+    }
+
+    if (entries.length === 0) {
+      listEl.innerHTML = '<div class="online-users-empty">No active users</div>';
+      return;
+    }
+
+    listEl.innerHTML = entries.map(([username, data]) => {
+      const displayName = data?.displayName || username;
+      const avatar = data?.avatar || (window.userAvatars && window.userAvatars.get(`${platform}:${username}`));
+      const avatarMarkup = avatar
+        ? `<img src="${escapeAttribute(avatar)}" alt="${escapeAttribute(displayName)}" class="online-user-avatar">`
+        : '<span class="online-user-avatar" style="display: inline-flex; align-items: center; justify-content: center; font-size: 0.65rem; background: rgba(255,255,255,0.14);">👤</span>';
+
+      return `
+        <div class="online-user-item" title="${escapeAttribute(displayName)}">
+          ${avatarMarkup}
+          <span class="online-user-name">${escapeHtml(displayName)}</span>
+          <span class="online-user-time">${formatUserSeenAgo(data.lastSeen)}</span>
+        </div>
+      `;
+    }).join('');
+  };
+
+  renderPlatformList('youtube', onlineYouTubeUsersEl, onlineYouTubeCountEl);
+  renderPlatformList('tiktok', onlineTikTokUsersEl, onlineTikTokCountEl);
+}
+
+function markUserOnline(username, platform) {
+  if (!username || !platform || !onlineUsers[platform]) return;
+  const existing = onlineUsers[platform].get(username) || {};
+  onlineUsers[platform].set(username, { ...existing, lastSeen: Date.now() });
+  renderOnlineUsers();
+}
+
+function clearOnlineUsers(platform) {
+  if (!onlineUsers[platform]) return;
+  onlineUsers[platform].clear();
+  if (platform === 'tiktok') {
+    tiktokLiveViewerCount = 0;
+  }
+  renderOnlineUsers();
+}
+
+async function refreshTikTokAudience() {
+  if (!tiktokConnected) {
+    tiktokLiveViewerCount = 0;
+    onlineUsers.tiktok.clear();
+    renderOnlineUsers();
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/tiktok/audience');
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const viewerCount = Number(data?.viewerCount || 0);
+    tiktokLiveViewerCount = Number.isFinite(viewerCount) && viewerCount >= 0 ? viewerCount : 0;
+
+    const candidates = [];
+    if (Array.isArray(data?.activeUsers)) {
+      candidates.push(...data.activeUsers);
+    }
+    if (Array.isArray(data?.topViewers)) {
+      candidates.push(...data.topViewers);
+    }
+
+    const now = Date.now();
+    const nextTikTokUsers = new Map();
+    candidates.forEach((entry) => {
+      const uniqueId = String(entry?.uniqueId || '').trim();
+      if (!uniqueId) return;
+
+      const displayName = String(entry?.nickname || uniqueId);
+      const avatar = entry?.avatar || entry?.profilePictureUrl || null;
+      if (avatar) {
+        window.userAvatars.set(`tiktok:${uniqueId}`, avatar);
+      }
+
+      const lastSeenRaw = Number(entry?.lastSeen);
+      const lastSeen = Number.isFinite(lastSeenRaw) ? lastSeenRaw : now;
+      const existing = onlineUsers.tiktok.get(uniqueId) || {};
+      nextTikTokUsers.set(uniqueId, {
+        ...existing,
+        displayName,
+        avatar,
+        lastSeen
+      });
+    });
+
+    onlineUsers.tiktok = nextTikTokUsers;
+    renderOnlineUsers();
+  } catch (err) {
+    console.warn('TikTok audience fetch failed:', err?.message || err);
   }
 }
 
@@ -652,7 +861,12 @@ function loadSettings() {
   if (savedTikTokUsername) document.getElementById('tiktokUsername').value = savedTikTokUsername;
 
   const savedTestMessage = settingsStore.getItem('yt_tts_test_message');
-  testMessageInput.value = savedTestMessage || 'Are you already subscribe to my YouTube? Wait, what!? Bro!';
+  const unifiedTestMessage = savedTestMessage || DEFAULT_TEST_MESSAGE;
+  testMessageInput.value = unifiedTestMessage;
+  const voicePreviewMessageInput = document.getElementById('voicePreviewText');
+  if (voicePreviewMessageInput) {
+    voicePreviewMessageInput.value = unifiedTestMessage;
+  }
 
   const savedVolume = settingsStore.getItem('yt_tts_volume');
   volumeSlider.value = savedVolume || '100';
@@ -679,8 +893,12 @@ volumeSlider.addEventListener('input', () => {
 });
 
 // Test message auto-save
-testMessageInput.addEventListener('change', () => {
+testMessageInput.addEventListener('input', () => {
   settingsStore.setItem('yt_tts_test_message', testMessageInput.value);
+  const voicePreviewMessageInput = document.getElementById('voicePreviewText');
+  if (voicePreviewMessageInput && voicePreviewMessageInput.value !== testMessageInput.value) {
+    voicePreviewMessageInput.value = testMessageInput.value;
+  }
 });
 
 // Extract channel ID
@@ -1145,6 +1363,7 @@ function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, e
   // Track recent users
   if (author !== 'SYSTEM') {
     addRecentUser(`${platform}:${author}`);
+    markUserOnline(author, platform);
   }
 
   if (isSpeaking) {
@@ -1261,6 +1480,7 @@ document.getElementById('connectYouTubeBtn').addEventListener('click', async () 
     youtubeNextPageToken = null;
     youtubeConnected = true;
     disconnectBtn.disabled = false;
+    clearOnlineUsers('youtube');
 
     // Request wake lock to keep audio playing in background
     requestWakeLock();
@@ -1282,6 +1502,7 @@ function disconnectYouTube() {
   youtubeLiveChatId = null;
   youtubeNextPageToken = null;
   youtubeLastPollTime = Date.now();
+  clearOnlineUsers('youtube');
 
   // Release wake lock if both platforms are disconnected
   if (!tiktokConnected && wakeLock) {
@@ -1332,6 +1553,8 @@ document.getElementById('connectTikTokBtn').addEventListener('click', async () =
       tiktokConnected = true;
       tiktokIsFirstPoll = true;
       disconnectBtn.disabled = false;
+      clearOnlineUsers('tiktok');
+      await refreshTikTokAudience();
 
       // Request wake lock to keep audio playing in background
       requestWakeLock();
@@ -1361,6 +1584,7 @@ document.getElementById('connectTikTokBtn').addEventListener('click', async () =
 function disconnectTikTok() {
   tiktokConnected = false;
   tiktokLastPollTime = Date.now();
+  clearOnlineUsers('tiktok');
 
   if (tiktokPollInterval) {
     try { clearTimeout(tiktokPollInterval); } catch (e) { /* ignore */ }
@@ -1391,17 +1615,13 @@ window.openVoiceAssignment = function(username, platform) {
   const platformBadge = platform === 'youtube'
     ? '<span class="platform-badge youtube">YouTube</span>'
     : '<span class="platform-badge tiktok">TikTok</span>';
-
-  // Get appropriate voice select based on platform
-  const sourceSelect = platform === 'youtube' ? voiceSelectYouTube : voiceSelectTikTok;
+  const optionsMarkup = buildVoiceOptionsMarkup(currentVoice);
 
   list.innerHTML = `
     <div class="user-voice-item">
       <div class="username">${platformBadge}${username}</div>
       <select id="voiceSelectModal">
-        ${Array.from(sourceSelect.options).map(opt =>
-          `<option value="${opt.value}" ${opt.value === currentVoice ? 'selected' : ''}>${opt.textContent}</option>`
-        ).join('')}
+        ${optionsMarkup}
       </select>
       <button onclick="assignVoice('${username.replace(/'/g, "\\'")}', '${platform}')">Set Voice</button>
     </div>
@@ -1446,16 +1666,13 @@ document.getElementById('manageVoicesBtn').addEventListener('click', function() 
       const platformBadge = platform === 'youtube'
         ? '<span class="platform-badge youtube">YouTube</span>'
         : '<span class="platform-badge tiktok">TikTok</span>';
-
-      const sourceSelect = platform === 'youtube' ? voiceSelectYouTube : voiceSelectTikTok;
+      const optionsMarkup = buildVoiceOptionsMarkup(currentVoice);
 
       return `
         <div class="user-voice-item">
           <div class="username">${platformBadge}${username}</div>
           <select onchange="setVoiceForUser('${username.replace(/'/g, "\\'")}', '${platform}', this.value)">
-            ${Array.from(sourceSelect.options).map(opt =>
-              `<option value="${opt.value}" ${opt.value === currentVoice ? 'selected' : ''}>${opt.textContent}</option>`
-            ).join('')}
+            ${optionsMarkup}
           </select>
           <button onclick="removeUserVoice('${username.replace(/'/g, "\\'")}', '${platform}')">Remove</button>
         </div>
@@ -1552,7 +1769,7 @@ window.setUserAnimationPermission = function(userKey, permission) {
 
 // Test voice buttons
 testVoiceYouTubeBtn.addEventListener('click', () => {
-  const testMsg = testMessageInput.value.trim() || 'Hello! This is a test.';
+  const testMsg = testMessageInput.value.trim() || DEFAULT_TEST_MESSAGE;
   const voiceId = voiceSelectYouTube.value;
 
   if (!voiceId) {
@@ -1588,7 +1805,7 @@ testVoiceYouTubeBtn.addEventListener('click', () => {
 });
 
 testVoiceTikTokBtn.addEventListener('click', () => {
-  const testMsg = testMessageInput.value.trim() || 'Hello! This is a test.';
+  const testMsg = testMessageInput.value.trim() || DEFAULT_TEST_MESSAGE;
   const voiceId = voiceSelectTikTok.value;
 
   if (!voiceId) {
@@ -1626,6 +1843,13 @@ testVoiceTikTokBtn.addEventListener('click', () => {
 // Load settings and voices on page load
 loadSettings();
 loadUserVoices();
+renderOnlineUsers();
+setInterval(renderOnlineUsers, 15000);
+setInterval(() => {
+  if (tiktokConnected) {
+    void refreshTikTokAudience();
+  }
+}, 4000);
 
 // Auto-connect to both platforms on page load
 setTimeout(async () => {
@@ -2105,66 +2329,70 @@ function saveGenderCache() {
   }
 }
 
+function setOllamaStatus(online) {
+  if (!ollamaStatusEl) return;
+  ollamaStatusEl.classList.remove('online', 'offline');
+  if (online) {
+    ollamaStatusEl.classList.add('online');
+    ollamaStatusEl.textContent = 'Ollama: online (LLM detection active)';
+  } else {
+    ollamaStatusEl.classList.add('offline');
+    ollamaStatusEl.textContent = 'Ollama: offline (fallback pattern detection)';
+  }
+}
+
+async function refreshOllamaStatus() {
+  if (!ollamaStatusEl) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1800);
+
+  try {
+    const response = await fetch('http://localhost:11434/api/tags', {
+      method: 'GET',
+      signal: controller.signal
+    });
+    setOllamaStatus(response.ok);
+  } catch (error) {
+    setOllamaStatus(false);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // Populate male/female voice selectors
 function populateGenderVoiceSelects() {
   if (!maleVoiceSelect || !femaleVoiceSelect) return;
 
-  // Clear existing options
-  maleVoiceSelect.innerHTML = '';
-  femaleVoiceSelect.innerHTML = '';
-
-  // Get all system voices
-  const systemVoices = voices.map((voice, index) => ({
-    value: `system-${index}`,
-    name: voice.name,
-    lang: voice.lang,
-    voice: voice
-  }));
-
-  // Add cloned voices
-  const allVoices = [
-    ...clonedVoices.map(name => ({
-      value: `cloned-${name}`,
-      name: name,
-      lang: 'custom',
-      isCloned: true
-    })),
-    ...systemVoices
-  ];
-
-  // Populate both selects
-  [maleVoiceSelect, femaleVoiceSelect].forEach(select => {
-    allVoices.forEach(v => {
-      const option = document.createElement('option');
-      option.value = v.value;
-      option.textContent = v.isCloned ? `🎙️ ${v.name}` : v.name;
-      select.appendChild(option);
-    });
-  });
-
-  // Try to auto-select appropriate voices
-  const maleVoice = systemVoices.find(v =>
-    /male|man|boy|david|mark|george|daniel|thomas/i.test(v.name)
-  );
-  const femaleVoice = systemVoices.find(v =>
-    /female|woman|girl|samantha|victoria|zira|anna|karen|moira/i.test(v.name)
-  );
-
-  // Restore saved preferences or use auto-detected
   const savedMale = settingsStore.getItem('default_male_voice');
   const savedFemale = settingsStore.getItem('default_female_voice');
+  const currentMale = maleVoiceSelect.value;
+  const currentFemale = femaleVoiceSelect.value;
 
-  if (savedMale && Array.from(maleVoiceSelect.options).some(opt => opt.value === savedMale)) {
-    maleVoiceSelect.value = savedMale;
-  } else if (maleVoice) {
-    maleVoiceSelect.value = maleVoice.value;
+  const selectedMale = populateVoiceSelectElement(maleVoiceSelect, savedMale || currentMale);
+  const selectedFemale = populateVoiceSelectElement(femaleVoiceSelect, savedFemale || currentFemale);
+
+  const visibleSystemVoices = getAllVoiceEntries({ includeHidden: false })
+    .filter((entry) => !entry.isCloned);
+
+  if (!savedMale && !currentMale) {
+    const maleVoice = visibleSystemVoices.find((entry) => (
+      /male|man|boy|david|mark|george|daniel|thomas/i.test(entry.name)
+    ));
+    if (maleVoice) maleVoiceSelect.value = maleVoice.id;
   }
 
-  if (savedFemale && Array.from(femaleVoiceSelect.options).some(opt => opt.value === savedFemale)) {
-    femaleVoiceSelect.value = savedFemale;
-  } else if (femaleVoice) {
-    femaleVoiceSelect.value = femaleVoice.value;
+  if (!savedFemale && !currentFemale) {
+    const femaleVoice = visibleSystemVoices.find((entry) => (
+      /female|woman|girl|samantha|victoria|zira|anna|karen|moira/i.test(entry.name)
+    ));
+    if (femaleVoice) femaleVoiceSelect.value = femaleVoice.id;
   }
+
+  const finalMale = maleVoiceSelect.value || selectedMale;
+  const finalFemale = femaleVoiceSelect.value || selectedFemale;
+  if (!savedMale && finalMale) settingsStore.setItem('default_male_voice', finalMale);
+  if (!savedFemale && finalFemale) settingsStore.setItem('default_female_voice', finalFemale);
 
   console.log('✓ Gender voice selects populated');
 }
@@ -2399,13 +2627,9 @@ async function pollTikTokMessages() {
       } else if (msg.type === 'combined') {
         // Handle text + stickers combined
         console.log(`💬🖼️ TikTok combined message from ${msg.author}:`, msg);
-        
-        // Build HTML with text and sticker images inline
-        const stickersHTML = msg.emotes.map(e => 
-          `<img src="${e.emoteImage}" alt="sticker" style="max-width: 60px; max-height: 60px; border-radius: 4px; margin: 0 4px; vertical-align: middle;">`
-        ).join('');
-        
-        const combinedHTML = `${escapeHtml(msg.text)} ${stickersHTML}`;
+
+        const stickersHTML = buildStickerChatListHtml(msg.emotes || []);
+        const combinedHTML = `${escapeHtml(msg.text)}${stickersHTML ? `<br>${stickersHTML}` : ''}`;
         
         addChatMessage(msg.author, combinedHTML, 'tiktok', false, 'combined', true);
         
@@ -2429,11 +2653,9 @@ async function pollTikTokMessages() {
       } else if (msg.type === 'emote') {
         // Handle stickers only (multiple stickers, no text)
         console.log(`🖼️ TikTok stickers from ${msg.author}:`, msg);
-        
-        const stickersHTML = msg.emotes.map(e => 
-          `<img src="${e.emoteImage}" alt="sticker" style="max-width: 100px; max-height: 100px; border-radius: 8px; margin: 4px;">`
-        ).join('');
-        
+
+        const stickersHTML = buildStickerChatListHtml(msg.emotes || []);
+
         addChatMessage(msg.author, stickersHTML, 'tiktok', false, 'sticker', true);
         
         // Trigger animation ONCE for the first sticker only (SKIP on first poll)
@@ -2765,14 +2987,19 @@ function findStickerKeyForAnimationTrigger(trigger) {
 }
 
 function findFirstStickerNameForAnimationTrigger(trigger) {
-  const key = findStickerKeyForAnimationTrigger(trigger);
-  if (!key) return '';
-  const data = normalizeStickerMappingEntry(key, stickerMappings[key]);
-  return data.name || key;
+  const entry = findFirstStickerEntryForAnimationTrigger(trigger);
+  return entry ? (entry.name || entry.key) : '';
 }
 
 function hasStickerForAnimationTrigger(trigger) {
   return Boolean(findStickerKeyForAnimationTrigger(trigger));
+}
+
+function findFirstStickerEntryForAnimationTrigger(trigger) {
+  const key = findStickerKeyForAnimationTrigger(trigger);
+  if (!key) return null;
+  const data = normalizeStickerMappingEntry(key, stickerMappings[key]);
+  return { key, ...data };
 }
 
 function moveStickerAnimationReferences(oldTrigger, newTrigger) {
@@ -2797,21 +3024,79 @@ function removeStickerAnimationReferences(trigger) {
   });
 }
 
-function setStickerForAnimationTrigger(trigger, stickerKey) {
-  if (!trigger) return;
+function assignStickerToTrigger(stickerKey, trigger) {
+  if (!stickerKey) return;
+
+  const targetTrigger = typeof trigger === 'string' ? trigger : '';
+  const current = normalizeStickerMappingEntry(stickerKey, stickerMappings[stickerKey]);
 
   Object.entries(stickerMappings).forEach(([key, data]) => {
     const normalized = normalizeStickerMappingEntry(key, data);
-    if (normalized.trigger === trigger) {
+    if (key === stickerKey || (targetTrigger && normalized.trigger === targetTrigger)) {
       normalized.trigger = '';
       stickerMappings[key] = normalized;
     }
   });
 
-  if (!stickerKey) return;
-  const selected = normalizeStickerMappingEntry(stickerKey, stickerMappings[stickerKey]);
-  selected.trigger = trigger;
-  stickerMappings[stickerKey] = selected;
+  if (!targetTrigger) return;
+  current.trigger = targetTrigger;
+  stickerMappings[stickerKey] = current;
+}
+
+function setStickerForAnimationTrigger(trigger, stickerKey) {
+  if (!trigger) return;
+  if (!stickerKey) {
+    removeStickerAnimationReferences(trigger);
+    return;
+  }
+  assignStickerToTrigger(stickerKey, trigger);
+}
+
+function renderAnimationPopupStickerPicker(selectedKey = '') {
+  if (!animationPopupStickerPicker) return;
+
+  const currentTrigger = activeAnimationPopup?.trigger || '';
+  const options = getAvailableStickerOptions();
+  const noneSelected = !selectedKey;
+
+  const noneCard = `
+    <button type="button" class="secondary animation-sticker-option none${noneSelected ? ' active' : ''}" data-sticker-key="">
+      <span class="animation-sticker-option-name">No sticker</span>
+      <span class="animation-sticker-option-map">Unassigned</span>
+    </button>
+  `;
+
+  const optionCards = options.map(entry => {
+    const isSelected = selectedKey === entry.key;
+    const image = entry.image
+      ? `<img class="animation-sticker-option-image" src="${escapeAttribute(entry.image)}" alt="${escapeAttribute(entry.name || entry.key)}">`
+      : `<span class="animation-sticker-option-image" style="display: inline-flex; align-items: center; justify-content: center; font-size: 1.15rem;">🎭</span>`;
+
+    let mappedLabel = 'Unassigned';
+    if (entry.trigger) {
+      mappedLabel = entry.trigger === currentTrigger ? 'Mapped to this card' : `Mapped: ${entry.trigger}`;
+    }
+
+    return `
+      <button type="button" class="secondary animation-sticker-option${isSelected ? ' active' : ''}" data-sticker-key="${escapeAttribute(entry.key)}" title="${escapeAttribute(entry.name || entry.key)}">
+        ${image}
+        <span class="animation-sticker-option-name">${escapeHtml(entry.name || entry.key)}</span>
+        <span class="animation-sticker-option-map">${escapeHtml(mappedLabel)}</span>
+      </button>
+    `;
+  }).join('');
+
+  animationPopupStickerPicker.innerHTML = `${noneCard}${optionCards}`;
+
+  animationPopupStickerPicker.querySelectorAll('.animation-sticker-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const stickerKey = btn.dataset.stickerKey || '';
+      if (animationPopupSticker) {
+        animationPopupSticker.value = stickerKey;
+      }
+      renderAnimationPopupStickerPicker(stickerKey);
+    });
+  });
 }
 
 function populateAnimationPopupStickerOptions(selectedKey = '') {
@@ -2827,7 +3112,8 @@ function populateAnimationPopupStickerOptions(selectedKey = '') {
     }
     animationPopupSticker.appendChild(option);
   });
-  if (!selectedKey) animationPopupSticker.value = '';
+  animationPopupSticker.value = selectedKey || '';
+  renderAnimationPopupStickerPicker(animationPopupSticker.value);
 }
 
 function handleStickerAnimation(msg) {
@@ -2869,6 +3155,240 @@ function handleStickerAnimation(msg) {
     console.log(`🎬 Sticker triggered animation: ${emoteKey} → ${animTrigger}`);
     triggerAnimation(animTrigger, 'tiktok', msg.author);
   }
+}
+
+function ensureStickerEntry(stickerKey, { name = '', image = null } = {}) {
+  if (!stickerKey) return null;
+  const existingRaw = stickerMappings[stickerKey];
+  const existing = normalizeStickerMappingEntry(stickerKey, existingRaw);
+  let changed = false;
+
+  if (!existingRaw) {
+    changed = true;
+  }
+  if (name && existing.name !== name) {
+    existing.name = name;
+    changed = true;
+  }
+  if (image && existing.image !== image) {
+    existing.image = image;
+    changed = true;
+  }
+
+  if (changed) {
+    stickerMappings[stickerKey] = existing;
+    saveStickerMappings();
+  } else if (!existingRaw) {
+    stickerMappings[stickerKey] = existing;
+  }
+
+  return existing;
+}
+
+function buildStickerChatItemHtml(emote, fallbackName = '') {
+  const stickerKey = String(emote?.emoteId || emote?.emoteName || '').trim();
+  if (!stickerKey) return '';
+
+  const stickerName = String(emote?.emoteName || fallbackName || `Sticker ${stickerKey}`).trim();
+  const stickerImage = emote?.emoteImage || emote?.emoteImageUrl || null;
+  ensureStickerEntry(stickerKey, { name: stickerName, image: stickerImage });
+
+  const assignedTrigger = getStickerTriggerForKey(stickerKey);
+  const statusLabel = assignedTrigger ? `Mapped to: ${assignedTrigger}` : 'Unassigned';
+  const actionLabel = 'Assign';
+  const imageMarkup = stickerImage
+    ? `<img src="${escapeAttribute(stickerImage)}" alt="${escapeAttribute(stickerName)}" class="chat-sticker-image">`
+    : `<span class="chat-sticker-image" style="display: inline-flex; align-items: center; justify-content: center; font-size: 1.4rem;">🎭</span>`;
+  const unassignButton = assignedTrigger
+    ? `<button type="button" class="secondary chat-sticker-unassign-btn" data-sticker-key="${escapeAttribute(stickerKey)}" title="Unassign">×</button>`
+    : '';
+
+  return `
+    <span class="chat-sticker-item${assignedTrigger ? ' is-mapped' : ''}" data-sticker-key="${escapeAttribute(stickerKey)}" data-sticker-name="${escapeAttribute(stickerName)}" title="${escapeAttribute(stickerName)} — ${escapeAttribute(statusLabel)}">
+      ${imageMarkup}
+      <span class="chat-sticker-controls">
+        <button
+          type="button"
+          class="secondary chat-sticker-assign-btn"
+          data-sticker-key="${escapeAttribute(stickerKey)}"
+          data-sticker-name="${escapeAttribute(stickerName)}"
+          data-sticker-image="${escapeAttribute(stickerImage || '')}"
+          data-sticker-trigger="${escapeAttribute(assignedTrigger || '')}"
+        >${actionLabel}</button>
+        ${unassignButton}
+      </span>
+    </span>
+  `;
+}
+
+function buildStickerChatListHtml(emotes = []) {
+  const parts = emotes.map((emote) => buildStickerChatItemHtml(emote)).filter(Boolean);
+  if (parts.length === 0) return '';
+  return `<span class="chat-sticker-list">${parts.join('')}</span>`;
+}
+
+function buildStickerAssignAnimationOptions(selectedTrigger = '') {
+  if (!stickerAssignAnimationSelect) return;
+  const triggers = Object.keys(animationMappings || {}).sort((a, b) => a.localeCompare(b));
+  stickerAssignAnimationSelect.innerHTML = '<option value="">No animation assigned</option>';
+  triggers.forEach((trigger) => {
+    const option = document.createElement('option');
+    option.value = trigger;
+    option.textContent = trigger;
+    if (selectedTrigger && selectedTrigger === trigger) {
+      option.selected = true;
+    }
+    stickerAssignAnimationSelect.appendChild(option);
+  });
+  if (!selectedTrigger) {
+    stickerAssignAnimationSelect.value = '';
+  }
+}
+
+function refreshChatStickerUiForKey(stickerKey) {
+  if (!stickerKey) return;
+  const assignedTrigger = getStickerTriggerForKey(stickerKey);
+  const mapped = Boolean(assignedTrigger);
+
+  document.querySelectorAll('.chat-sticker-item').forEach((item) => {
+    if (!(item instanceof HTMLElement)) return;
+    if (item.dataset.stickerKey !== stickerKey) return;
+
+    item.classList.toggle('is-mapped', mapped);
+    const stickerName = item.dataset.stickerName || stickerKey;
+    item.title = mapped
+      ? `${stickerName} — Mapped to: ${assignedTrigger}`
+      : `${stickerName} — Unassigned`;
+
+    const controls = item.querySelector('.chat-sticker-controls');
+    if (!controls) return;
+
+    const assignBtn = controls.querySelector('.chat-sticker-assign-btn');
+    if (assignBtn) {
+      assignBtn.textContent = 'Assign';
+      assignBtn.dataset.stickerTrigger = assignedTrigger || '';
+    }
+
+    const existingUnassign = controls.querySelector('.chat-sticker-unassign-btn');
+    if (mapped && !existingUnassign) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'secondary chat-sticker-unassign-btn';
+      btn.dataset.stickerKey = stickerKey;
+      btn.title = 'Unassign';
+      btn.textContent = '×';
+      controls.appendChild(btn);
+    }
+    if (!mapped && existingUnassign) {
+      existingUnassign.remove();
+    }
+  });
+}
+
+window.closeStickerAssignModal = function closeStickerAssignModal() {
+  if (!stickerAssignModal) return;
+  stickerAssignModal.style.display = 'none';
+  activeStickerAssignKey = '';
+};
+
+window.openStickerAssignFromChat = function openStickerAssignFromChat(stickerKey, stickerImage = '', stickerName = '') {
+  if (!stickerAssignModal || !stickerAssignAnimationSelect) return;
+  if (!stickerKey) return;
+
+  const ensured = ensureStickerEntry(stickerKey, {
+    name: stickerName || `Sticker ${stickerKey}`,
+    image: stickerImage || null
+  }) || normalizeStickerMappingEntry(stickerKey, stickerMappings[stickerKey]);
+
+  activeStickerAssignKey = stickerKey;
+  const currentTrigger = getStickerTriggerForKey(stickerKey);
+  const displayName = ensured.name || stickerName || stickerKey;
+  const displayImage = ensured.image || stickerImage || '';
+
+  if (stickerAssignName) {
+    stickerAssignName.textContent = displayName;
+  }
+  if (stickerAssignCurrent) {
+    stickerAssignCurrent.textContent = currentTrigger
+      ? `Currently mapped to: ${currentTrigger}`
+      : 'Currently unassigned';
+  }
+  if (stickerAssignPreviewImage) {
+    if (displayImage) {
+      stickerAssignPreviewImage.src = displayImage;
+      stickerAssignPreviewImage.style.display = 'block';
+    } else {
+      stickerAssignPreviewImage.removeAttribute('src');
+      stickerAssignPreviewImage.style.display = 'none';
+    }
+  }
+
+  buildStickerAssignAnimationOptions(currentTrigger);
+  stickerAssignModal.style.display = 'flex';
+};
+
+if (chatFeed) {
+  chatFeed.addEventListener('click', (e) => {
+    if (!(e.target instanceof Element)) return;
+    const unassignButton = e.target.closest('.chat-sticker-unassign-btn');
+    if (unassignButton) {
+      e.preventDefault();
+      const stickerKey = unassignButton.dataset.stickerKey || '';
+      if (!stickerKey) return;
+
+      assignStickerToTrigger(stickerKey, '');
+      saveStickerMappings();
+      renderAnimationMappings();
+      refreshChatStickerUiForKey(stickerKey);
+
+      if (activeAnimationPopup?.trigger) {
+        const selectedKey = findStickerKeyForAnimationTrigger(activeAnimationPopup.trigger);
+        populateAnimationPopupStickerOptions(selectedKey);
+      }
+      return;
+    }
+
+    const button = e.target.closest('.chat-sticker-assign-btn');
+    if (!button) return;
+    e.preventDefault();
+    const stickerKey = button.dataset.stickerKey || '';
+    const stickerName = button.dataset.stickerName || '';
+    const stickerImage = button.dataset.stickerImage || '';
+    window.openStickerAssignFromChat(stickerKey, stickerImage, stickerName);
+  });
+}
+
+if (stickerAssignCancelBtn) {
+  stickerAssignCancelBtn.addEventListener('click', () => {
+    window.closeStickerAssignModal();
+  });
+}
+
+if (stickerAssignModal) {
+  stickerAssignModal.addEventListener('click', (e) => {
+    if (e.target === stickerAssignModal) {
+      window.closeStickerAssignModal();
+    }
+  });
+}
+
+if (stickerAssignSaveBtn) {
+  stickerAssignSaveBtn.addEventListener('click', async () => {
+    if (!activeStickerAssignKey) return;
+
+    const nextTrigger = stickerAssignAnimationSelect ? stickerAssignAnimationSelect.value : '';
+    assignStickerToTrigger(activeStickerAssignKey, nextTrigger);
+    saveStickerMappings();
+    renderAnimationMappings();
+    refreshChatStickerUiForKey(activeStickerAssignKey);
+
+    if (activeAnimationPopup?.trigger) {
+      const selectedKey = findStickerKeyForAnimationTrigger(activeAnimationPopup.trigger);
+      populateAnimationPopupStickerOptions(selectedKey);
+    }
+
+    window.closeStickerAssignModal();
+  });
 }
 
 
@@ -2913,14 +3433,19 @@ async function pollYouTubeMessages(isReconnect = false) {
       addChatMessage('SYSTEM', 'YouTube chat synced. Waiting for new messages...', 'youtube', false);
     } else {
       // Process only new messages
-      messages.forEach(msg => {
+      for (const msg of messages) {
         if (!youtubeSeenMessages.has(msg.id)) {
           youtubeSeenMessages.add(msg.id);
           const author = msg.authorDetails.displayName;
           const text = msg.snippet.displayMessage;
+          const avatarUrl = msg.authorDetails.profileImageUrl;
+          if (avatarUrl) {
+            window.userAvatars.set(`youtube:${author}`, avatarUrl);
+          }
+          await autoAssignVoiceIfNeeded(author, 'youtube');
           speakText(author, text, 'youtube');
         }
-      });
+      }
     }
 
     // Poll again based on the interval YouTube suggests (usually 5 seconds)
@@ -2938,6 +3463,8 @@ async function pollYouTubeMessages(isReconnect = false) {
 // Initialize on page load
 loadGenderCache();
 loadHiddenVoices(); // Load hidden voices list
+refreshOllamaStatus();
+setInterval(refreshOllamaStatus, 30000);
 
 // Populate gender voice selects after voices are loaded
 if (speechSynthesis.onvoiceschanged !== undefined) {
@@ -2963,6 +3490,7 @@ if (autoGenderDetectionCheckbox) {
   autoGenderDetectionCheckbox.addEventListener('change', () => {
     settingsStore.setItem('auto_gender_detection', autoGenderDetectionCheckbox.checked);
     console.log('Auto gender detection:', autoGenderDetectionCheckbox.checked ? 'enabled' : 'disabled');
+    refreshOllamaStatus();
   });
 }
 
@@ -3154,12 +3682,16 @@ function renderAnimationVisibilityBadges(trigger) {
   const giftNames = findGiftNamesForAnimationTrigger(trigger);
   const giftValues = findGiftValuesForAnimationTrigger(trigger);
   const nonDefaultValues = giftValues.filter(value => value !== '1');
-  const stickerName = findFirstStickerNameForAnimationTrigger(trigger);
+  const stickerEntry = findFirstStickerEntryForAnimationTrigger(trigger);
+  const stickerName = stickerEntry ? (stickerEntry.name || stickerEntry.key) : '';
   const isDefaultGiftAnimation = isGiftAnimationMapping(giftMappings.byValue?.['1'], trigger);
   const badges = [];
 
   if (stickerName) {
-    badges.push(`<span class="animation-visibility-badge sticker" title="Sticker mapping: ${escapeAttribute(stickerName)}">🎭 ${escapeAttribute(trimBadgeLabel(stickerName, 14))}</span>`);
+    const thumb = stickerEntry?.image
+      ? `<img src="${escapeAttribute(stickerEntry.image)}" alt="" class="animation-sticker-badge-thumb">`
+      : '<span class="animation-sticker-badge-thumb animation-sticker-badge-fallback">🎭</span>';
+    badges.push(`<span class="animation-visibility-badge sticker thumb-only" title="Sticker mapping: ${escapeAttribute(stickerName)}">${thumb}</span>`);
   }
 
   if (giftNames.length > 0) {
@@ -3692,6 +4224,7 @@ const animationPopupScale = document.getElementById('animationPopupScale');
 const animationPopupGiftName = document.getElementById('animationPopupGiftName');
 const animationPopupGiftValue = document.getElementById('animationPopupGiftValue');
 const animationPopupSticker = document.getElementById('animationPopupSticker');
+const animationPopupStickerPicker = document.getElementById('animationPopupStickerPicker');
 const animationPopupMakeDefault = document.getElementById('animationPopupMakeDefault');
 const animationPopupScaleUpBtn = document.getElementById('animationPopupScaleUpBtn');
 const animationPopupScaleDownBtn = document.getElementById('animationPopupScaleDownBtn');
@@ -4050,6 +4583,7 @@ const voiceFilterPanel = document.getElementById('voiceFilterPanel');
 const voiceFilterIcon = document.getElementById('voiceFilterIcon');
 const voicePreviewList = document.getElementById('voicePreviewList');
 const voicePreviewText = document.getElementById('voicePreviewText');
+const hideAllVoicesBtn = document.getElementById('hideAllVoicesBtn');
 const showAllVoicesBtn = document.getElementById('showAllVoicesBtn');
 const hiddenVoicesContainer = document.getElementById('hiddenVoicesContainer');
 const hiddenVoicesList = document.getElementById('hiddenVoicesList');
@@ -4094,7 +4628,18 @@ if (showAllVoicesBtn) {
   showAllVoicesBtn.addEventListener('click', () => {
     hiddenVoices.clear();
     saveHiddenVoices();
-    loadVoices(); // Refresh all dropdowns
+    loadVoices();
+    populateVoicePreviewList();
+    populateHiddenVoicesList();
+  });
+}
+
+if (hideAllVoicesBtn) {
+  hideAllVoicesBtn.addEventListener('click', () => {
+    getAllVoiceEntries({ includeHidden: true, ignoreLanguageFilters: true })
+      .forEach((entry) => hiddenVoices.add(entry.id));
+    saveHiddenVoices();
+    loadVoices();
     populateVoicePreviewList();
     populateHiddenVoicesList();
   });
@@ -4104,73 +4649,100 @@ if (showAllVoicesBtn) {
 function populateVoicePreviewList() {
   if (!voicePreviewList) return;
 
-  const allVoices = [];
-
-  // Add cloned voices (never hidden)
-  clonedVoices.forEach(name => {
-    allVoices.push({
-      value: `cloned-${name}`,
-      name: name,
-      lang: 'custom',
-      isCloned: true
-    });
-  });
-
-  // Add system voices (check if hidden)
-  voices.forEach((voice, index) => {
-    const voiceId = `system-${index}`;
-    if (!hiddenVoices.has(voiceId)) {
-      allVoices.push({
-        value: voiceId,
-        name: voice.name,
-        lang: voice.lang,
-        voice: voice
-      });
-    }
-  });
-
-  if (allVoices.length === 0) {
-    voicePreviewList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">All voices hidden</div>';
+  const groups = buildVoiceGroups({ includeHidden: true });
+  if (groups.length === 0) {
+    voicePreviewList.innerHTML = '<div class="voice-list-empty">No voices available</div>';
     return;
   }
 
-  // Generate HTML
-  voicePreviewList.innerHTML = allVoices.map(v => {
-    const langFlag = {
-      'en': '🇺🇸',
-      'de': '🇩🇪',
-      'es': '🇪🇸',
-      'uk': '🇺🇦',
-      'ru': '🇷🇺',
-      'custom': '🎙️'
-    }[v.lang.substring(0, 2)] || '🌐';
+  voicePreviewList.innerHTML = groups.map((group) => {
+    const visibleCount = group.voices.filter((entry) => !entry.isHidden).length;
+    const allHidden = visibleCount === 0;
 
-    const hideBtn = v.isCloned ? '' : `<button class="secondary hide-voice-btn" data-voice="${v.value}" style="padding: 4px 12px; font-size: 0.75rem;">❌ Hide</button>`;
+    const voicesMarkup = group.voices.map((entry) => `
+      <div class="voice-preview-item${entry.isHidden ? ' is-hidden' : ''}">
+        <span class="voice-preview-name" title="${escapeAttribute(entry.name)}">${escapeHtml(entry.name)}</span>
+        <div class="voice-preview-actions">
+          <button class="secondary preview-voice-btn" data-voice="${escapeAttribute(entry.id)}">Preview</button>
+          <button class="secondary voice-visibility-btn" data-voice="${escapeAttribute(entry.id)}">${entry.isHidden ? 'Show' : 'Hide'}</button>
+        </div>
+      </div>
+    `).join('');
 
     return `
-      <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 6px;">
-        <span style="font-size: 1.2rem;">${langFlag}</span>
-        <span style="flex: 1; color: var(--text-primary); font-size: 0.875rem;">${v.name}</span>
-        <button class="secondary preview-voice-btn" data-voice="${v.value}" style="padding: 4px 12px; font-size: 0.75rem;">
-          🔊 Preview
-        </button>
+      <div class="voice-filter-group">
+        <div class="voice-filter-group-header">
+          <span class="voice-filter-group-title">${escapeHtml(group.label)}</span>
+          <div class="voice-filter-group-actions">
+            <span class="voice-filter-group-count">${visibleCount}/${group.voices.length} shown</span>
+            <button class="secondary voice-group-toggle-btn" data-group="${escapeAttribute(group.key)}" data-action="${allHidden ? 'show' : 'hide'}">
+              ${allHidden ? 'Show group' : 'Hide group'}
+            </button>
+          </div>
+        </div>
+        <div class="voice-filter-group-list">${voicesMarkup}</div>
       </div>
     `;
   }).join('');
 
-  // Add preview button handlers
-  document.querySelectorAll('.preview-voice-btn').forEach(btn => {
+  document.querySelectorAll('.preview-voice-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       const voiceId = btn.dataset.voice;
+      if (!voiceId) return;
       previewVoice(voiceId);
+    });
+  });
+
+  document.querySelectorAll('.voice-visibility-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const voiceId = btn.dataset.voice;
+      if (!voiceId) return;
+
+      if (hiddenVoices.has(voiceId)) {
+        hiddenVoices.delete(voiceId);
+      } else {
+        hiddenVoices.add(voiceId);
+      }
+
+      saveHiddenVoices();
+      loadVoices();
+      populateVoicePreviewList();
+      populateHiddenVoicesList();
+    });
+  });
+
+  document.querySelectorAll('.voice-group-toggle-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const groupKey = btn.dataset.group;
+      const action = btn.dataset.action;
+      if (!groupKey || !action) return;
+
+      const targetGroup = buildVoiceGroups({ includeHidden: true })
+        .find((group) => group.key === groupKey);
+      if (!targetGroup) return;
+
+      targetGroup.voices.forEach((entry) => {
+        if (action === 'hide') {
+          hiddenVoices.add(entry.id);
+        } else {
+          hiddenVoices.delete(entry.id);
+        }
+      });
+
+      saveHiddenVoices();
+      loadVoices();
+      populateVoicePreviewList();
+      populateHiddenVoicesList();
     });
   });
 }
 
 // Preview a voice
 function previewVoice(voiceId) {
-  const testMsg = (voicePreviewText && voicePreviewText.value) || 'Hello! This is a test of the voice.';
+  const testMsg = (voicePreviewText && voicePreviewText.value) || (testMessageInput && testMessageInput.value) || DEFAULT_TEST_MESSAGE;
 
   if (voiceId.startsWith('cloned-')) {
     // Preview cloned voice
@@ -4201,6 +4773,15 @@ function previewVoice(voiceId) {
   }
 }
 
+if (voicePreviewText) {
+  voicePreviewText.addEventListener('input', () => {
+    if (testMessageInput && testMessageInput.value !== voicePreviewText.value) {
+      testMessageInput.value = voicePreviewText.value;
+      settingsStore.setItem('yt_tts_test_message', voicePreviewText.value);
+    }
+  });
+}
+
 console.log('✓ Voice filter & preview system initialized');
 
 // ─── Language Filter Checkboxes ─────────────────────────────────────
@@ -4223,6 +4804,8 @@ document.querySelectorAll('.lang-filter').forEach(checkbox => {
 
     // Refresh all voice dropdowns
     loadVoices();
+    populateVoicePreviewList();
+    populateHiddenVoicesList();
   });
 });
 
@@ -4232,7 +4815,13 @@ function loadLanguageFilters() {
   if (saved) {
     try {
       const langs = JSON.parse(saved);
-      enabledLanguages = new Set(langs);
+      const allowedLangs = VOICE_GROUP_ORDER.filter((code) => code !== 'custom');
+      enabledLanguages = new Set(
+        Array.isArray(langs) ? langs.filter((code) => allowedLangs.includes(code)) : []
+      );
+      if (enabledLanguages.size === 0) {
+        enabledLanguages = new Set(allowedLangs);
+      }
 
       // Update checkboxes to match saved state
       document.querySelectorAll('.lang-filter').forEach(checkbox => {
@@ -4242,45 +4831,47 @@ function loadLanguageFilters() {
       console.log('✓ Loaded language filters:', Array.from(enabledLanguages));
     } catch (e) {
       console.error('Error loading language filters:', e);
+      enabledLanguages = new Set(VOICE_GROUP_ORDER.filter((code) => code !== 'custom'));
     }
   }
 }
 
 // Populate hidden voices list
 function populateHiddenVoicesList() {
-  if (!hiddenVoicesList) return;
+  if (!hiddenVoicesList || !hiddenVoicesContainer) return;
 
-  const hiddenArray = Array.from(hiddenVoices);
+  const hiddenEntries = getAllVoiceEntries({ includeHidden: true, ignoreLanguageFilters: true })
+    .filter((entry) => hiddenVoices.has(entry.id))
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base', numeric: true }));
 
-  if (hiddenArray.length === 0) {
-    hiddenVoicesContainer.style.display = 'none';
+  if (hiddenEntries.length === 0) {
+    hiddenVoicesList.style.display = 'none';
+    hiddenVoicesContainer.innerHTML = '';
     return;
   }
 
-  hiddenVoicesContainer.style.display = 'block';
+  hiddenVoicesList.style.display = 'block';
 
-  hiddenVoicesList.innerHTML = hiddenArray.map(voiceId => {
-    const voiceIndex = parseInt(voiceId.replace('system-', ''));
-    const voice = voices[voiceIndex];
-    const voiceName = voice ? voice.name : voiceId;
-
+  hiddenVoicesContainer.innerHTML = hiddenEntries.map((entry) => {
     return `
-      <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px; margin-bottom: 6px;">
-        <span style="flex: 1; color: var(--text-secondary); font-size: 0.875rem;">${voiceName}</span>
-        <button class="secondary unhide-voice-btn" data-voice="${voiceId}" style="padding: 4px 12px; font-size: 0.75rem;">
-          ↩️ Restore
+      <div class="hidden-voice-item">
+        <span class="hidden-voice-name" title="${escapeAttribute(entry.name)}">${escapeHtml(entry.name)}</span>
+        <button class="secondary unhide-voice-btn" data-voice="${escapeAttribute(entry.id)}">
+          Restore
         </button>
       </div>
     `;
   }).join('');
 
   // Add unhide button handlers
-  document.querySelectorAll('.unhide-voice-btn').forEach(btn => {
+  document.querySelectorAll('.unhide-voice-btn').forEach((btn) => {
     btn.addEventListener('click', (e) => {
+      e.preventDefault();
       const voiceId = btn.dataset.voice;
+      if (!voiceId) return;
       hiddenVoices.delete(voiceId);
       saveHiddenVoices();
-      loadVoices(); // Refresh all dropdowns
+      loadVoices();
       populateVoicePreviewList();
       populateHiddenVoicesList();
     });

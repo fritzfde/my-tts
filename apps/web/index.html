@@ -126,12 +126,12 @@
                 </div>
             </div>
 
-            <div class="input-group" style="margin-bottom: 12px;">
-                <label>Test Message <span style="color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: normal;">(spoken when testing voices)</span></label>
-                <input type="text" id="testMessage" placeholder="Are you already subscribe to my YouTube? Wait, what!? Bro!">
-            </div>
+            <div class="voice-test-controls-row">
+                <div class="input-group" style="margin-bottom: 0;">
+                    <label>Test Message <span style="color: var(--text-secondary); font-weight: 400; text-transform: none; letter-spacing: normal;">(spoken when testing voices)</span></label>
+                    <input type="text" id="testMessage" placeholder="Are you already subscribe to my YouTube? Wait, what!? Bro!">
+                </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
                 <div class="input-group" style="margin-bottom: 0;">
                     <label>Rate</label>
                     <select id="rateSelect">
@@ -182,11 +182,12 @@
                     🤖 Auto-detect user gender (AI-powered voice assignment)
                 </label>
                 <div style="margin-top: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                    Uses local LLM to detect gender from usernames (e.g., "xXS4r4hXx" → Sarah → female voice). Results are cached for instant future assignments. Requires Ollama running locally.
+                    Uses local LLM to detect gender from usernames (e.g., "xXS4r4hXx" → Sarah → female voice). Results are cached for instant future assignments. If Ollama is offline, fallback pattern matching is used.
                 </div>
+                <div id="ollamaStatus" class="ollama-status">Ollama: checking...</div>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+            <div class="voice-user-controls-row">
                 <div class="input-group" style="margin-bottom: 0;">
                     <label>Default Male Voice 🧑</label>
                     <select id="maleVoiceSelect">
@@ -200,49 +201,42 @@
                         <option value="">Loading voices...</option>
                     </select>
                 </div>
-            </div>
 
-            <!-- Voice Filter & Preview -->
-            <div class="input-group" style="margin-bottom: 0;">
-                <button id="toggleVoiceFilter" class="secondary" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                    <span>🎤 Manage Voices (Show/Hide Individual Voices)</span>
-                    <span id="voiceFilterIcon" style="transform: rotate(0deg); transition: transform 0.3s;">▼</span>
-                </button>
-
-                <div id="voiceFilterPanel" style="display: none; margin-top: 12px; padding: 16px; background: var(--bg-tertiary); border-radius: 8px; border: 1px solid var(--border);">
-                    <div style="margin-bottom: 12px;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <label style="text-transform: none; font-size: 0.875rem; color: var(--text-secondary);">
-                                Click ❌ to hide voices from all dropdowns. Hidden voices can be restored below.
-                            </label>
-                            <button id="showAllVoicesBtn" class="secondary" style="padding: 4px 12px; font-size: 0.75rem;">Show All</button>
-                        </div>
-                    </div>
-
-                    <div style="margin-bottom: 12px;">
-                        <label style="text-transform: none; font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px; display: block;">
-                            Preview test message:
-                        </label>
-                        <input type="text" id="voicePreviewText" value="Hello! This is a test of the voice." style="width: 100%;">
-                    </div>
-
-                    <div id="voicePreviewList" style="max-height: 300px; overflow-y: auto;">
-                        <!-- Voice list will be populated here -->
-                    </div>
-
-                    <div id="hiddenVoicesList" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: none;">
-                        <label style="text-transform: none; font-size: 0.875rem; color: var(--text-secondary); margin-bottom: 8px; display: block;">
-                            Hidden Voices (click to restore):
-                        </label>
-                        <div id="hiddenVoicesContainer" style="display: flex; flex-wrap: wrap; gap: 8px;">
-                            <!-- Hidden voices will appear here -->
-                        </div>
+                <div class="input-group voice-controls-inline-group" style="margin-bottom: 0;">
+                    <label>User voices control</label>
+                    <div class="voice-controls-row">
+                        <button id="manageVoicesBtn" class="secondary voice-control-btn" title="User voices control">👤 User Voices</button>
+                        <button id="toggleVoiceFilter" class="secondary voice-control-btn voice-control-btn-manage" title="User voices control">
+                            <span>⚙️ Manage Voices</span>
+                            <span id="voiceFilterIcon">▼</span>
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
-                <button id="manageVoicesBtn" class="secondary" style="padding: 6px 10px; font-size: 0.75rem;">⚙️ User Voices</button>
+            <!-- Voice Filter & Preview -->
+            <div id="voiceFilterPanel" class="voice-filter-panel" style="display: none;">
+                <div class="voice-filter-actions">
+                    <button id="hideAllVoicesBtn" class="secondary">Hide all</button>
+                    <button id="showAllVoicesBtn" class="secondary">Show all</button>
+                </div>
+
+                <div class="voice-filter-preview">
+                    <label>
+                        Preview test message:
+                    </label>
+                    <input type="text" id="voicePreviewText">
+                </div>
+
+                <div id="voicePreviewList" class="voice-preview-list">
+                    <!-- Voice list will be populated here -->
+                </div>
+
+                <div id="hiddenVoicesList" class="hidden-voices-panel" style="display: none;">
+                    <div id="hiddenVoicesContainer" class="hidden-voices-grid">
+                        <!-- Hidden voices will appear here -->
+                    </div>
+                </div>
             </div>
 
         </div>
@@ -399,9 +393,13 @@
                                 <input type="text" id="animationPopupGiftName" placeholder="Gift name (e.g. Rose)">
                                 <input type="number" id="animationPopupGiftValue" min="1" step="1" placeholder="Diamond value">
                             </div>
-                            <select id="animationPopupSticker" style="margin-top: 8px;">
+                            <select id="animationPopupSticker" style="display: none;">
                                 <option value="">No sticker assigned</option>
                             </select>
+                            <label style="margin-top: 8px;">Sticker Mapping</label>
+                            <div id="animationPopupStickerPicker" class="animation-sticker-picker">
+                                <!-- Sticker thumbnails added dynamically -->
+                            </div>
                             <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
                                 <input type="checkbox" id="animationPopupMakeDefault" style="width: auto; margin-right: 8px;">
                                 Make default gift animation (adds to diamond value 1 round-robin)
@@ -479,6 +477,33 @@
             <div class="status-icon"></div>
             <span>Ready to connect...</span>
         </div>
+
+        <div id="onlineUsersPanel" class="online-users-panel">
+            <div class="online-users-header">
+                <span>👥 Current Online Users</span>
+                <span class="online-users-window">active ~1 min</span>
+            </div>
+            <div class="online-users-grid">
+                <div class="online-users-platform">
+                    <div class="online-users-platform-title">
+                        <span>📺 YouTube</span>
+                        <span id="onlineYouTubeCount" class="online-users-count">0</span>
+                    </div>
+                    <div id="onlineYouTubeUsers" class="online-users-list">
+                        <div class="online-users-empty">No active users</div>
+                    </div>
+                </div>
+                <div class="online-users-platform">
+                    <div class="online-users-platform-title">
+                        <span>🎵 TikTok</span>
+                        <span id="onlineTikTokCount" class="online-users-count">0</span>
+                    </div>
+                    <div id="onlineTikTokUsers" class="online-users-list">
+                        <div class="online-users-empty">No active users</div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <div class="chat-feed" id="chatFeed">
@@ -497,6 +522,30 @@
                 Assign specific voices to users from any platform.
             </p>
             <div id="userVoiceList" class="user-voice-list"></div>
+        </div>
+    </div>
+
+    <div id="stickerAssignModal" class="modal-overlay" style="display: none;">
+        <div class="modal">
+            <button class="modal-close" onclick="closeStickerAssignModal()">&times;</button>
+            <h3>Assign Sticker Animation</h3>
+            <div class="sticker-assign-preview">
+                <img id="stickerAssignPreviewImage" alt="Sticker preview">
+                <div class="sticker-assign-meta">
+                    <div id="stickerAssignName" class="sticker-assign-name"></div>
+                    <div id="stickerAssignCurrent" class="sticker-assign-current"></div>
+                </div>
+            </div>
+            <div class="input-group" style="margin-bottom: 12px;">
+                <label>Animation Trigger</label>
+                <select id="stickerAssignAnimationSelect">
+                    <option value="">No animation assigned</option>
+                </select>
+            </div>
+            <div class="sticker-assign-actions">
+                <button id="stickerAssignSaveBtn">Save</button>
+                <button id="stickerAssignCancelBtn" class="secondary">Cancel</button>
+            </div>
         </div>
     </div>
 </div>

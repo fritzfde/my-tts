@@ -216,11 +216,42 @@ let tiktokMessageQueue = [];
 // Recent gifts cache to deduplicate duplicate events from the TikTok connector
 let recentGifts = new Map(); // key -> ts
 const RECENT_GIFT_WINDOW_MS = 5000; // ignore duplicates within 5 seconds
+const TIKTOK_ACTIVE_USER_TTL_MS = 60 * 1000;
 let giftOverlayClients = [];
 let likerLeaderboard = new Map(); // username → like count
 let likerUserInfo = new Map(); // username → { nickname, avatar }
 let likerLeaderboardClients = [];
 let animationOverlayClients = []; // SSE clients for animation overlay
+let tiktokViewerCount = 0;
+let tiktokTopViewers = [];
+let tiktokActiveUsers = new Map(); // uniqueId -> { uniqueId, nickname, avatar, source, lastSeen }
+
+function rememberTikTokUser({ uniqueId, nickname, avatar }, source = 'event') {
+    if (!uniqueId) return;
+    const existing = tiktokActiveUsers.get(uniqueId) || {};
+    tiktokActiveUsers.set(uniqueId, {
+        uniqueId,
+        nickname: nickname || existing.nickname || uniqueId,
+        avatar: avatar || existing.avatar || null,
+        source,
+        lastSeen: Date.now()
+    });
+}
+
+function pruneTikTokActiveUsers() {
+    const cutoff = Date.now() - TIKTOK_ACTIVE_USER_TTL_MS;
+    for (const [uniqueId, entry] of tiktokActiveUsers.entries()) {
+        if (!entry || entry.lastSeen < cutoff) {
+            tiktokActiveUsers.delete(uniqueId);
+        }
+    }
+}
+
+function resetTikTokAudienceState() {
+    tiktokViewerCount = 0;
+    tiktokTopViewers = [];
+    tiktokActiveUsers.clear();
+}
 
 app.post('/api/tiktok/connect', (req, res) => {
     const { username } = req.body;
@@ -232,10 +263,15 @@ app.post('/api/tiktok/connect', (req, res) => {
 
     // Reset leaderboard on new connection
     likerLeaderboard.clear();
+    resetTikTokAudienceState();
 
     tiktokConnection = new WebcastPushConnection(username);
 
     tiktokConnection.connect().then(state => {
+        const statsViewerCount = Number(state?.roomInfo?.stats?.userCount || state?.roomInfo?.stats?.viewerCount || 0);
+        if (Number.isFinite(statsViewerCount) && statsViewerCount > 0) {
+            tiktokViewerCount = statsViewerCount;
+        }
         console.log(`✅ SUCCESS: Connected to @${username}`);
         res.json({ success: true });
     }).catch(err => {
@@ -247,6 +283,11 @@ app.post('/api/tiktok/connect', (req, res) => {
     tiktokConnection.on('chat', data => {
         const hasEmotes = data.emotes && data.emotes.length > 0;
         const hasText = data.comment && data.comment.trim();
+        rememberTikTokUser({
+            uniqueId: data.uniqueId,
+            nickname: data.nickname || data.uniqueId,
+            avatar: data.profilePictureUrl || null
+        }, 'chat');
         
         if (hasEmotes && hasText) {
             // COMBINED MESSAGE: Text + Stickers
@@ -340,6 +381,11 @@ app.post('/api/tiktok/connect', (req, res) => {
       recentGifts.set(key, now);
 
       console.log(`🎁 [Gift] ${msg.authorName} (@${msg.author}): ${msg.giftName} x${count} (${diamonds} diamonds)`);
+      rememberTikTokUser({
+        uniqueId: msg.author,
+        nickname: msg.authorName,
+        avatar: msg.authorAvatar
+      }, 'gift');
       tiktokMessageQueue.push(msg);
 
       // Broadcast to gift overlay
@@ -356,6 +402,11 @@ app.post('/api/tiktok/connect', (req, res) => {
             timestamp: Date.now()
         };
         console.log(`👤 [Follow] ${msg.authorName} (@${msg.author}) followed!`);
+        rememberTikTokUser({
+            uniqueId: msg.author,
+            nickname: msg.authorName,
+            avatar: msg.authorAvatar
+        }, 'follow');
         tiktokMessageQueue.push(msg);
     });
 
@@ -369,6 +420,11 @@ app.post('/api/tiktok/connect', (req, res) => {
             timestamp: Date.now()
         };
         console.log(`📤 [Share] ${msg.authorName} (@${msg.author}) shared the stream!`);
+        rememberTikTokUser({
+            uniqueId: msg.author,
+            nickname: msg.authorName,
+            avatar: msg.authorAvatar
+        }, 'share');
         tiktokMessageQueue.push(msg);
     });
 
@@ -384,6 +440,11 @@ app.post('/api/tiktok/connect', (req, res) => {
             timestamp: Date.now()
         };
         console.log(`😂 [Emote] ${msg.authorName} sent ${msg.emoteName} (ID: ${msg.emoteId})`);
+        rememberTikTokUser({
+            uniqueId: msg.author,
+            nickname: msg.authorName,
+            avatar: data.profilePictureUrl || null
+        }, 'emote');
 
         // Broadcast to animation overlay
         broadcastToAnimationOverlay({
@@ -395,10 +456,56 @@ app.post('/api/tiktok/connect', (req, res) => {
         });
     });
 
+    // Capture Members Joining (viewer enters room)
+    tiktokConnection.on('member', data => {
+        const member = {
+            uniqueId: data.uniqueId,
+            nickname: data.nickname || data.uniqueId,
+            avatar: data.profilePictureUrl || null
+        };
+        rememberTikTokUser(member, 'member');
+    });
+
+    // Capture viewer statistics + top viewers from room stats events
+    tiktokConnection.on('roomUser', data => {
+        const viewerCount = Number(data?.viewerCount || 0);
+        tiktokViewerCount = Number.isFinite(viewerCount) ? viewerCount : 0;
+
+        const rawTopViewers = Array.isArray(data?.topViewers)
+            ? data.topViewers
+            : Array.isArray(data?.ranksList)
+                ? data.ranksList
+                : [];
+
+        tiktokTopViewers = rawTopViewers
+            .map((entry) => {
+                const user = entry?.user || {};
+                const uniqueId = user.uniqueId || entry?.uniqueId || '';
+                if (!uniqueId) return null;
+
+                const mapped = {
+                    uniqueId,
+                    nickname: user.nickname || entry?.nickname || uniqueId,
+                    avatar: user.profilePictureUrl || entry?.profilePictureUrl || null,
+                    coinCount: Number(entry?.coinCount || 0)
+                };
+
+                rememberTikTokUser(mapped, 'topViewer');
+                return mapped;
+            })
+            .filter(Boolean)
+            .slice(0, 10);
+    });
+
     // Capture Likes
     tiktokConnection.on('like', data => {
         const author = data.uniqueId;
         const count = data.likeCount || 1;
+        rememberTikTokUser({
+            uniqueId: author,
+            nickname: data.nickname || author,
+            avatar: data.profilePictureUrl || null
+        }, 'like');
 
         // Update leaderboard
         const currentCount = likerLeaderboard.get(author) || 0;
@@ -423,6 +530,23 @@ app.post('/api/tiktok/connect', (req, res) => {
 app.get('/api/tiktok/messages', (req, res) => {
     res.json(tiktokMessageQueue);
     tiktokMessageQueue = [];
+});
+
+app.get('/api/tiktok/audience', (req, res) => {
+    pruneTikTokActiveUsers();
+
+    const activeUsers = Array.from(tiktokActiveUsers.values())
+        .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
+        .slice(0, 200);
+
+    res.json({
+        connected: Boolean(tiktokConnection && tiktokConnection.isConnected),
+        viewerCount: tiktokViewerCount,
+        activeUsers,
+        topViewers: tiktokTopViewers,
+        ttlMs: TIKTOK_ACTIVE_USER_TTL_MS,
+        updatedAt: Date.now()
+    });
 });
 
 // SSE endpoint for gift overlay
