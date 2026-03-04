@@ -3752,6 +3752,8 @@ function markAnimationCardPlaying(trigger) {
     ? cachedDuration
     : ANIMATION_PLAYBACK_FALLBACK_SECONDS;
 
+  // UI is single-active: keep only the latest triggered animation highlighted.
+  activeAnimationCardPlayback.clear();
   setAnimationCardPlaybackState(trigger, filename, initialDuration, startedAtMs);
 
   getAnimationDurationSeconds(filename)
@@ -3765,6 +3767,16 @@ function markAnimationCardPlaying(trigger) {
     .catch((err) => {
       console.debug('Animation duration probe failed:', err);
     });
+
+  return startedAtMs;
+}
+
+function clearAnimationCardPlaybackIfMatches(trigger, startedAtMs) {
+  const state = activeAnimationCardPlayback.get(trigger);
+  if (!state) return;
+  if (Number.isFinite(startedAtMs) && state.startedAtMs !== startedAtMs) return;
+  activeAnimationCardPlayback.delete(trigger);
+  updateAnimationPlaybackUi();
 }
 
 function updateAnimationPlaybackUi() {
@@ -4786,6 +4798,7 @@ async function triggerAnimation(trigger, platform, author, type = 'gift') {
   const data = animationMappings[trigger];
   const filename = typeof data === 'string' ? data : data.file;
   console.log(`✅ Found mapping: ${trigger} → ${filename}`);
+  const playbackToken = markAnimationCardPlaying(trigger);
 
   // Send to server to broadcast to overlay
   console.log(`📡 Sending to server: POST /api/animations/trigger`);
@@ -4803,14 +4816,15 @@ async function triggerAnimation(trigger, platform, author, type = 'gift') {
 
     if (response.ok) {
       console.log(`✅ Animation trigger sent successfully: ${trigger}`);
-      markAnimationCardPlaying(trigger);
       return true;
     } else {
       console.error(`❌ Server returned error:`, response.status);
+      clearAnimationCardPlaybackIfMatches(trigger, playbackToken);
       return false;
     }
   } catch (err) {
     console.error('❌ Animation trigger error:', err);
+    clearAnimationCardPlaybackIfMatches(trigger, playbackToken);
     return false;
   }
 }
