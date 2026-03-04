@@ -1114,7 +1114,8 @@ input[type="range"] {
 .online-user-name {
   flex: 1;
   min-width: 0;
-  font-size: 0.74rem;
+  font-size: 0.82rem;
+  line-height: 1.2;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;

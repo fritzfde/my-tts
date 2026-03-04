@@ -387,6 +387,55 @@ let tiktokLastPollTime = null;
 // User voice assignments (now with platform prefix)
 let userVoices = {};
 let recentUsers = [];
+const userDisplayNames = new Map(); // platform:username -> preferred display name
+
+function getUserProfileKey(platform, username) {
+  return `${platform}:${String(username || '').trim()}`;
+}
+
+function normalizeUserDisplayName(displayName, username) {
+  const fallback = String(username || '').trim();
+  const candidate = String(displayName || '').trim();
+  return candidate || fallback;
+}
+
+function rememberUserDisplayName(username, platform, displayName = '') {
+  const normalizedUsername = String(username || '').trim();
+  const normalizedPlatform = String(platform || '').trim();
+  if (!normalizedUsername || !normalizedPlatform) return normalizedUsername;
+
+  const resolved = normalizeUserDisplayName(displayName, normalizedUsername);
+  const key = getUserProfileKey(normalizedPlatform, normalizedUsername);
+  const previous = userDisplayNames.get(key);
+  if (previous !== resolved) {
+    userDisplayNames.set(key, resolved);
+    settingsStore.setItem('user_display_names', JSON.stringify(Object.fromEntries(userDisplayNames.entries())));
+  }
+  return resolved;
+}
+
+function rememberUserProfile({ username, platform, displayName = '', avatar = null } = {}) {
+  const normalizedUsername = String(username || '').trim();
+  const normalizedPlatform = String(platform || '').trim();
+  if (!normalizedUsername || !normalizedPlatform || normalizedPlatform === 'SYSTEM') return;
+
+  rememberUserDisplayName(normalizedUsername, normalizedPlatform, displayName);
+  if (avatar) {
+    window.userAvatars.set(`${normalizedPlatform}:${normalizedUsername}`, avatar);
+  }
+}
+
+function getUserDisplayName(username, platform) {
+  const normalizedUsername = String(username || '').trim();
+  const normalizedPlatform = String(platform || '').trim();
+  if (!normalizedUsername || !normalizedPlatform) return normalizedUsername;
+
+  const key = getUserProfileKey(normalizedPlatform, normalizedUsername);
+  const cached = userDisplayNames.get(key);
+  if (cached) return cached;
+
+  return normalizedUsername;
+}
 
 // Voice select elements
 let voiceSelectYouTube = null;
@@ -649,7 +698,11 @@ function initOnlineUsersPlatformResize() {
 initChatOnlinePanelResize();
 initOnlineUsersPlatformResize();
 
-const ONLINE_USER_TTL_MS = 60000;
+const ONLINE_USER_TTL_BY_PLATFORM_MS = {
+  youtube: 120000,
+  tiktok: 45000
+};
+let tiktokOnlineUserTtlMs = ONLINE_USER_TTL_BY_PLATFORM_MS.tiktok;
 const onlineUsers = {
   youtube: new Map(),
   tiktok: new Map()
@@ -876,12 +929,28 @@ function loadUserVoices() {
       recentUsers = [];
     }
   }
+
+  const savedDisplayNames = settingsStore.getItem('user_display_names');
+  if (savedDisplayNames) {
+    try {
+      const parsed = JSON.parse(savedDisplayNames);
+      Object.entries(parsed || {}).forEach(([userKey, displayName]) => {
+        const normalizedKey = String(userKey || '').trim();
+        const normalizedDisplayName = String(displayName || '').trim();
+        if (!normalizedKey || !normalizedDisplayName) return;
+        userDisplayNames.set(normalizedKey, normalizedDisplayName);
+      });
+    } catch (e) {
+      console.warn('Failed to load cached user display names:', e);
+    }
+  }
 }
 
 // Save user voice mappings
 function saveUserVoices() {
   settingsStore.setItem('user_voices', JSON.stringify(userVoices));
   settingsStore.setItem('recent_users', JSON.stringify(recentUsers));
+  settingsStore.setItem('user_display_names', JSON.stringify(Object.fromEntries(userDisplayNames.entries())));
 }
 
 // Get voice for specific user (with platform)
@@ -895,7 +964,8 @@ function setVoiceForUser(username, platform, voiceId) {
   const userKey = `${platform}:${username}`;
   userVoices[userKey] = voiceId;
   saveUserVoices();
-  addChatMessage('SYSTEM', `Voice for "${username}" (${platform}) set to: ${getVoiceName(voiceId)}`, 'SYSTEM', false);
+  const displayName = getUserDisplayName(username, platform) || username;
+  addChatMessage('SYSTEM', `Voice for "${displayName}" (@${username}, ${platform}) set to: ${getVoiceName(voiceId)}`, 'SYSTEM', false);
 }
 
 // Get voice name from voice ID
@@ -938,8 +1008,12 @@ function formatUserSeenAgo(lastSeenTs) {
 }
 
 function pruneOnlineUsers() {
-  const cutoff = Date.now() - ONLINE_USER_TTL_MS;
   ['youtube', 'tiktok'].forEach((platform) => {
+    const ttlMs = platform === 'tiktok'
+      ? tiktokOnlineUserTtlMs
+      : ONLINE_USER_TTL_BY_PLATFORM_MS.youtube;
+    const cutoff = Date.now() - ttlMs;
+
     onlineUsers[platform].forEach((value, username) => {
       if (!value || value.lastSeen < cutoff) {
         onlineUsers[platform].delete(username);
@@ -957,28 +1031,28 @@ function renderOnlineUsers() {
     const entries = Array.from(onlineUsers[platform].entries())
       .sort((a, b) => (b[1]?.lastSeen || 0) - (a[1]?.lastSeen || 0));
 
+    countEl.textContent = String(entries.length);
     if (platform === 'tiktok' && tiktokLiveViewerCount > 0) {
-      countEl.textContent = String(tiktokLiveViewerCount);
-      countEl.title = `Tracked active users: ${entries.length}`;
+      countEl.title = `Showing ${entries.length} detected users (active + lurkers). Live viewer count: ${tiktokLiveViewerCount}`;
     } else {
-      countEl.textContent = String(entries.length);
       countEl.title = '';
     }
 
     if (entries.length === 0) {
-      listEl.innerHTML = '<div class="online-users-empty">No active users</div>';
+      listEl.innerHTML = '<div class="online-users-empty">No users detected</div>';
       return;
     }
 
     listEl.innerHTML = entries.map(([username, data]) => {
-      const displayName = data?.displayName || username;
+      const displayName = normalizeUserDisplayName(data?.displayName || getUserDisplayName(username, platform), username);
+      rememberUserDisplayName(username, platform, displayName);
       const avatar = data?.avatar || (window.userAvatars && window.userAvatars.get(`${platform}:${username}`));
       const avatarMarkup = avatar
         ? `<img src="${escapeAttribute(avatar)}" alt="${escapeAttribute(displayName)}" class="online-user-avatar">`
         : '<span class="online-user-avatar" style="display: inline-flex; align-items: center; justify-content: center; font-size: 0.65rem; background: rgba(255,255,255,0.14);">👤</span>';
 
       return `
-        <div class="online-user-item" title="${escapeAttribute(displayName)}">
+        <div class="online-user-item" title="${escapeAttribute(username)}">
           ${avatarMarkup}
           <span class="online-user-name">${escapeHtml(displayName)}</span>
           <span class="online-user-time">${formatUserSeenAgo(data.lastSeen)}</span>
@@ -991,10 +1065,19 @@ function renderOnlineUsers() {
   renderPlatformList('tiktok', onlineTikTokUsersEl, onlineTikTokCountEl);
 }
 
-function markUserOnline(username, platform) {
+function markUserOnline(username, platform, { displayName = '', avatar = null, lastSeen = Date.now() } = {}) {
   if (!username || !platform || !onlineUsers[platform]) return;
+  const resolvedDisplayName = rememberUserDisplayName(username, platform, displayName || username);
+  if (avatar) {
+    window.userAvatars.set(`${platform}:${username}`, avatar);
+  }
   const existing = onlineUsers[platform].get(username) || {};
-  onlineUsers[platform].set(username, { ...existing, lastSeen: Date.now() });
+  onlineUsers[platform].set(username, {
+    ...existing,
+    displayName: resolvedDisplayName,
+    avatar: avatar || existing.avatar || null,
+    lastSeen: Number.isFinite(Number(lastSeen)) ? Number(lastSeen) : Date.now()
+  });
   renderOnlineUsers();
 }
 
@@ -1020,36 +1103,59 @@ async function refreshTikTokAudience() {
     if (!response.ok) return;
 
     const data = await response.json();
+    if (data?.connected === false) {
+      tiktokLiveViewerCount = 0;
+      onlineUsers.tiktok.clear();
+      renderOnlineUsers();
+      return;
+    }
+
     const viewerCount = Number(data?.viewerCount || 0);
     tiktokLiveViewerCount = Number.isFinite(viewerCount) && viewerCount >= 0 ? viewerCount : 0;
 
-    const candidates = [];
-    if (Array.isArray(data?.activeUsers)) {
-      candidates.push(...data.activeUsers);
-    }
-    if (Array.isArray(data?.topViewers)) {
-      candidates.push(...data.topViewers);
+    const backendTtlMs = Number(data?.ttlMs);
+    if (Number.isFinite(backendTtlMs) && backendTtlMs >= 10000 && backendTtlMs <= 180000) {
+      tiktokOnlineUserTtlMs = backendTtlMs;
     }
 
     const now = Date.now();
+    const lurkerCandidates = Array.isArray(data?.topViewers)
+      ? data.topViewers.map((entry) => ({
+        uniqueId: entry?.uniqueId,
+        nickname: entry?.nickname,
+        avatar: entry?.avatar || entry?.profilePictureUrl || null,
+        source: 'topViewer',
+        lastSeen: now
+      }))
+      : [];
+    const activeCandidates = Array.isArray(data?.activeUsers) ? data.activeUsers : [];
+    const candidates = [...lurkerCandidates, ...activeCandidates];
+
     const nextTikTokUsers = new Map();
     candidates.forEach((entry) => {
       const uniqueId = String(entry?.uniqueId || '').trim();
       if (!uniqueId) return;
 
+      const source = String(entry?.source || '').trim().toLowerCase();
+      if (source === 'member') return;
+
       const displayName = String(entry?.nickname || uniqueId);
       const avatar = entry?.avatar || entry?.profilePictureUrl || null;
-      if (avatar) {
-        window.userAvatars.set(`tiktok:${uniqueId}`, avatar);
-      }
+      rememberUserProfile({
+        username: uniqueId,
+        platform: 'tiktok',
+        displayName,
+        avatar
+      });
 
       const lastSeenRaw = Number(entry?.lastSeen);
       const lastSeen = Number.isFinite(lastSeenRaw) ? lastSeenRaw : now;
-      const existing = onlineUsers.tiktok.get(uniqueId) || {};
+      const existing = nextTikTokUsers.get(uniqueId) || onlineUsers.tiktok.get(uniqueId) || {};
       nextTikTokUsers.set(uniqueId, {
         ...existing,
-        displayName,
+        displayName: getUserDisplayName(uniqueId, 'tiktok') || displayName,
         avatar,
+        source,
         lastSeen
       });
     });
@@ -1107,6 +1213,20 @@ function saveSettings() {
   const streamUrl     = streamUrlInput.value.trim();
   if (channelUrl)    settingsStore.setItem('yt_tts_channel_url', channelUrl);
   if (streamUrl)     settingsStore.setItem('yt_tts_stream_url', streamUrl);
+}
+
+function clearSavedStreamUrl() {
+  streamUrlInput.value = '';
+  settingsStore.removeItem('yt_tts_stream_url');
+}
+
+function isUnavailableStreamError(error) {
+  const message = (error?.message || '').toLowerCase();
+  return message.includes('video not found')
+    || message.includes('not a live stream')
+    || message.includes('no active live chat')
+    || message.includes('invalid youtube url')
+    || message.includes('invalid stream url');
 }
 
 // Auto-save when fields change
@@ -1322,8 +1442,6 @@ findStreamBtn.addEventListener('click', async () => {
     updateStatus('Stream found!', false);
 
   } catch (error) {
-    streamUrlInput.value = '';
-    saveSettings();
     updateStatus('No live stream found', false, true);
   } finally {
     findStreamBtn.disabled = false;
@@ -1564,13 +1682,18 @@ function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, e
 
   // Author part with avatar (if available)
   let authorHtml;
+  let normalizedAuthor = String(author || '').trim();
+  let resolvedDisplayName = normalizedAuthor;
+  let avatar = null;
   if (author !== 'SYSTEM') {
-    const avatar = window.userAvatars && window.userAvatars.get(`${platform}:${author}`);
+    resolvedDisplayName = getUserDisplayName(normalizedAuthor, platform) || normalizedAuthor;
+    rememberUserDisplayName(normalizedAuthor, platform, resolvedDisplayName);
+    avatar = window.userAvatars && window.userAvatars.get(`${platform}:${normalizedAuthor}`);
     const avatarHtml = avatar 
-      ? `<img src="${avatar}" alt="${author}" style="width: 32px; height: 32px; border-radius: 50%; margin-right: 8px; vertical-align: middle;">` 
+      ? `<img src="${avatar}" alt="${escapeAttribute(resolvedDisplayName)}" style="width: 32px; height: 32px; border-radius: 50%; margin-right: 8px; vertical-align: middle;">` 
       : '';
     
-    authorHtml = `<span class="chat-author clickable" onclick="openVoiceAssignment('${author.replace(/'/g, "\\'")}', '${platform}')">${avatarHtml}${badge}${escapeHtml(author)}:</span>`;
+    authorHtml = `<span class="chat-author clickable" title="${escapeAttribute(normalizedAuthor)}" onclick="openVoiceAssignment('${normalizedAuthor.replace(/'/g, "\\'")}', '${platform}')">${avatarHtml}${badge}${escapeHtml(resolvedDisplayName)}:</span>`;
   } else {
     authorHtml = `<span class="chat-author">${badge}${escapeHtml(text)}</span>`;
   }
@@ -1589,8 +1712,8 @@ function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, e
 
   // Track recent users
   if (author !== 'SYSTEM') {
-    addRecentUser(`${platform}:${author}`);
-    markUserOnline(author, platform);
+    addRecentUser(`${platform}:${normalizedAuthor}`);
+    markUserOnline(normalizedAuthor, platform, { displayName: resolvedDisplayName, avatar });
   }
 
   if (isSpeaking) {
@@ -1631,32 +1754,70 @@ function speakText(author, text, platform, shouldDisplay = true) {
 
 // Get live chat ID
 async function getLiveChatId(videoId, apiKey) {
-  try {
-    const response = await fetch(
-      `/api/youtube/videos?part=liveStreamingDetails&id=${videoId}&key=${apiKey}`
-    );
+  const attempts = Math.max(1, apiKeys.length);
+  let keyToTry = apiKey || getNextApiKey();
+  let lastError = null;
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error?.message || `API Error: ${response.status}`);
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const response = await fetch(
+        `/api/youtube/videos?part=liveStreamingDetails&id=${videoId}&key=${keyToTry}`
+      );
+
+      if (response.status === 403) {
+        let errorMessage = `API Error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error?.message || errorMessage;
+        } catch (parseErr) {
+          // keep generic message
+        }
+
+        lastError = new Error(errorMessage);
+        if (rotateToNextKey()) {
+          keyToTry = getNextApiKey();
+          console.warn('⚠️ /videos returned 403, rotating key and retrying...');
+          continue;
+        }
+        throw lastError;
+      }
+
+      if (!response.ok) {
+        let errorMessage = `API Error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error?.message || errorMessage;
+        } catch (parseErr) {
+          // keep generic message
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      if (!data.items || data.items.length === 0) {
+        throw new Error('Video not found or not a live stream');
+      }
+
+      const liveChatId = data.items[0].liveStreamingDetails?.activeLiveChatId;
+      if (!liveChatId) {
+        throw new Error('No active live chat found');
+      }
+
+      return liveChatId;
+    } catch (error) {
+      lastError = error;
+      const msg = String(error?.message || '').toLowerCase();
+      const shouldRetry = (msg.includes('quota') || msg.includes('forbidden')) && rotateToNextKey();
+      if (shouldRetry) {
+        keyToTry = getNextApiKey();
+        console.warn('⚠️ Retrying getLiveChatId with next API key...');
+        continue;
+      }
+      throw error;
     }
-
-    const data = await response.json();
-
-    if (!data.items || data.items.length === 0) {
-      throw new Error('Video not found or not a live stream');
-    }
-
-    const liveChatId = data.items[0].liveStreamingDetails?.activeLiveChatId;
-
-    if (!liveChatId) {
-      throw new Error('No active live chat found');
-    }
-
-    return liveChatId;
-  } catch (error) {
-    throw error;
   }
+
+  throw lastError || new Error('Failed to get live chat ID');
 }
 
 // Poll YouTube messages
@@ -1993,16 +2154,19 @@ function renderManageUserVoicesModal() {
     const { platform, username } = parseRecentUserKey(userKey);
     const currentVoice = getVoiceForUser(username, platform);
     const initialGroup = getVoiceGroupKeyForVoiceId(currentVoice);
-    return { platform, username, currentVoice, initialGroup };
+    const displayName = getUserDisplayName(username, platform) || username;
+    return { platform, username, displayName, currentVoice, initialGroup };
   }).sort((a, b) => {
     const aIndex = Math.max(0, VOICE_GROUP_ORDER.indexOf(a.initialGroup));
     const bIndex = Math.max(0, VOICE_GROUP_ORDER.indexOf(b.initialGroup));
     if (aIndex !== bIndex) return aIndex - bIndex;
     if (a.platform !== b.platform) return a.platform.localeCompare(b.platform);
+    const byDisplayName = a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base', numeric: true });
+    if (byDisplayName !== 0) return byDisplayName;
     return a.username.localeCompare(b.username, undefined, { sensitivity: 'base', numeric: true });
   });
 
-  list.innerHTML = usersWithGroups.map(({ platform, username, currentVoice, initialGroup }) => {
+  list.innerHTML = usersWithGroups.map(({ platform, username, displayName, currentVoice, initialGroup }) => {
     const groupOptions = buildVoiceGroupOptionsMarkup(initialGroup);
     const voiceOptions = buildVoiceOptionsMarkupForGroup(groupOptions.selectedGroupKey, currentVoice);
     const groupLabel = VOICE_GROUP_LABELS[groupOptions.selectedGroupKey] || 'Voices';
@@ -2016,7 +2180,7 @@ function renderManageUserVoicesModal() {
         <div class="username">
           <span class="user-voice-name">
             ${platformBadge}
-            <span class="user-voice-name-text">${escapeHtml(username)}</span>
+            <span class="user-voice-name-text" title="${escapeAttribute(username)}">${escapeHtml(displayName)}</span>
           </span>
           <span class="user-voice-group-hint" title="Current language group">${escapeHtml(groupLabel)}</span>
         </div>
@@ -2040,6 +2204,7 @@ function renderManageUserVoicesModal() {
 // Voice assignment modal
 window.openVoiceAssignment = function(username, platform) {
   const currentVoice = getVoiceForUser(username, platform);
+  const displayName = getUserDisplayName(username, platform) || username;
   const modal = document.getElementById('voiceModal');
   const list = document.getElementById('userVoiceList');
   setVoiceModalWideLayout(false);
@@ -2052,7 +2217,7 @@ window.openVoiceAssignment = function(username, platform) {
 
   list.innerHTML = `
     <div class="user-voice-item">
-      <div class="username">${platformBadge}${username}</div>
+      <div class="username" title="${escapeAttribute(username)}">${platformBadge}${escapeHtml(displayName)}</div>
       <select id="voiceSelectModal">
         ${optionsMarkup}
       </select>
@@ -2093,7 +2258,8 @@ window.removeUserVoice = function(username, platform) {
   const userKey = `${platform}:${username}`;
   delete userVoices[userKey];
   saveUserVoices();
-  addChatMessage('SYSTEM', `Voice for "${username}" (${platform}) removed`, 'SYSTEM', false);
+  const displayName = getUserDisplayName(username, platform) || username;
+  addChatMessage('SYSTEM', `Voice for "${displayName}" (@${username}, ${platform}) removed`, 'SYSTEM', false);
   renderManageUserVoicesModal();
 };
 
@@ -2138,6 +2304,7 @@ document.getElementById('manageAnimationPermissionsBtn')?.addEventListener('clic
       </div>
       ${recentUsers.map(userKey => {
         const [platform, username] = userKey.split(':');
+        const displayName = getUserDisplayName(username, platform) || username;
         const permission = userAnimationPermissions[userKey] || 'default';
         
         const platformBadge = platform === 'youtube'
@@ -2146,7 +2313,7 @@ document.getElementById('manageAnimationPermissionsBtn')?.addEventListener('clic
         
         return `
           <div class="user-voice-item">
-            <div class="username">${platformBadge}${username}</div>
+            <div class="username" title="${escapeAttribute(username)}">${platformBadge}${escapeHtml(displayName)}</div>
             <select onchange="setUserAnimationPermission('${userKey.replace(/'/g, "\\'")}', this.value)">
               <option value="default" ${permission === 'default' ? 'selected' : ''}>⚙️ Default</option>
               <option value="allow" ${permission === 'allow' ? 'selected' : ''}>✅ Allow</option>
@@ -2171,7 +2338,8 @@ window.setUserAnimationPermission = function(userKey, permission) {
   saveAnimationPermissions();
   
   const [platform, username] = userKey.split(':');
-  addChatMessage('SYSTEM', `Animation trigger for "${username}" (${platform}): ${permission}`, 'SYSTEM', false);
+  const displayName = getUserDisplayName(username, platform) || username;
+  addChatMessage('SYSTEM', `Animation trigger for "${displayName}" (@${username}, ${platform}): ${permission}`, 'SYSTEM', false);
 };
 
 
@@ -2277,33 +2445,36 @@ setTimeout(async () => {
       if (videoId) {
         try {
           const apiKey = getNextApiKey();
-          const liveChatId = await getLiveChatId(videoId, apiKey);
+          await getLiveChatId(videoId, apiKey);
           // Success — proceed with normal connection
           document.getElementById('connectYouTubeBtn').click();
         } catch (error) {
-          console.log('Saved stream URL failed, clearing and trying auto-find...', error.message);
-          streamUrlInput.value = '';
-          saveSettings();
+          const shouldClearSavedUrl = isUnavailableStreamError(error);
+          if (shouldClearSavedUrl) {
+            console.log('Saved stream URL is unavailable, clearing and trying auto-find...', error.message);
+            clearSavedStreamUrl();
 
-          // Fall back to auto-finding from channel URL
-          if (channelUrl) {
-            try {
-              const apiKey = getNextApiKey();
-              const foundUrl = await findLiveStream(apiKey, channelUrl);
-              // findLiveStream already sets streamUrlInput.value and saves
-              console.log('Auto-found stream, connecting...');
-              setTimeout(() => document.getElementById('connectYouTubeBtn').click(), 500);
-            } catch (findError) {
-              console.log('Auto-find also failed:', findError.message);
-              updateStatus('No live stream found for auto-connect', false, false);
+            // Fall back to auto-finding from channel URL
+            if (channelUrl) {
+              try {
+                const apiKey = getNextApiKey();
+                await findLiveStream(apiKey, channelUrl);
+                // findLiveStream already sets streamUrlInput.value and saves
+                console.log('Auto-found stream, connecting...');
+                setTimeout(() => document.getElementById('connectYouTubeBtn').click(), 500);
+              } catch (findError) {
+                console.log('Auto-find also failed:', findError.message);
+                updateStatus('No live stream found for auto-connect', false, false);
+              }
             }
+          } else {
+            console.log('Saved stream URL check failed, keeping saved URL:', error.message);
           }
         }
       } else {
         // Invalid stream URL format — clear it and try auto-find
         console.log('Invalid stream URL format, clearing...');
-        streamUrlInput.value = '';
-        saveSettings();
+        clearSavedStreamUrl();
 
         if (channelUrl) {
           try {
@@ -2991,10 +3162,12 @@ async function pollTikTokMessages() {
 
     // Helper function to process a single message
     const processMessage = async (msg, shouldSpeak = true, isFirstPoll = false) => {
-      // Cache avatar
-      if (msg.authorAvatar) {
-        window.userAvatars.set(`tiktok:${msg.author}`, msg.authorAvatar);
-      }
+      rememberUserProfile({
+        username: msg.author,
+        platform: 'tiktok',
+        displayName: msg.authorName || msg.author,
+        avatar: msg.authorAvatar || null
+      });
 
       if (msg.type === 'gift') {
         // Handle gift
@@ -3096,9 +3269,12 @@ async function pollTikTokMessages() {
       
       // Mark all as seen
       messages.forEach(msg => {
-        if (msg.authorAvatar) {
-          window.userAvatars.set(`tiktok:${msg.author}`, msg.authorAvatar);
-        }
+        rememberUserProfile({
+          username: msg.author,
+          platform: 'tiktok',
+          displayName: msg.authorName || msg.author,
+          avatar: msg.authorAvatar || null
+        });
         tiktokSeenMessages.add(getMessageId(msg));
       });
 
@@ -3828,7 +4004,36 @@ async function pollYouTubeMessages(isReconnect = false) {
 
     // On the very first poll, we just "mark as read" everything currently in chat
     if (youtubeIsFirstPoll && !isReconnect) {
-      messages.forEach(msg => youtubeSeenMessages.add(msg.id));
+      const now = Date.now();
+      const cutoff = now - ONLINE_USER_TTL_BY_PLATFORM_MS.youtube;
+      messages.forEach((msg) => {
+        youtubeSeenMessages.add(msg.id);
+
+        const author = msg?.authorDetails?.displayName;
+        if (!author) return;
+
+        const avatarUrl = msg?.authorDetails?.profileImageUrl || null;
+        rememberUserProfile({
+          username: author,
+          platform: 'youtube',
+          displayName: author,
+          avatar: avatarUrl
+        });
+
+        const publishedAtMs = Date.parse(msg?.snippet?.publishedAt || '');
+        const lastSeen = Number.isFinite(publishedAtMs) ? publishedAtMs : now;
+        if (lastSeen < cutoff) return;
+
+        const existing = onlineUsers.youtube.get(author) || {};
+        onlineUsers.youtube.set(author, {
+          ...existing,
+          displayName: getUserDisplayName(author, 'youtube') || author,
+          avatar: avatarUrl || existing.avatar || null,
+          lastSeen
+        });
+      });
+
+      renderOnlineUsers();
       youtubeIsFirstPoll = false;
       console.log(`Initial sync: Ignored ${messages.length} old YouTube messages.`);
       addChatMessage('SYSTEM', 'YouTube chat synced. Waiting for new messages...', 'youtube', false);
@@ -3840,9 +4045,21 @@ async function pollYouTubeMessages(isReconnect = false) {
           const author = msg.authorDetails.displayName;
           const text = msg.snippet.displayMessage;
           const avatarUrl = msg.authorDetails.profileImageUrl;
-          if (avatarUrl) {
-            window.userAvatars.set(`youtube:${author}`, avatarUrl);
-          }
+          rememberUserProfile({
+            username: author,
+            platform: 'youtube',
+            displayName: author,
+            avatar: avatarUrl
+          });
+          const publishedAtMs = Date.parse(msg?.snippet?.publishedAt || '');
+          const existing = onlineUsers.youtube.get(author) || {};
+          onlineUsers.youtube.set(author, {
+            ...existing,
+            displayName: getUserDisplayName(author, 'youtube') || author,
+            avatar: avatarUrl || existing.avatar || null,
+            lastSeen: Number.isFinite(publishedAtMs) ? publishedAtMs : Date.now()
+          });
+          renderOnlineUsers();
           await autoAssignVoiceIfNeeded(author, 'youtube');
           speakText(author, text, 'youtube');
         }

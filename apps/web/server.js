@@ -216,7 +216,8 @@ let tiktokMessageQueue = [];
 // Recent gifts cache to deduplicate duplicate events from the TikTok connector
 let recentGifts = new Map(); // key -> ts
 const RECENT_GIFT_WINDOW_MS = 5000; // ignore duplicates within 5 seconds
-const TIKTOK_ACTIVE_USER_TTL_MS = 60 * 1000;
+const TIKTOK_ACTIVE_USER_TTL_MS = 45 * 1000;
+const TIKTOK_ONLINE_LIST_EXCLUDED_SOURCES = new Set(['member', 'topViewer']);
 let giftOverlayClients = [];
 let likerLeaderboard = new Map(); // username → like count
 let likerUserInfo = new Map(); // username → { nickname, avatar }
@@ -489,8 +490,6 @@ app.post('/api/tiktok/connect', (req, res) => {
                     avatar: user.profilePictureUrl || entry?.profilePictureUrl || null,
                     coinCount: Number(entry?.coinCount || 0)
                 };
-
-                rememberTikTokUser(mapped, 'topViewer');
                 return mapped;
             })
             .filter(Boolean)
@@ -534,16 +533,21 @@ app.get('/api/tiktok/messages', (req, res) => {
 
 app.get('/api/tiktok/audience', (req, res) => {
     pruneTikTokActiveUsers();
+    const connected = Boolean(tiktokConnection && tiktokConnection.isConnected);
 
     const activeUsers = Array.from(tiktokActiveUsers.values())
+        .filter((entry) => {
+            const source = String(entry?.source || '');
+            return !TIKTOK_ONLINE_LIST_EXCLUDED_SOURCES.has(source);
+        })
         .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
         .slice(0, 200);
 
     res.json({
-        connected: Boolean(tiktokConnection && tiktokConnection.isConnected),
-        viewerCount: tiktokViewerCount,
+        connected,
+        viewerCount: connected ? tiktokViewerCount : 0,
         activeUsers,
-        topViewers: tiktokTopViewers,
+        topViewers: connected ? tiktokTopViewers : [],
         ttlMs: TIKTOK_ACTIVE_USER_TTL_MS,
         updatedAt: Date.now()
     });
