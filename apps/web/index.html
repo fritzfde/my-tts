@@ -469,12 +469,24 @@
             <span>Ready to connect...</span>
         </div>
 
+    </div>
+
+    <div id="chatLayout" class="chat-layout">
+        <div class="chat-main">
+            <div class="chat-feed" id="chatFeed">
+                <div class="empty-state">
+                    <div class="empty-state-icon">💬</div>
+                    <div>No active streams. Connect to YouTube or TikTok to see messages.</div>
+                </div>
+            </div>
+        </div>
+        <div id="chatOnlineSplitter" class="chat-online-splitter" role="separator" aria-orientation="vertical" aria-label="Resize online users panel"></div>
         <div id="onlineUsersPanel" class="online-users-panel">
             <div class="online-users-header">
                 <span>👥 Current Online Users</span>
                 <span class="online-users-window">active ~1 min</span>
             </div>
-            <div class="online-users-grid">
+            <div id="onlineUsersGrid" class="online-users-grid">
                 <div class="online-users-platform">
                     <div class="online-users-platform-title">
                         <span>📺 YouTube</span>
@@ -484,6 +496,7 @@
                         <div class="online-users-empty">No active users</div>
                     </div>
                 </div>
+                <div id="onlineUsersSplitter" class="online-users-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize YouTube and TikTok online lists"></div>
                 <div class="online-users-platform">
                     <div class="online-users-platform-title">
                         <span>🎵 TikTok</span>
@@ -494,13 +507,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <div class="chat-feed" id="chatFeed">
-        <div class="empty-state">
-            <div class="empty-state-icon">💬</div>
-            <div>No active streams. Connect to YouTube or TikTok to see messages.</div>
         </div>
     </div>
 

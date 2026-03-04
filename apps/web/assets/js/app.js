@@ -398,6 +398,8 @@ const streamUrlInput = document.getElementById('streamUrl');
 const findStreamBtn = document.getElementById('findStreamBtn');
 const statusDiv = document.getElementById('status');
 const chatFeed = document.getElementById('chatFeed');
+const chatLayout = document.getElementById('chatLayout');
+const chatOnlineSplitter = document.getElementById('chatOnlineSplitter');
 const rateSelect = document.getElementById('rateSelect');
 const pitchSelect = document.getElementById('pitchSelect');
 const volumeSlider = document.getElementById('volumeSlider');
@@ -409,6 +411,9 @@ const testMessageInput = document.getElementById('testMessage');
 const testVoiceYouTubeBtn = document.getElementById('testVoiceYouTubeBtn');
 const testVoiceTikTokBtn = document.getElementById('testVoiceTikTokBtn');
 const ollamaStatusEl = document.getElementById('ollamaStatus');
+const onlineUsersPanel = document.getElementById('onlineUsersPanel');
+const onlineUsersGrid = document.getElementById('onlineUsersGrid');
+const onlineUsersSplitter = document.getElementById('onlineUsersSplitter');
 const onlineYouTubeCountEl = document.getElementById('onlineYouTubeCount');
 const onlineTikTokCountEl = document.getElementById('onlineTikTokCount');
 const onlineYouTubeUsersEl = document.getElementById('onlineYouTubeUsers');
@@ -421,6 +426,228 @@ const stickerAssignAnimationSelect = document.getElementById('stickerAssignAnima
 const stickerAssignSaveBtn = document.getElementById('stickerAssignSaveBtn');
 const stickerAssignCancelBtn = document.getElementById('stickerAssignCancelBtn');
 const DEFAULT_TEST_MESSAGE = 'Are you already subscribe to my YouTube? Wait, what!? Bro!';
+const CHAT_LAYOUT_WIDTH_KEY = 'chat_online_panel_width';
+const CHAT_LAYOUT_MIN_WIDTH = 260;
+const CHAT_LAYOUT_MAX_WIDTH = 760;
+const ONLINE_USERS_TOP_HEIGHT_KEY = 'online_users_youtube_height';
+const ONLINE_USERS_TOP_MIN_HEIGHT = 120;
+
+function getChatOnlinePanelBounds() {
+  if (!chatLayout) {
+    return { min: CHAT_LAYOUT_MIN_WIDTH, max: CHAT_LAYOUT_MAX_WIDTH };
+  }
+
+  const layoutWidth = chatLayout.clientWidth || window.innerWidth || 1200;
+  const maxByLayout = Math.max(CHAT_LAYOUT_MIN_WIDTH, layoutWidth - 420);
+  return {
+    min: CHAT_LAYOUT_MIN_WIDTH,
+    max: Math.min(CHAT_LAYOUT_MAX_WIDTH, maxByLayout)
+  };
+}
+
+function setChatOnlinePanelWidth(widthPx, { persist = true } = {}) {
+  if (!chatLayout) return;
+  const nextWidth = Number(widthPx);
+  if (!Number.isFinite(nextWidth)) return;
+
+  const bounds = getChatOnlinePanelBounds();
+  const clamped = Math.max(bounds.min, Math.min(bounds.max, nextWidth));
+  const rounded = Math.round(clamped);
+
+  chatLayout.style.setProperty('--online-users-width', `${rounded}px`);
+  if (persist) {
+    settingsStore.setItem(CHAT_LAYOUT_WIDTH_KEY, String(rounded));
+  }
+}
+
+function initChatOnlinePanelResize() {
+  if (!chatLayout || !chatOnlineSplitter) return;
+
+  const savedWidth = Number(settingsStore.getItem(CHAT_LAYOUT_WIDTH_KEY));
+  if (Number.isFinite(savedWidth)) {
+    setChatOnlinePanelWidth(savedWidth, { persist: false });
+  }
+
+  let dragging = false;
+  let activePointerId = null;
+
+  const stopDrag = (event) => {
+    if (!dragging) return;
+    if (activePointerId !== null && event?.pointerId !== undefined && event.pointerId !== activePointerId) return;
+
+    dragging = false;
+    activePointerId = null;
+    chatOnlineSplitter.classList.remove('dragging');
+    document.body.classList.remove('is-resizing-online-users');
+
+    const currentWidth = parseFloat(getComputedStyle(chatLayout).getPropertyValue('--online-users-width'));
+    if (Number.isFinite(currentWidth)) {
+      settingsStore.setItem(CHAT_LAYOUT_WIDTH_KEY, String(Math.round(currentWidth)));
+    }
+
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', stopDrag);
+    window.removeEventListener('pointercancel', stopDrag);
+  };
+
+  const onPointerMove = (event) => {
+    if (!dragging) return;
+    if (activePointerId !== null && event.pointerId !== activePointerId) return;
+
+    const layoutRect = chatLayout.getBoundingClientRect();
+    const desiredWidth = layoutRect.right - event.clientX;
+    setChatOnlinePanelWidth(desiredWidth, { persist: false });
+  };
+
+  chatOnlineSplitter.addEventListener('pointerdown', (event) => {
+    const compact = typeof window.matchMedia === 'function'
+      && window.matchMedia('(max-width: 1100px)').matches;
+    if (compact) return;
+
+    dragging = true;
+    activePointerId = event.pointerId;
+    chatOnlineSplitter.classList.add('dragging');
+    document.body.classList.add('is-resizing-online-users');
+
+    if (typeof chatOnlineSplitter.setPointerCapture === 'function') {
+      chatOnlineSplitter.setPointerCapture(event.pointerId);
+    }
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', stopDrag);
+    window.addEventListener('pointercancel', stopDrag);
+    event.preventDefault();
+  });
+
+  window.addEventListener('resize', () => {
+    const compact = typeof window.matchMedia === 'function'
+      && window.matchMedia('(max-width: 1100px)').matches;
+    if (compact) return;
+
+    const currentWidth = parseFloat(getComputedStyle(chatLayout).getPropertyValue('--online-users-width'));
+    if (Number.isFinite(currentWidth)) {
+      setChatOnlinePanelWidth(currentWidth, { persist: false });
+    }
+  });
+}
+
+function getOnlineUsersTopPaneBounds() {
+  if (!onlineUsersGrid) {
+    return { min: ONLINE_USERS_TOP_MIN_HEIGHT, max: ONLINE_USERS_TOP_MIN_HEIGHT };
+  }
+
+  const splitterHeight = 10;
+  const panelHeight = onlineUsersPanel ? onlineUsersPanel.clientHeight : 0;
+  const estimatedGridHeight = panelHeight > 0 ? Math.max(0, panelHeight - 42) : 0;
+  const gridHeight = onlineUsersGrid.clientHeight || estimatedGridHeight || 360;
+  const maxByLayout = Math.max(
+    ONLINE_USERS_TOP_MIN_HEIGHT,
+    gridHeight - ONLINE_USERS_TOP_MIN_HEIGHT - splitterHeight
+  );
+
+  return {
+    min: ONLINE_USERS_TOP_MIN_HEIGHT,
+    max: maxByLayout
+  };
+}
+
+function setOnlineUsersTopPaneHeight(heightPx, { persist = true } = {}) {
+  if (!onlineUsersGrid) return;
+  const nextHeight = Number(heightPx);
+  if (!Number.isFinite(nextHeight)) return;
+
+  const bounds = getOnlineUsersTopPaneBounds();
+  const clamped = Math.max(bounds.min, Math.min(bounds.max, nextHeight));
+  const rounded = Math.round(clamped);
+
+  onlineUsersGrid.style.setProperty('--online-users-youtube-height', `${rounded}px`);
+  if (persist) {
+    settingsStore.setItem(ONLINE_USERS_TOP_HEIGHT_KEY, String(rounded));
+  }
+}
+
+function initOnlineUsersPlatformResize() {
+  if (!onlineUsersPanel || !onlineUsersGrid || !onlineUsersSplitter) return;
+
+  const isCompact = () => (
+    typeof window.matchMedia === 'function'
+    && window.matchMedia('(max-width: 1100px)').matches
+  );
+
+  const savedTopHeight = Number(settingsStore.getItem(ONLINE_USERS_TOP_HEIGHT_KEY));
+  if (Number.isFinite(savedTopHeight)) {
+    setOnlineUsersTopPaneHeight(savedTopHeight, { persist: false });
+  }
+
+  let dragging = false;
+  let activePointerId = null;
+
+  const stopDrag = (event) => {
+    if (!dragging) return;
+    if (activePointerId !== null && event?.pointerId !== undefined && event.pointerId !== activePointerId) return;
+
+    dragging = false;
+    activePointerId = null;
+    onlineUsersSplitter.classList.remove('dragging');
+    document.body.classList.remove('is-resizing-online-users-vertical');
+
+    const currentHeight = parseFloat(getComputedStyle(onlineUsersGrid).getPropertyValue('--online-users-youtube-height'));
+    if (Number.isFinite(currentHeight)) {
+      settingsStore.setItem(ONLINE_USERS_TOP_HEIGHT_KEY, String(Math.round(currentHeight)));
+    }
+
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', stopDrag);
+    window.removeEventListener('pointercancel', stopDrag);
+  };
+
+  const onPointerMove = (event) => {
+    if (!dragging) return;
+    if (activePointerId !== null && event.pointerId !== activePointerId) return;
+
+    const gridRect = onlineUsersGrid.getBoundingClientRect();
+    const desiredTopHeight = event.clientY - gridRect.top;
+    setOnlineUsersTopPaneHeight(desiredTopHeight, { persist: false });
+  };
+
+  onlineUsersSplitter.addEventListener('pointerdown', (event) => {
+    if (isCompact()) return;
+
+    dragging = true;
+    activePointerId = event.pointerId;
+    onlineUsersSplitter.classList.add('dragging');
+    document.body.classList.add('is-resizing-online-users-vertical');
+
+    if (typeof onlineUsersSplitter.setPointerCapture === 'function') {
+      onlineUsersSplitter.setPointerCapture(event.pointerId);
+    }
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', stopDrag);
+    window.addEventListener('pointercancel', stopDrag);
+    event.preventDefault();
+  });
+
+  window.addEventListener('resize', () => {
+    if (isCompact()) return;
+
+    const currentHeight = parseFloat(getComputedStyle(onlineUsersGrid).getPropertyValue('--online-users-youtube-height'));
+    if (Number.isFinite(currentHeight)) {
+      setOnlineUsersTopPaneHeight(currentHeight, { persist: false });
+    }
+  });
+
+  requestAnimationFrame(() => {
+    if (isCompact()) return;
+    const currentHeight = parseFloat(getComputedStyle(onlineUsersGrid).getPropertyValue('--online-users-youtube-height'));
+    if (Number.isFinite(currentHeight)) {
+      setOnlineUsersTopPaneHeight(currentHeight, { persist: false });
+    }
+  });
+}
+
+initChatOnlinePanelResize();
+initOnlineUsersPlatformResize();
 
 const ONLINE_USER_TTL_MS = 60000;
 const onlineUsers = {
