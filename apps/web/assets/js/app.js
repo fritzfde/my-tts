@@ -3558,6 +3558,12 @@ const animationSortSelect = document.getElementById('animationSortSelect');
 const animationMapFilterSelect = document.getElementById('animationMapFilterSelect');
 const animationStickerFilterSelect = document.getElementById('animationStickerFilterSelect');
 let animationThumbnailObserver = null;
+let animationPlaybackTicker = null;
+const ANIMATION_PLAYBACK_FALLBACK_SECONDS = 4;
+const ANIMATION_PLAYBACK_TICK_MS = 120;
+const animationDurationSecondsCache = new Map(); // filename -> duration seconds
+const animationDurationProbePromises = new Map(); // filename -> Promise<number|null>
+const activeAnimationCardPlayback = new Map(); // trigger -> playback state
 
 function getAnimationVolumePercent() {
   if (!animationVolumeSlider) return 100;
@@ -3604,6 +3610,207 @@ function escapeAttribute(value) {
     .replace(/'/g, '&#39;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function getAnimationFileUrl(filename) {
+  return `/animations/${encodeURIComponent(filename)}`;
+}
+
+function cacheAnimationDuration(filename, durationSeconds) {
+  const numeric = Number(durationSeconds);
+  if (!filename || !Number.isFinite(numeric) || numeric <= 0) return;
+  animationDurationSecondsCache.set(filename, numeric);
+}
+
+function cacheAnimationDurationFromVideo(video) {
+  if (!video) return;
+  const filename = video.dataset.file || '';
+  const duration = Number(video.duration);
+  cacheAnimationDuration(filename, duration);
+}
+
+function bindAnimationThumbnailDurationListener(video) {
+  if (!video || video.dataset.durationBound === '1') return;
+  video.dataset.durationBound = '1';
+  video.addEventListener('loadedmetadata', () => {
+    cacheAnimationDurationFromVideo(video);
+  });
+}
+
+function probeAnimationDurationSeconds(filename) {
+  return new Promise((resolve) => {
+    if (!filename) {
+      resolve(null);
+      return;
+    }
+
+    const probeVideo = document.createElement('video');
+    const src = getAnimationFileUrl(filename);
+    let settled = false;
+
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      probeVideo.removeEventListener('loadedmetadata', onLoadedMetadata);
+      probeVideo.removeEventListener('error', onError);
+      probeVideo.removeAttribute('src');
+      probeVideo.load();
+      resolve(value);
+    };
+
+    const onLoadedMetadata = () => {
+      const duration = Number(probeVideo.duration);
+      finish(Number.isFinite(duration) && duration > 0 ? duration : null);
+    };
+
+    const onError = () => finish(null);
+    const timeoutId = setTimeout(() => finish(null), 4500);
+
+    probeVideo.preload = 'metadata';
+    probeVideo.muted = true;
+    probeVideo.playsInline = true;
+    probeVideo.addEventListener('loadedmetadata', onLoadedMetadata, { once: true });
+    probeVideo.addEventListener('error', onError, { once: true });
+    probeVideo.src = src;
+    probeVideo.load();
+  });
+}
+
+function getAnimationDurationSeconds(filename) {
+  if (!filename) return Promise.resolve(null);
+
+  const cached = animationDurationSecondsCache.get(filename);
+  if (Number.isFinite(cached) && cached > 0) {
+    return Promise.resolve(cached);
+  }
+
+  const pending = animationDurationProbePromises.get(filename);
+  if (pending) return pending;
+
+  const probePromise = probeAnimationDurationSeconds(filename)
+    .then((duration) => {
+      if (Number.isFinite(duration) && duration > 0) {
+        cacheAnimationDuration(filename, duration);
+        return duration;
+      }
+      return null;
+    })
+    .finally(() => {
+      animationDurationProbePromises.delete(filename);
+    });
+
+  animationDurationProbePromises.set(filename, probePromise);
+  return probePromise;
+}
+
+function formatAnimationPlaybackCountdown(remainingMs) {
+  const remainingSeconds = Math.max(0, remainingMs / 1000);
+  if (remainingSeconds >= 60) {
+    const minutes = Math.floor(remainingSeconds / 60);
+    const seconds = Math.ceil(remainingSeconds % 60);
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  }
+  if (remainingSeconds >= 10) {
+    return `${Math.ceil(remainingSeconds)}s`;
+  }
+  return `${remainingSeconds.toFixed(1)}s`;
+}
+
+function setAnimationCardPlaybackState(trigger, filename, durationSeconds, startedAtMs = Date.now()) {
+  const safeDuration = Number(durationSeconds);
+  const finalDuration = Number.isFinite(safeDuration) && safeDuration > 0
+    ? safeDuration
+    : ANIMATION_PLAYBACK_FALLBACK_SECONDS;
+
+  activeAnimationCardPlayback.set(trigger, {
+    trigger,
+    filename,
+    startedAtMs,
+    endAtMs: startedAtMs + (finalDuration * 1000),
+    durationSeconds: finalDuration
+  });
+
+  if (!animationPlaybackTicker) {
+    animationPlaybackTicker = setInterval(() => {
+      updateAnimationPlaybackUi();
+    }, ANIMATION_PLAYBACK_TICK_MS);
+  }
+  updateAnimationPlaybackUi();
+}
+
+function markAnimationCardPlaying(trigger) {
+  if (!trigger || !animationMappings[trigger]) return;
+
+  const data = animationMappings[trigger];
+  const filename = getAnimationFileFromMapping(data);
+  if (!filename) return;
+
+  const startedAtMs = Date.now();
+  const cachedDuration = animationDurationSecondsCache.get(filename);
+  const initialDuration = Number.isFinite(cachedDuration) && cachedDuration > 0
+    ? cachedDuration
+    : ANIMATION_PLAYBACK_FALLBACK_SECONDS;
+
+  setAnimationCardPlaybackState(trigger, filename, initialDuration, startedAtMs);
+
+  getAnimationDurationSeconds(filename)
+    .then((duration) => {
+      if (!Number.isFinite(duration) || duration <= 0) return;
+      const current = activeAnimationCardPlayback.get(trigger);
+      if (!current) return;
+      if (current.startedAtMs !== startedAtMs) return;
+      setAnimationCardPlaybackState(trigger, filename, duration, startedAtMs);
+    })
+    .catch((err) => {
+      console.debug('Animation duration probe failed:', err);
+    });
+}
+
+function updateAnimationPlaybackUi() {
+  const now = Date.now();
+
+  for (const [trigger, state] of activeAnimationCardPlayback.entries()) {
+    if (!state || state.endAtMs <= now) {
+      activeAnimationCardPlayback.delete(trigger);
+    }
+  }
+
+  const cards = document.querySelectorAll('.animation-mapping-card[data-animation-trigger]');
+  cards.forEach((card) => {
+    const trigger = card.dataset.animationTrigger || '';
+    const state = activeAnimationCardPlayback.get(trigger);
+    const countdownEl = card.querySelector('.animation-playing-countdown');
+    const button = card.querySelector('.preview-mapping-btn');
+    const video = card.querySelector('.animation-thumb-video');
+
+    if (!state) {
+      card.classList.remove('playing');
+      card.style.removeProperty('--play-progress');
+      if (countdownEl) countdownEl.textContent = '';
+      if (isThumbnailInteractionActive(button)) {
+        playAnimationThumbnail(video);
+      } else {
+        stopAnimationThumbnail(video);
+      }
+      return;
+    }
+
+    const remainingMs = Math.max(0, state.endAtMs - now);
+    const totalMs = Math.max(200, state.durationSeconds * 1000);
+    const elapsedMs = Math.max(0, totalMs - remainingMs);
+    const progress = Math.min(1, elapsedMs / totalMs);
+
+    card.classList.add('playing');
+    card.style.setProperty('--play-progress', progress.toFixed(4));
+    if (countdownEl) countdownEl.textContent = formatAnimationPlaybackCountdown(remainingMs);
+    playAnimationThumbnail(video);
+  });
+
+  if (activeAnimationCardPlayback.size === 0 && animationPlaybackTicker) {
+    clearInterval(animationPlaybackTicker);
+    animationPlaybackTicker = null;
+  }
 }
 
 function getAnimationFileFromMapping(data) {
@@ -3940,10 +4147,38 @@ async function loadAvailableAnimations() {
 
 function ensureAnimationVideoSource(video) {
   if (!video) return;
+  bindAnimationThumbnailDurationListener(video);
   if (video.dataset.src && !video.getAttribute('src')) {
     video.setAttribute('src', video.dataset.src);
     video.load();
   }
+}
+
+function playAnimationThumbnail(video) {
+  if (!video) return;
+  ensureAnimationVideoSource(video);
+  if (video.paused) {
+    video.play().catch(() => {});
+  }
+}
+
+function stopAnimationThumbnail(video) {
+  if (!video) return;
+  video.pause();
+  try {
+    video.currentTime = 0;
+  } catch (err) {
+    // Some browsers may block currentTime until metadata is available.
+  }
+}
+
+function isThumbnailInteractionActive(button) {
+  if (!button) return false;
+  return (
+    button.matches(':hover') ||
+    button.matches(':focus') ||
+    button.matches(':focus-visible')
+  );
 }
 
 function wireThumbnailLazyLoading(container) {
@@ -3983,20 +4218,20 @@ function wireThumbnailHoverPlayback(container) {
     if (!video) return;
 
     const play = () => {
-      ensureAnimationVideoSource(video);
-      video.play().catch(() => {});
+      playAnimationThumbnail(video);
     };
 
     const stop = () => {
-      video.pause();
-      try {
-        video.currentTime = 0;
-      } catch (err) {
-        // Some browsers may block currentTime until metadata is available.
-      }
+      const card = btn.closest('.animation-mapping-card');
+      if (card?.classList.contains('playing')) return;
+      stopAnimationThumbnail(video);
     };
 
-    stop();
+    if (btn.closest('.animation-mapping-card')?.classList.contains('playing')) {
+      play();
+    } else {
+      stop();
+    }
     btn.addEventListener('mouseenter', play);
     btn.addEventListener('mouseleave', stop);
     btn.addEventListener('focus', play);
@@ -4078,15 +4313,32 @@ function renderAnimationMappings() {
   list.innerHTML = cards.map(({ anim, trigger }) => {
     const safeTrigger = escapeAttribute(trigger);
     const safeFilename = escapeAttribute(anim.filename);
-    const fileUrl = `/animations/${encodeURIComponent(anim.filename)}`;
+    const fileUrl = getAnimationFileUrl(anim.filename);
     const visibilityBadges = renderAnimationVisibilityBadges(trigger);
+    const playbackState = activeAnimationCardPlayback.get(trigger);
+    const now = Date.now();
+    const isPlaying = Boolean(playbackState && playbackState.endAtMs > now);
+    let playProgress = 0;
+    let countdown = '';
+    if (isPlaying) {
+      const remainingMs = Math.max(0, playbackState.endAtMs - now);
+      const totalMs = Math.max(200, playbackState.durationSeconds * 1000);
+      const elapsedMs = Math.max(0, totalMs - remainingMs);
+      playProgress = Math.min(1, elapsedMs / totalMs);
+      countdown = formatAnimationPlaybackCountdown(remainingMs);
+    }
     
     return `
-    <div class="animation-mapping-card" title="${safeTrigger}">
+    <div class="animation-mapping-card${isPlaying ? ' playing' : ''}" data-animation-trigger="${safeTrigger}" data-animation-file="${safeFilename}" style="--play-progress:${playProgress.toFixed(4)}" title="${safeTrigger}">
       <button class="secondary animation-thumb-btn preview-mapping-btn" data-trigger="${safeTrigger}" title="${safeTrigger}">
-        <video class="animation-thumb-video" data-src="${fileUrl}" muted loop playsinline preload="none"></video>
+        <video class="animation-thumb-video" data-src="${fileUrl}" data-file="${safeFilename}" muted loop playsinline preload="none"></video>
         ${visibilityBadges}
         <span class="animation-thumb-overlay">▶ Play</span>
+        <span class="animation-playing-state" aria-hidden="true">
+          <span class="animation-playing-label">Playing</span>
+          <span class="animation-playing-countdown">${countdown}</span>
+          <span class="animation-playing-progress"><span class="animation-playing-progress-fill"></span></span>
+        </span>
       </button>
       <button class="secondary animation-gear-btn open-animation-settings-btn" data-trigger="${safeTrigger}" data-file="${safeFilename}" title="Settings">⚙️</button>
     </div>
@@ -4101,27 +4353,13 @@ function renderAnimationMappings() {
     btn.addEventListener('click', async (e) => {
       const trigger = e.currentTarget.dataset.trigger;
       const data = animationMappings[trigger];
-      const filename = typeof data === 'string' ? data : data.file;
+      const filename = getAnimationFileFromMapping(data);
       
       console.log(`🎬 Testing: ${trigger} → ${filename}`);
       
-      try {
-        const response = await fetch('/api/animations/trigger', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'test',
-            trigger: trigger,
-            platform: 'manual',
-            author: 'Test'
-          })
-        });
-        
-        if (response.ok) {
-          console.log(`✅ Triggered: ${trigger}`);
-        }
-      } catch (err) {
-        console.error('Test error:', err);
+      const success = await triggerAnimation(trigger, 'manual', 'Test', 'test');
+      if (success) {
+        console.log(`✅ Triggered: ${trigger}`);
       }
     });
   });
@@ -4133,6 +4371,8 @@ function renderAnimationMappings() {
       openAnimationCardPopup(btn.dataset.trigger, btn.dataset.file);
     });
   });
+
+  updateAnimationPlaybackUi();
 }
 
 const uploadAnimationBtn = document.getElementById('uploadAnimationBtn');
@@ -4532,7 +4772,7 @@ if (greenThresholdSlider && chromaToleranceSlider) {
   chromaToleranceSlider.addEventListener('change', saveChromaSettings);
 }
 
-function triggerAnimation(trigger, platform, author) {
+async function triggerAnimation(trigger, platform, author, type = 'gift') {
   console.log(`🎯 triggerAnimation called: trigger="${trigger}", platform="${platform}", author="${author}"`);
   console.log(`Available mappings:`, Object.keys(animationMappings));
 
@@ -4540,7 +4780,7 @@ function triggerAnimation(trigger, platform, author) {
   if (!animationMappings[trigger]) {
     console.warn(`❌ No animation mapped for trigger: "${trigger}"`);
     console.log(`Available triggers:`, Object.keys(animationMappings).join(', '));
-    return;
+    return false;
   }
 
   const data = animationMappings[trigger];
@@ -4549,24 +4789,30 @@ function triggerAnimation(trigger, platform, author) {
 
   // Send to server to broadcast to overlay
   console.log(`📡 Sending to server: POST /api/animations/trigger`);
-  fetch('/api/animations/trigger', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      type: 'gift',
-      trigger: trigger,
-      platform: platform,
-      author: author
-    })
-  })
-  .then(response => {
+  try {
+    const response = await fetch('/api/animations/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type,
+        trigger: trigger,
+        platform: platform,
+        author: author
+      })
+    });
+
     if (response.ok) {
       console.log(`✅ Animation trigger sent successfully: ${trigger}`);
+      markAnimationCardPlaying(trigger);
+      return true;
     } else {
       console.error(`❌ Server returned error:`, response.status);
+      return false;
     }
-  })
-  .catch(err => console.error('❌ Animation trigger error:', err));
+  } catch (err) {
+    console.error('❌ Animation trigger error:', err);
+    return false;
+  }
 }
 
 // Initialize animation system
