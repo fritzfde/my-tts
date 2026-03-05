@@ -1,6 +1,7 @@
 const { test, expect } = require('@playwright/test');
 
 const SETTINGS_SYNC_WAIT_MS = 1000;
+const e2eScopesToCleanup = new Set();
 
 function uniqueScope(name) {
   return `e2e-${name}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
@@ -23,6 +24,10 @@ function defaultSettings() {
 }
 
 async function seedScopeSettings(request, scope, overrides = {}) {
+  if (String(scope || '').startsWith('e2e-')) {
+    e2eScopesToCleanup.add(scope);
+  }
+
   const response = await request.put('/api/settings', {
     data: {
       scope,
@@ -30,6 +35,17 @@ async function seedScopeSettings(request, scope, overrides = {}) {
         ...defaultSettings(),
         ...overrides
       }
+    }
+  });
+  expect(response.ok()).toBeTruthy();
+}
+
+async function cleanupScopeSettings(request, scope) {
+  if (!String(scope || '').startsWith('e2e-')) return;
+  const response = await request.put('/api/settings', {
+    data: {
+      scope,
+      settings: {}
     }
   });
   expect(response.ok()).toBeTruthy();
@@ -59,6 +75,13 @@ async function mockAnimationsApi(page, files = [{ name: 'smoke', filename: 'smok
 }
 
 test.describe('Dashboard smoke suite', () => {
+  test.afterAll(async ({ request }) => {
+    for (const scope of e2eScopesToCleanup) {
+      await cleanupScopeSettings(request, scope);
+    }
+    e2eScopesToCleanup.clear();
+  });
+
   test('@smoke persists key settings after page reload', async ({ page, request }) => {
     const scope = uniqueScope('settings');
     await seedScopeSettings(request, scope);
