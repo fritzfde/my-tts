@@ -105,6 +105,16 @@ Recommended workflow:
 - Daily checks: `npm run test:smoke`
 - Troubleshooting/debugging: `npm run test:e2e:ui`
 
+## Git Push Safety Hook (Local)
+
+To run smoke tests automatically before each local `git push`:
+```bash
+npm run setup:hooks
+```
+
+This configures `core.hooksPath=.githooks` and enables the repo `pre-push` hook.
+If smoke tests fail, push is blocked (you can still bypass with `git push --no-verify`).
+
 ## How to Use
 
 ### First Time Setup:

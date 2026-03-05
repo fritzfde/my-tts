@@ -9,6 +9,7 @@
     "start:web": "npm --prefix apps/web start",
     "start:tts": "./scripts/start-tts.sh",
     "setup:tts": "./scripts/setup-tts.sh",
+    "setup:hooks": "./scripts/setup-git-hooks.sh",
     "start:all": "./scripts/start-all.sh",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
