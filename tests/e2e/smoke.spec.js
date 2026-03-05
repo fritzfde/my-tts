@@ -278,4 +278,167 @@ test.describe('Dashboard smoke suite', () => {
     await expect(page.locator('.animation-mapping-card[data-animation-trigger="smoke-renamed"]')).toBeVisible();
     await expect(page.locator('.animation-mapping-card[data-animation-trigger="smoke"]')).toHaveCount(0);
   });
+
+  test('@smoke keeps saved stream URL on transient startup YouTube errors', async ({ page, request }) => {
+    const scope = uniqueScope('stream-url-transient');
+    const savedStreamUrl = 'https://www.youtube.com/watch?v=keep1234567';
+    await seedScopeSettings(request, scope, {
+      yt_tts_api_keys: JSON.stringify(['smoke-api-key-1']),
+      yt_tts_stream_url: savedStreamUrl,
+      yt_tts_channel_url: 'https://www.youtube.com/@example'
+    });
+
+    let videosCalls = 0;
+    let searchCalls = 0;
+    await page.route('**/api/youtube/videos**', async (route) => {
+      videosCalls += 1;
+      await route.fulfill({
+        status: 403,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { message: 'quotaExceeded: simulated transient error' }
+        })
+      });
+    });
+
+    await page.route('**/api/youtube/search**', async (route) => {
+      searchCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [] })
+      });
+    });
+
+    await page.route('**/api/youtube/channels**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [] })
+      });
+    });
+
+    await openDashboard(page, scope);
+    await page.waitForTimeout(3000);
+
+    await expect(page.locator('#streamUrl')).toHaveValue(savedStreamUrl);
+    expect(videosCalls).toBeGreaterThan(0);
+    expect(searchCalls).toBe(0);
+  });
+
+  test('@smoke persists default YouTube/TikTok voice selections', async ({ page, request }) => {
+    const scope = uniqueScope('default-voices');
+    await seedScopeSettings(request, scope, {
+      youtube_default_voice: 'cloned-bravo',
+      tiktok_default_voice: 'cloned-alpha'
+    });
+
+    await page.route('**/api/voice-clone/voices', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ voices: ['alpha', 'bravo'] })
+      });
+    });
+
+    await openDashboard(page, scope);
+
+    await expect(page.locator('#voiceSelectYouTube')).toHaveValue('cloned-bravo');
+    await expect(page.locator('#voiceSelectTikTok')).toHaveValue('cloned-alpha');
+
+    await page.selectOption('#voiceSelectYouTube', 'cloned-alpha');
+    await page.selectOption('#voiceSelectTikTok', 'cloned-bravo');
+    await page.waitForTimeout(SETTINGS_SYNC_WAIT_MS);
+    await page.reload();
+
+    await expect(page.locator('#voiceSelectYouTube')).toHaveValue('cloned-alpha');
+    await expect(page.locator('#voiceSelectTikTok')).toHaveValue('cloned-bravo');
+  });
+
+  test('@smoke cycles round-robin animation mapping for repeated gift value', async ({ page, request }) => {
+    const scope = uniqueScope('gift-round-robin');
+    await seedScopeSettings(request, scope, {
+      animation_mappings: JSON.stringify({
+        'anim-a': { file: 'a.mov', position: 'bottom-left', scale: 1 },
+        'anim-b': { file: 'b.mov', position: 'bottom-left', scale: 1 }
+      }),
+      gift_mappings: JSON.stringify({
+        byName: {},
+        byValue: {
+          '5': { type: 'animation', value: ['anim-a', 'anim-b'] }
+        },
+        default: { type: 'sound', value: '' }
+      })
+    });
+
+    await mockAnimationsApi(page, [
+      { name: 'A', filename: 'a.mov' },
+      { name: 'B', filename: 'b.mov' }
+    ]);
+
+    await openDashboard(page, scope);
+    const values = await page.evaluate(() => {
+      const first = getGiftAction('RoundRobinGift', 5);
+      const second = getGiftAction('RoundRobinGift', 5);
+      const third = getGiftAction('RoundRobinGift', 5);
+      return [first?.value || '', second?.value || '', third?.value || ''];
+    });
+
+    expect(values).toEqual(['anim-a', 'anim-b', 'anim-a']);
+  });
+
+  test('@smoke keeps animation card playback state consistent when switching and stopping', async ({ page, request }) => {
+    const scope = uniqueScope('animation-state-consistency');
+    await seedScopeSettings(request, scope);
+
+    await mockAnimationsApi(page, [
+      { name: 'One', filename: 'one.mov' },
+      { name: 'Two', filename: 'two.mov' }
+    ]);
+
+    let triggerCalls = 0;
+    let stopCalls = 0;
+    await page.route('**/api/animations/trigger', async (route) => {
+      triggerCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, clients: 1 })
+      });
+    });
+
+    await page.route('**/api/animations/stop', async (route) => {
+      stopCalls += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true, clients: 1, obsClients: 1 })
+      });
+    });
+
+    await openDashboard(page, scope);
+
+    const firstCard = page.locator('.animation-mapping-card').nth(0);
+    const secondCard = page.locator('.animation-mapping-card').nth(1);
+    await expect(firstCard).toBeVisible();
+    await expect(secondCard).toBeVisible();
+
+    await firstCard.locator('.preview-mapping-btn').click();
+    await expect(firstCard).toHaveClass(/playing/);
+    await expect(secondCard).not.toHaveClass(/playing/);
+    await expect(page.locator('#stopAnimationBtn')).toBeEnabled();
+
+    await secondCard.locator('.preview-mapping-btn').click();
+    await expect(secondCard).toHaveClass(/playing/);
+    await expect(firstCard).not.toHaveClass(/playing/);
+    await expect(page.locator('#stopAnimationBtn')).toBeEnabled();
+
+    await page.click('#stopAnimationBtn');
+    await expect(page.locator('#stopAnimationBtn')).toBeDisabled();
+    await expect(firstCard).not.toHaveClass(/playing/);
+    await expect(secondCard).not.toHaveClass(/playing/);
+
+    expect(triggerCalls).toBeGreaterThanOrEqual(2);
+    expect(stopCalls).toBe(1);
+  });
 });
