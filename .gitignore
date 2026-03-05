@@ -47,4 +47,6 @@ apps/web/animations/*
 apps/web/data/*.sqlite
 apps/web/data/*.sqlite-shm
 apps/web/data/*.sqlite-wal
+playwright-report/
+test-results/
 copilot-instructions.md

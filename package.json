@@ -1,11 +1,20 @@
 {
   "name": "my-tts-platform",
   "private": true,
+  "devDependencies": {
+    "@playwright/test": "^1.53.0"
+  },
   "scripts": {
     "start": "npm --prefix apps/web start",
     "start:web": "npm --prefix apps/web start",
     "start:tts": "./scripts/start-tts.sh",
     "setup:tts": "./scripts/setup-tts.sh",
-    "start:all": "./scripts/start-all.sh"
+    "start:all": "./scripts/start-all.sh",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:smoke:headed": "playwright test --grep @smoke --headed",
+    "test:smoke:ui": "playwright test --grep @smoke --ui"
   }
 }

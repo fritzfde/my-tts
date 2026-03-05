@@ -88,6 +88,23 @@ npm run start:web
 ### 8. Open the App
 Open your browser and go to: http://localhost:3000/index.html
 
+## Regression Smoke Tests (Playwright)
+
+From repo root:
+```bash
+npm install
+npx playwright install chromium
+npm run test:smoke
+```
+
+Notes:
+- Tests run against the live app on `http://localhost:3000`.
+- Each test uses an isolated `scope` (`?scope=e2e-...`) so it does not overwrite your normal settings.
+
+Recommended workflow:
+- Daily checks: `npm run test:smoke`
+- Troubleshooting/debugging: `npm run test:e2e:ui`
+
 ## How to Use
 
 ### First Time Setup:
