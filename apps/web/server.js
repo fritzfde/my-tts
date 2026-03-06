@@ -36,6 +36,9 @@ loadRootEnv();
 
 const TTS_SERVER_URL = (process.env.TTS_SERVER_URL || 'http://127.0.0.1:5000').replace(/\/+$/, '');
 const TTS_TIMEOUT_MS = 60000;
+const SUPPORTED_TTS_LANGUAGES = new Set([
+  'en', 'de', 'es', 'fr', 'it', 'pt', 'pl', 'tr', 'ru', 'nl', 'cs', 'ar', 'zh-cn', 'ja', 'ko', 'hu', 'hi'
+]);
 const DEFAULT_SETTINGS_SCOPE = process.env.SETTINGS_SCOPE || 'local-dev';
 const DB_DRIVER = process.env.DB_DRIVER || 'sqlite';
 const storage = createStorage({
@@ -48,6 +51,13 @@ const storage = createStorage({
 });
 
 const { WebcastPushConnection } = require('tiktok-live-connector');
+
+function normalizeTtsLanguage(language) {
+  const normalized = String(language || '').trim().toLowerCase().replace('_', '-');
+  if (!normalized) return 'en';
+  if (normalized === 'zh') return 'zh-cn';
+  return SUPPORTED_TTS_LANGUAGES.has(normalized) ? normalized : 'en';
+}
 
 app.use(cors());
 app.use(express.json());
@@ -145,7 +155,7 @@ app.post('/api/voice-clone/tts', async (req, res) => {
       body: JSON.stringify({
         voice: voiceFile,
         text: text,
-        language: req.body.language || 'en'
+        language: normalizeTtsLanguage(req.body.language)
       }),
       signal: AbortSignal.timeout(TTS_TIMEOUT_MS)
     });
@@ -345,17 +355,46 @@ app.post('/api/tiktok/connect', (req, res) => {
 
     // Capture Gifts
     tiktokConnection.on('gift', data => {
-      const count = data.repeatCount || 1;
-      const diamonds = (data.diamondCount || 0) * count;
+      const repeatCountRaw = Number(data?.repeatCount ?? data?.repeat_count ?? 1);
+      const count = Number.isFinite(repeatCountRaw) && repeatCountRaw > 0
+        ? Math.floor(repeatCountRaw)
+        : 1;
+
+      const candidateUnitDiamonds = [
+        data?.diamondCount,
+        data?.gift?.diamond_count,
+        data?.gift?.diamondCount,
+        data?.gift?.price,
+        data?.gift?.coin_count
+      ];
+      let unitDiamonds = 0;
+      for (const candidate of candidateUnitDiamonds) {
+        const numeric = Number(candidate);
+        if (Number.isFinite(numeric) && numeric >= 0) {
+          unitDiamonds = Math.floor(numeric);
+          break;
+        }
+      }
+      const totalDiamonds = unitDiamonds * count;
+      const resolvedGiftName = String(
+        data?.giftName
+        || data?.gift?.name
+        || data?.gift?.giftName
+        || data?.gift?.title
+        || data?.extendedGiftInfo?.name
+        || 'Gift'
+      ).trim() || 'Gift';
+
       const msg = {
         type: 'gift',
         author: data.uniqueId,
         authorName: data.nickname || data.userName || data.uniqueId,
         authorAvatar: data.profilePictureUrl || null,
-        giftName: data.giftName,
+        giftName: resolvedGiftName,
         giftPictureUrl: data.giftPictureUrl || data.gift?.image?.url_list?.[0] || null,
         repeatCount: count,
-        diamondCount: diamonds,
+        diamondUnitCount: unitDiamonds,
+        diamondCount: totalDiamonds,
         timestamp: Date.now()
       };
 
@@ -381,7 +420,7 @@ app.post('/api/tiktok/connect', (req, res) => {
       // Add to recent cache and proceed
       recentGifts.set(key, now);
 
-      console.log(`🎁 [Gift] ${msg.authorName} (@${msg.author}): ${msg.giftName} x${count} (${diamonds} diamonds)`);
+      console.log(`🎁 [Gift] ${msg.authorName} (@${msg.author}): ${msg.giftName} x${count} (${totalDiamonds} diamonds)`);
       rememberTikTokUser({
         uniqueId: msg.author,
         nickname: msg.authorName,
@@ -1018,11 +1057,23 @@ app.get('/api/animations/list', (req, res) => {
         const ext = path.extname(file).toLowerCase();
         return ALLOWED_ANIMATION_EXTENSIONS.has(ext);
       })
-      .map(filename => ({
-        filename: filename,
-        name: filename.replace(/\.(mov|mp4|webm|avi)$/i, ''),
-        path: `/animations/${filename}`
-      }));
+      .map(filename => {
+        const filePath = path.join(animationsDir, filename);
+        let stats = null;
+        try {
+          stats = fs.statSync(filePath);
+        } catch (err) {
+          console.warn(`Failed to stat animation file "${filename}":`, err.message);
+        }
+
+        return {
+          filename: filename,
+          name: filename.replace(/\.(mov|mp4|webm|avi)$/i, ''),
+          path: `/animations/${filename}`,
+          mtimeMs: Number.isFinite(stats?.mtimeMs) ? Math.round(stats.mtimeMs) : null,
+          birthtimeMs: Number.isFinite(stats?.birthtimeMs) ? Math.round(stats.birthtimeMs) : null
+        };
+      });
 
     res.json({ animations: files });
   } catch (err) {

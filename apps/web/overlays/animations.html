@@ -136,7 +136,7 @@
     // Basic config
     let animationsEnabled = true;
     let animationMappings = {};
-    let chromaKeySettings = { greenThreshold: 70, tolerance: 60 };
+    let chromaKeySettings = { greenThreshold: 70, tolerance: 60, spillReduction: 0.5 };
     let globalPosition = 'bottom-left';
     let globalScale = 1.0;
     let animationVolume = 100;
@@ -205,16 +205,48 @@
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const data = imageData.data;
                 
-                const threshold = chromaKeySettings.greenThreshold;
-                const tolerance = chromaKeySettings.tolerance;
+                const threshold = Number(chromaKeySettings.greenThreshold ?? 70);
+                const tolerance = Math.max(1, Number(chromaKeySettings.tolerance ?? 60));
+                const spillReduction = Math.max(0, Math.min(1, Number(chromaKeySettings.spillReduction ?? 0.5)));
+                const edgeStart = threshold - tolerance;
+                const edgeRange = Math.max(1, threshold - edgeStart);
 
                 for (let i = 0; i < data.length; i += 4) {
-                    const r = data[i], g = data[i+1], b = data[i+2];
-                    // Chroma logic
-                    const greenness = g - Math.max(r, b);
-                    if (greenness > threshold) {
-                        data[i+3] = 0; // Transparent
+                    let r = data[i], g = data[i + 1], b = data[i + 2];
+                    const maxRB = Math.max(r, b);
+                    const greenExcess = g - maxRB;
+                    const looksGreen = g > (r * 1.03) && g > (b * 1.03);
+
+                    if (greenExcess > edgeStart && looksGreen) {
+                        // Soft key across tolerance range, with stronger falloff near threshold.
+                        let keyAmount = (greenExcess - edgeStart) / edgeRange; // 0..1
+                        keyAmount = Math.max(0, Math.min(1, keyAmount));
+                        keyAmount = Math.pow(keyAmount, 1.35);
+
+                        if (greenExcess >= threshold || keyAmount > 0.96) {
+                            data[i + 3] = 0;
+                        } else {
+                            const fade = Math.pow(1 - keyAmount, 2);
+                            data[i + 3] = Math.round(data[i + 3] * fade);
+                        }
+
+                        // Stronger despill on keyed pixels to remove green stroke edges.
+                        const despillStrength = (0.65 + spillReduction * 0.35) * (0.35 + keyAmount * 0.65);
+                        const reduction = Math.max(0, greenExcess * despillStrength);
+                        g = Math.max(0, g - reduction);
+                        r = Math.min(255, r + reduction * 0.18);
+                        b = Math.min(255, b + reduction * 0.25);
+                    } else if (greenExcess > 8 && looksGreen) {
+                        // Mild cleanup even outside keyed zone for compression spill.
+                        const cleanup = Math.min(1, (greenExcess - 8) / 30);
+                        const reduction = greenExcess * 0.18 * cleanup;
+                        g = Math.max(0, g - reduction);
+                        b = Math.min(255, b + reduction * 0.2);
                     }
+
+                    data[i] = r;
+                    data[i + 1] = g;
+                    data[i + 2] = b;
                 }
                 ctx.putImageData(imageData, 0, 0);
             } catch (e) {
@@ -392,9 +424,24 @@
                     stopAllAnimations();
                 }
                 if (d.type === 'config' && d.config) {
+                    animationsEnabled = d.config.enabled !== false;
+                    animationMappings = d.config.mappings || animationMappings;
+                    chromaKeySettings = {
+                        ...chromaKeySettings,
+                        ...(d.config.chroma || {})
+                    };
+                    globalPosition = d.config.globalPosition || globalPosition;
+                    globalScale = Number(d.config.globalScale) || globalScale;
                     animationVolume = d.config.animationVolume ?? animationVolume;
                     applyVolumeToAllActiveAnimations();
-                    console.log('Animation config updated, volume =', animationVolume);
+                    updateDebugInfo();
+                    console.log('Animation config updated:', {
+                        enabled: animationsEnabled,
+                        chroma: chromaKeySettings,
+                        position: globalPosition,
+                        scale: globalScale,
+                        volume: animationVolume
+                    });
                 }
             } catch (err) { console.error('parse', err); }
         };
@@ -409,7 +456,7 @@
             const res = await fetch(`/api/animations/config/${cfgName}`);
             const cfg = await res.json();
             animationMappings = cfg.mappings || {};
-            chromaKeySettings = cfg.chroma || chromaKeySettings;
+            chromaKeySettings = { ...chromaKeySettings, ...(cfg.chroma || {}) };
             globalPosition = cfg.globalPosition || globalPosition;
             globalScale = cfg.globalScale || globalScale;
             animationVolume = cfg.animationVolume ?? animationVolume;

@@ -22,14 +22,29 @@ tts = TTS(
 )
 print("✅ Model loaded and ready!", file=sys.stderr)
 
+SUPPORTED_LANGUAGES = {
+    "en", "de", "es", "fr", "it", "pt", "pl", "tr", "ru",
+    "nl", "cs", "ar", "zh-cn", "ja", "ko", "hu", "hi"
+}
+
+
+def normalize_language(language):
+    candidate = str(language or "").strip().lower().replace("_", "-")
+    if not candidate:
+        return "en"
+    if candidate == "zh":
+        return "zh-cn"
+    return candidate if candidate in SUPPORTED_LANGUAGES else "en"
+
 
 @app.route('/tts', methods=['POST'])
 def generate_speech():
     """Generate speech from JSON request"""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         voice_file = data.get('voice')
         text = data.get('text')
+        language = normalize_language(data.get('language'))
 
         if not voice_file or not text:
             return {'error': 'Missing voice_file or text'}, 400
@@ -42,13 +57,13 @@ def generate_speech():
         output_path = temp_file.name
         temp_file.close()
 
-        print(f"🎙️ Generating: '{text[:50]}...'", file=sys.stderr)
+        print(f"🎙️ Generating ({language}): '{text[:50]}...'", file=sys.stderr)
 
         # Generate speech (model already loaded - FAST!)
         tts.tts_to_file(
             text=text,
             speaker_wav=voice_file,
-            language="en",
+            language=language,
             file_path=output_path
         )
 
@@ -88,6 +103,7 @@ def cli_mode():
     parser = argparse.ArgumentParser(description="XTTS Voice Test")
     parser.add_argument("--voice", type=str, help="Path to voice wav file")
     parser.add_argument("--text", type=str, help="Text to synthesize")
+    parser.add_argument("--language", type=str, default="en", help="Language code (e.g. en, de, es)")
 
     args, _ = parser.parse_known_args()
 
@@ -104,10 +120,12 @@ def cli_mode():
 
     output_path = "output.wav"
 
+    language = normalize_language(args.language)
+
     tts.tts_to_file(
         text=args.text,
         speaker_wav=args.voice,
-        language="en",
+        language=language,
         file_path=output_path
     )
 

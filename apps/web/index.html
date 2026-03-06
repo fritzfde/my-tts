@@ -159,7 +159,7 @@
 
             <div class="input-group" style="margin-bottom: 12px;">
                 <label>Reading Options</label>
-                <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center;">
                     <label class="checkbox-label" style="padding: 0; margin: 0;">
                         <input type="checkbox" id="readUsernames">
                         <span>Read usernames</span>
@@ -172,6 +172,14 @@
                         <input type="checkbox" id="readLinks">
                         <span>Read links</span>
                     </label>
+                    <div class="startup-backlog-inline" title="How many recent chat messages should be replayed by TTS when reconnecting or reloading. Applies to YouTube and TikTok. 0 means no replay.">
+                        <span id="youtubeStartupBacklogLabel" class="startup-backlog-label">Play last 0 chat messages on reload (YouTube + TikTok)</span>
+                        <div class="startup-backlog-controls">
+                            <input type="number" id="youtubeStartupBacklogCount" min="0" max="20" step="1" value="0" aria-label="Startup backlog messages count for YouTube and TikTok">
+                            <button type="button" id="youtubeStartupBacklogDownBtn" class="secondary animation-scale-btn" title="Decrease replay count">▼</button>
+                            <button type="button" id="youtubeStartupBacklogUpBtn" class="secondary animation-scale-btn" title="Increase replay count">▲</button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -330,6 +338,8 @@
                 <div class="animation-controls-row">
                     <select id="animationSortSelect" style="font-size: 0.8125rem;">
                         <option value="name">Sort: Name</option>
+                        <option value="newest">Sort: Newest</option>
+                        <option value="oldest">Sort: Oldest</option>
                         <option value="gift">Sort: Gift Name</option>
                         <option value="value">Sort: Value</option>
                     </select>
@@ -403,12 +413,12 @@
                             </div>
                             <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
                                 <input type="checkbox" id="animationPopupMakeDefault" style="width: auto; margin-right: 8px;">
-                                Make default gift animation (adds to diamond value 1 round-robin)
+                                Make default gift animation (fallback round-robin)
                             </label>
                         </div>
                         <div class="animation-card-popup-actions">
                             <button id="animationPopupSaveBtn">Save</button>
-                            <button id="animationPopupDeleteBtn" class="secondary">🗑️ Delete File</button>
+                            <button id="animationPopupDeleteBtn" class="stop animation-popup-delete-btn">Delete File</button>
                             <button id="animationPopupCancelBtn" class="secondary">Cancel</button>
                         </div>
                     </div>
@@ -429,6 +439,10 @@
                                 <input type="range" id="chromaTolerance" min="10" max="100" value="50" class="animation-range-input">
                                 <span class="animation-slider-inline-label">Tolerance</span>
                                 <span class="animation-slider-inline-value" id="chromaToleranceValue">50</span>
+                            </div>
+                            <div class="animation-slider-hint">
+                                Green Threshold: lower removes more green, higher keeps more detail.
+                                Tolerance: higher softens edge halos, lower keeps sharper edges.
                             </div>
                         </div>
                         <div class="input-group" style="margin-bottom: 12px;">
@@ -490,7 +504,10 @@
             <div id="onlineUsersGrid" class="online-users-grid">
                 <div class="online-users-platform">
                     <div class="online-users-platform-title">
-                        <span>📺 YouTube</span>
+                        <span class="online-users-platform-label">
+                            <span id="onlineYouTubeIndicator" class="platform-connection-indicator is-offline" title="YouTube disconnected" aria-label="YouTube disconnected"></span>
+                            <span>📺 YouTube</span>
+                        </span>
                         <span id="onlineYouTubeCount" class="online-users-count">0</span>
                     </div>
                     <div id="onlineYouTubeUsers" class="online-users-list">
@@ -500,7 +517,10 @@
                 <div id="onlineUsersSplitter" class="online-users-splitter" role="separator" aria-orientation="horizontal" aria-label="Resize YouTube and TikTok online lists"></div>
                 <div class="online-users-platform">
                     <div class="online-users-platform-title">
-                        <span>🎵 TikTok</span>
+                        <span class="online-users-platform-label">
+                            <span id="onlineTikTokIndicator" class="platform-connection-indicator is-offline" title="TikTok disconnected" aria-label="TikTok disconnected"></span>
+                            <span>🎵 TikTok</span>
+                        </span>
                         <span id="onlineTikTokCount" class="online-users-count">0</span>
                     </div>
                     <div id="onlineTikTokUsers" class="online-users-list">
@@ -548,6 +568,34 @@
     </div>
 </div>
 
+<script src="assets/js/settings.js"></script>
+<script src="assets/js/api-key-manager.js"></script>
+<script src="assets/js/layout-resize.js"></script>
+<script src="assets/js/voices.js"></script>
+<script src="assets/js/dashboard-settings.js"></script>
+<script src="assets/js/audio-runtime.js"></script>
+<script src="assets/js/chat-ui.js"></script>
+<script src="assets/js/tts-engine.js"></script>
+<script src="assets/js/voice-test-controls.js"></script>
+<script src="assets/js/voice-ui.js"></script>
+<script src="assets/js/animation-permissions-ui.js"></script>
+<script src="assets/js/ollama-gender.js"></script>
+<script src="assets/js/gift-sounds.js"></script>
+<script src="assets/js/gift-mappings.js"></script>
+<script src="assets/js/presence.js"></script>
+<script src="assets/js/animation-mappings.js"></script>
+<script src="assets/js/animation-playback.js"></script>
+<script src="assets/js/animation-ui.js"></script>
+<script src="assets/js/animation-popup.js"></script>
+<script src="assets/js/animation-popup-stickers.js"></script>
+<script src="assets/js/animation-settings.js"></script>
+<script src="assets/js/gift-batch.js"></script>
+<script src="assets/js/sticker-mappings.js"></script>
+<script src="assets/js/sticker-ui.js"></script>
+<script src="assets/js/youtube.js"></script>
+<script src="assets/js/tiktok.js"></script>
+<script src="assets/js/app-bootstrap.js"></script>
+<script src="assets/js/startup-orchestrator.js"></script>
 <script src="assets/js/app.js"></script>
 </body>
 </html>
