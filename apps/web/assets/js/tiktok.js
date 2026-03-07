@@ -349,10 +349,9 @@
           throw new Error('Connection failed');
         }
 
-        await fetch('/api/tiktok/messages');
-
         state.connected = true;
         state.isFirstPoll = true;
+        state.seenMessages.clear();
         state.pollLoopToken += 1;
         elements.disconnectTikTokBtn.disabled = false;
         clearOnlineUsers('tiktok');

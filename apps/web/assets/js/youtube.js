@@ -364,12 +364,23 @@
           const now = Date.now();
           const cutoff = now - youtubeOnlineUserTtlMs;
           const startupBacklogCount = resolveStartupBacklogCount();
+          const startupRenderableMessages = [];
 
           messages.forEach((msg) => {
             state.seenMessages.add(msg.id);
 
             const author = msg?.authorDetails?.displayName;
+            const text = String(msg?.snippet?.displayMessage || '').trim();
             if (!author) return;
+
+            if (text) {
+              const publishedAtMs = Date.parse(msg?.snippet?.publishedAt || '');
+              startupRenderableMessages.push({
+                author,
+                text,
+                publishedAtMs: Number.isFinite(publishedAtMs) ? publishedAtMs : now
+              });
+            }
 
             const avatarUrl = msg?.authorDetails?.profileImageUrl || null;
             rememberUserProfile({
@@ -396,15 +407,18 @@
           state.isFirstPoll = false;
           console.log(`Initial sync: received ${messages.length} message(s), startup backlog=${startupBacklogCount}.`);
 
+          // Always render startup chat in UI so reload shows recent context,
+          // while backlog count controls only what gets spoken.
+          startupRenderableMessages.forEach(({ author, text }) => {
+            addChatMessage(author, text, 'youtube', false);
+          });
+
           let replayed = 0;
           if (startupBacklogCount > 0) {
-            const replayCandidates = messages.slice(-startupBacklogCount);
+            const replayCandidates = startupRenderableMessages.slice(-startupBacklogCount);
             for (const msg of replayCandidates) {
-              const author = msg?.authorDetails?.displayName;
-              const text = msg?.snippet?.displayMessage;
-              if (!author || !text) continue;
-              await autoAssignVoiceIfNeeded(author, 'youtube');
-              speakText(author, text, 'youtube');
+              await autoAssignVoiceIfNeeded(msg.author, 'youtube');
+              speakText(msg.author, msg.text, 'youtube', false);
               replayed += 1;
             }
           }
