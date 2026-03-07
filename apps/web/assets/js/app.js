@@ -694,8 +694,64 @@ function updateStatus(message, isActive = false, isError = false) {
   chatUiController?.updateStatus(message, isActive, isError);
 }
 
+function normalizeOverlayChatText(text, { allowHtml = false, replayText = undefined, extraClass = '' } = {}) {
+  let candidate = '';
+
+  if (replayText === null) {
+    candidate = '';
+  } else if (replayText !== undefined) {
+    candidate = String(replayText ?? '');
+  } else if (allowHtml) {
+    candidate = String(text ?? '').replace(/<[^>]+>/g, ' ');
+  } else {
+    candidate = String(text ?? '');
+  }
+
+  candidate = candidate.replace(/\s+/g, ' ').trim();
+  if (!candidate && String(extraClass || '').includes('sticker')) {
+    return '[Sticker]';
+  }
+  return candidate;
+}
+
+function broadcastChatMessageToOverlay(author, text, platform, {
+  allowHtml = false,
+  replayText = undefined,
+  extraClass = ''
+} = {}) {
+  const normalizedPlatform = String(platform || '').toLowerCase();
+  if (normalizedPlatform !== 'youtube' && normalizedPlatform !== 'tiktok') return;
+
+  const normalizedAuthor = String(author || '').trim();
+  if (!normalizedAuthor) return;
+
+  const normalizedText = normalizeOverlayChatText(text, { allowHtml, replayText, extraClass });
+  if (!normalizedText) return;
+
+  const displayName = getUserDisplayName(normalizedAuthor, normalizedPlatform) || normalizedAuthor;
+  const avatar = window.userAvatars?.get?.(`${normalizedPlatform}:${normalizedAuthor}`) || null;
+
+  fetch('/api/overlay/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      platform: normalizedPlatform,
+      author: normalizedAuthor,
+      displayName,
+      avatar,
+      text: normalizedText,
+      timestamp: Date.now()
+    })
+  }).catch((err) => {
+    console.debug('Chat overlay broadcast skipped:', err?.message || err);
+  });
+}
+
 function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, extraClass = '', allowHtml = false, replayText = undefined) {
   chatUiController?.addChatMessage(author, text, platform, isSpeaking, extraClass, allowHtml, replayText);
+  if (author !== 'SYSTEM') {
+    broadcastChatMessageToOverlay(author, text, platform, { allowHtml, replayText, extraClass });
+  }
 }
 
 function escapeHtml(text) {

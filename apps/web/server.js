@@ -232,6 +232,9 @@ let giftOverlayClients = [];
 let likerLeaderboard = new Map(); // username → like count
 let likerUserInfo = new Map(); // username → { nickname, avatar }
 let likerLeaderboardClients = [];
+let chatOverlayClients = [];
+let chatOverlayHistory = [];
+const CHAT_OVERLAY_HISTORY_LIMIT = 80;
 let animationOverlayClients = []; // SSE clients for animation overlay
 let tiktokViewerCount = 0;
 let tiktokTopViewers = [];
@@ -624,6 +627,65 @@ app.get('/overlay/likers/stream', (req, res) => {
     });
 });
 
+// SSE endpoint for unified chat overlay (YouTube + TikTok)
+app.get('/overlay/chat/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    chatOverlayClients.push(res);
+
+    // Send recent messages immediately so newly opened OBS sources are not empty.
+    res.write(`data: ${JSON.stringify({ type: 'snapshot', messages: chatOverlayHistory })}\n\n`);
+
+    req.on('close', () => {
+        const index = chatOverlayClients.indexOf(res);
+        if (index > -1) chatOverlayClients.splice(index, 1);
+    });
+});
+
+app.post('/api/overlay/chat', (req, res) => {
+    const platform = String(req.body?.platform || '').toLowerCase();
+    if (platform !== 'youtube' && platform !== 'tiktok') {
+        return res.status(400).json({ error: 'Invalid platform' });
+    }
+
+    const author = String(req.body?.author || '').trim();
+    const displayName = String(req.body?.displayName || author).trim() || author;
+    const text = String(req.body?.text || '').replace(/\s+/g, ' ').trim();
+    if (!author || !text) {
+        return res.status(400).json({ error: 'author and text are required' });
+    }
+
+    const avatarRaw = req.body?.avatar;
+    const avatar = typeof avatarRaw === 'string' && avatarRaw.trim() ? avatarRaw.trim() : null;
+    const event = {
+        type: 'message',
+        platform,
+        author,
+        displayName,
+        avatar,
+        text: text.slice(0, 400),
+        timestamp: Number.isFinite(Number(req.body?.timestamp)) ? Number(req.body.timestamp) : Date.now()
+    };
+
+    chatOverlayHistory.push(event);
+    if (chatOverlayHistory.length > CHAT_OVERLAY_HISTORY_LIMIT) {
+        chatOverlayHistory = chatOverlayHistory.slice(-CHAT_OVERLAY_HISTORY_LIMIT);
+    }
+
+    const payload = JSON.stringify(event);
+    chatOverlayClients.forEach(client => {
+        try {
+            client.write(`data: ${payload}\n\n`);
+        } catch (err) {
+            console.error('Chat overlay broadcast error:', err);
+        }
+    });
+
+    res.json({ success: true, clients: chatOverlayClients.length });
+});
+
 // Helper functions
 function broadcastToGiftOverlay(giftData) {
     const data = JSON.stringify(giftData);
@@ -671,6 +733,10 @@ app.get('/overlay/gifts', (req, res) => {
 
 app.get('/overlay/likers', (req, res) => {
     res.sendFile(path.join(__dirname, 'overlays', 'likers.html'));
+});
+
+app.get('/overlay/chat', (req, res) => {
+    res.sendFile(path.join(__dirname, 'overlays', 'chat.html'));
 });
 
 // Sound effects management

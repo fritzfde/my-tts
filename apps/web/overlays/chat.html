@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Unified Chat Overlay</title>
+    <style>
+        :root {
+            --yt: #ff2f5e;
+            --tt: #00f2ea;
+            --fg: #f8fafc;
+            --muted: rgba(226, 232, 240, 0.78);
+            --card: rgba(8, 12, 20, 0.74);
+            --border: rgba(148, 163, 184, 0.36);
+            --size: min(100vw, 100vh);
+            --text-scale: 3;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            background: transparent;
+            font-family: "Trebuchet MS", "Segoe UI", "Noto Sans", sans-serif;
+            color: var(--fg);
+        }
+
+        .overlay-shell {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            width: var(--size);
+            height: var(--size);
+            transform: translate(-50%, -50%);
+            padding: 12px;
+            pointer-events: none;
+        }
+
+        .chat-card {
+            width: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-rows: auto 1fr;
+            border-radius: 22px;
+            border: 1px solid var(--border);
+            background:
+                radial-gradient(circle at 15% -5%, rgba(255, 47, 94, 0.18), transparent 34%),
+                radial-gradient(circle at 105% 0%, rgba(0, 242, 234, 0.16), transparent 32%),
+                linear-gradient(160deg, rgba(15, 23, 42, 0.92), var(--card));
+            backdrop-filter: blur(10px);
+            overflow: hidden;
+            box-shadow: 0 20px 48px rgba(2, 6, 23, 0.48);
+        }
+
+        .header {
+            padding: 22px 24px 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.22);
+        }
+
+        .title {
+            font-size: calc(0.92rem * var(--text-scale));
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #e2e8f0;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 14px;
+            font-size: calc(0.72rem * var(--text-scale));
+            color: var(--muted);
+        }
+
+        .status-dot {
+            width: 16px;
+            height: 16px;
+            border-radius: 999px;
+            background: #ef4444;
+            transition: background-color 0.2s ease;
+        }
+
+        .status-dot.online {
+            background: #22c55e;
+        }
+
+        .messages {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            gap: 12px;
+            padding: 16px;
+            overflow: hidden;
+        }
+
+        .message {
+            border-radius: 12px;
+            padding: 14px 16px;
+            background: rgba(15, 23, 42, 0.74);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            box-shadow: 0 8px 18px rgba(2, 6, 23, 0.22);
+            animation: riseIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 156px;
+            height: 54px;
+            border-radius: 999px;
+            font-size: calc(0.62rem * var(--text-scale));
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #0b1220;
+            background: var(--yt);
+        }
+
+        .badge.tiktok {
+            background: var(--tt);
+        }
+
+        .name {
+            font-size: calc(0.76rem * var(--text-scale));
+            font-weight: 700;
+            color: #f8fafc;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+        }
+
+        .time {
+            font-size: calc(0.63rem * var(--text-scale));
+            color: rgba(203, 213, 225, 0.64);
+            flex: none;
+        }
+
+        .text {
+            font-size: calc(0.82rem * var(--text-scale));
+            line-height: 1.32;
+            color: #e2e8f0;
+            word-break: break-word;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .empty {
+            margin: auto 0;
+            text-align: center;
+            font-size: calc(0.84rem * var(--text-scale));
+            color: rgba(203, 213, 225, 0.74);
+            border: 1px dashed rgba(148, 163, 184, 0.3);
+            border-radius: 12px;
+            padding: 26px 18px;
+            background: rgba(15, 23, 42, 0.45);
+        }
+
+        @keyframes riseIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="overlay-shell">
+    <div class="chat-card">
+        <div class="header">
+            <div class="title">Live Multi Chat</div>
+            <div class="status">
+                <span id="statusDot" class="status-dot"></span>
+                <span id="statusText">offline</span>
+            </div>
+        </div>
+        <div id="messages" class="messages">
+            <div class="empty">Waiting for chat messages...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const MAX_MESSAGES = (() => {
+        const raw = Number(new URLSearchParams(window.location.search).get('limit'));
+        if (!Number.isFinite(raw)) return 14;
+        return Math.max(4, Math.min(30, Math.floor(raw)));
+    })();
+
+    const messagesEl = document.getElementById('messages');
+    const statusDotEl = document.getElementById('statusDot');
+    const statusTextEl = document.getElementById('statusText');
+    const messages = [];
+
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = String(value ?? '');
+        return div.innerHTML;
+    }
+
+    function formatTime(timestamp) {
+        const date = new Date(Number(timestamp) || Date.now());
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function render() {
+        if (messages.length === 0) {
+            messagesEl.innerHTML = '<div class="empty">Waiting for chat messages...</div>';
+            return;
+        }
+
+        messagesEl.innerHTML = messages.map((msg) => {
+            const platform = String(msg.platform || '').toLowerCase() === 'tiktok' ? 'tiktok' : 'youtube';
+            const displayName = msg.displayName || msg.author || 'Viewer';
+            return `
+                <div class="message">
+                    <div class="meta">
+                        <span class="badge ${platform}">${platform}</span>
+                        <span class="name" title="${escapeHtml(msg.author || displayName)}">${escapeHtml(displayName)}</span>
+                        <span class="time">${escapeHtml(formatTime(msg.timestamp))}</span>
+                    </div>
+                    <div class="text">${escapeHtml(msg.text || '')}</div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function pushMessage(message) {
+        if (!message || !message.text) return;
+        messages.push({
+            platform: message.platform,
+            author: String(message.author || '').trim(),
+            displayName: String(message.displayName || message.author || '').trim(),
+            text: String(message.text || '').trim(),
+            timestamp: Number.isFinite(Number(message.timestamp)) ? Number(message.timestamp) : Date.now()
+        });
+        while (messages.length > MAX_MESSAGES) messages.shift();
+        render();
+    }
+
+    function setConnectionStatus(online) {
+        if (online) {
+            statusDotEl.classList.add('online');
+            statusTextEl.textContent = 'online';
+        } else {
+            statusDotEl.classList.remove('online');
+            statusTextEl.textContent = 'offline';
+        }
+    }
+
+    const eventSource = new EventSource('/overlay/chat/stream');
+    eventSource.onopen = () => setConnectionStatus(true);
+    eventSource.onerror = () => setConnectionStatus(false);
+    eventSource.onmessage = (event) => {
+        try {
+            const payload = JSON.parse(event.data);
+            if (payload?.type === 'snapshot' && Array.isArray(payload.messages)) {
+                messages.length = 0;
+                payload.messages.slice(-MAX_MESSAGES).forEach(pushMessage);
+                return;
+            }
+            pushMessage(payload);
+        } catch (err) {
+            console.error('Chat overlay parse error:', err);
+        }
+    };
+</script>
+</body>
+</html>
