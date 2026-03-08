@@ -45,6 +45,32 @@
       return keys;
     }
 
+    function normalizeCustomSoundPath(pathValue) {
+      const raw = String(pathValue || '').trim();
+      if (!raw) return '';
+      if (raw.startsWith('/sounds/custom/')) {
+        return raw.replace('/sounds/custom/', '/sounds/');
+      }
+      return raw;
+    }
+
+    function normalizeSoundSelection(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+
+      if (raw.startsWith('custom-')) {
+        const normalizedPath = normalizeCustomSoundPath(raw.slice('custom-'.length));
+        return normalizedPath ? `custom-${normalizedPath}` : '';
+      }
+
+      if (raw.startsWith('/sounds/')) {
+        const normalizedPath = normalizeCustomSoundPath(raw);
+        return normalizedPath ? `custom-${normalizedPath}` : '';
+      }
+
+      return raw;
+    }
+
     function findByNameEntry(giftName) {
       if (!giftName && giftName !== 0) return null;
       if (Object.prototype.hasOwnProperty.call(state.byName, giftName)) {
@@ -78,7 +104,7 @@
 
       return {
         type: 'sound',
-        value: typeof action.value === 'string' ? action.value : ''
+        value: normalizeSoundSelection(action.value)
       };
     }
 
@@ -166,7 +192,7 @@
 
     function setDefaultSound(soundValue) {
       state.default.type = 'sound';
-      state.default.value = typeof soundValue === 'string' ? soundValue : '';
+      state.default.value = normalizeSoundSelection(soundValue);
     }
 
     function getDefaultAnimationAction() {
@@ -210,19 +236,30 @@
 
     function clearSoundReferences(soundValue) {
       if (!soundValue) return;
+      const normalizedTarget = normalizeSoundSelection(soundValue);
+      if (!normalizedTarget) return;
 
-      if (state.default?.type === 'sound' && state.default.value === soundValue) {
+      if (
+        state.default?.type === 'sound'
+        && normalizeSoundSelection(state.default.value) === normalizedTarget
+      ) {
         state.default.value = '';
       }
 
       Object.values(state.byName || {}).forEach((entry) => {
-        if (entry?.type === 'sound' && entry.value === soundValue) {
+        if (
+          entry?.type === 'sound'
+          && normalizeSoundSelection(entry.value) === normalizedTarget
+        ) {
           entry.value = '';
         }
       });
 
       Object.values(state.byValue || {}).forEach((entry) => {
-        if (entry?.type === 'sound' && entry.value === soundValue) {
+        if (
+          entry?.type === 'sound'
+          && normalizeSoundSelection(entry.value) === normalizedTarget
+        ) {
           entry.value = '';
         }
       });

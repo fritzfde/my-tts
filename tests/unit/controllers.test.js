@@ -45,7 +45,7 @@ test('gift mappings: round-robin + default sound cleanup', async () => {
   const controller = factory({ settingsStore });
 
   controller.state.byValue['5'] = { type: 'animation', value: ['alpha', 'beta'] };
-  controller.state.default = { type: 'sound', value: 'custom-/sounds/custom/x.wav' };
+  controller.state.default = { type: 'sound', value: 'custom-/sounds/x.wav' };
 
   const first = controller.getGiftAction('Rose', 5);
   const second = controller.getGiftAction('Rose', 5);
@@ -57,7 +57,7 @@ test('gift mappings: round-robin + default sound cleanup', async () => {
   assert.equal(third.type, 'animation');
   assert.equal(third.value, 'alpha');
 
-  controller.state.byName.Rose = { type: 'sound', value: 'custom-/sounds/custom/x.wav' };
+  controller.state.byName.Rose = { type: 'sound', value: 'custom-/sounds/x.wav' };
   controller.clearSoundReferences('custom-/sounds/custom/x.wav');
   assert.equal(controller.state.default.value, '');
   assert.equal(controller.state.byName.Rose.value, '');
@@ -118,26 +118,39 @@ test('presence: tracks users, viewer count, and prunes stale entries', async () 
     onlineTikTokCountEl: { textContent: '', title: '' }
   };
 
+  const joined = [];
+  const left = [];
   const controller = factory({
     elements,
     ttlMsByPlatform: { youtube: 120000, tiktok: 45000 },
     initialTikTokTtlMs: 45000,
-    resolveDisplayName: ({ displayName, username }) => displayName || username
+    resolveDisplayName: ({ displayName, username }) => displayName || username,
+    onUserJoined: (payload) => joined.push(payload),
+    onUserLeft: (payload) => left.push(payload)
   });
 
   const now = Date.now();
   controller.markUserOnline('yt-user', 'youtube', { displayName: 'YT User', lastSeen: now });
   controller.markUserOnline('tt-user', 'tiktok', { displayName: 'TT User', lastSeen: now });
+  controller.markUserOnline('tt-user', 'tiktok', { displayName: 'TT User', lastSeen: now + 1000 });
   controller.setTikTokViewerCount(12);
   controller.render();
 
   assert.equal(elements.onlineYouTubeCountEl.textContent, '1');
   assert.equal(elements.onlineTikTokCountEl.textContent, '1');
   assert.match(elements.onlineTikTokCountEl.title, /Live viewer count: 12/);
+  assert.equal(joined.length, 2);
 
   controller.onlineUsers.youtube.set('stale', { displayName: 'Stale', lastSeen: now - 999999 });
   controller.render();
   assert.equal(controller.onlineUsers.youtube.has('stale'), false);
+  assert.equal(left.length, 1);
+  assert.equal(left[0].username, 'stale');
+
+  const VmMap = controller.onlineUsers.tiktok.constructor;
+  controller.setPlatformUsers('tiktok', new VmMap(), { emitLifecycleEvents: true });
+  assert.equal(left.length, 2);
+  assert.equal(left[1].username, 'tt-user');
 });
 
 test('sticker mappings: assignment uniqueness and trigger handling', async () => {

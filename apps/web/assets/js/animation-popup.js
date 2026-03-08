@@ -110,6 +110,18 @@
       const isDefaultGiftAnimation = helpers.isDefaultGiftAnimationTrigger
         ? helpers.isDefaultGiftAnimationTrigger(trigger)
         : false;
+      const followTrigger = helpers.getEventAnimationTrigger
+        ? helpers.getEventAnimationTrigger('follow')
+        : '';
+      const shareTrigger = helpers.getEventAnimationTrigger
+        ? helpers.getEventAnimationTrigger('share')
+        : '';
+      const joinTrigger = helpers.getEventAnimationTrigger
+        ? helpers.getEventAnimationTrigger('join')
+        : '';
+      const leaveTrigger = helpers.getEventAnimationTrigger
+        ? helpers.getEventAnimationTrigger('leave')
+        : '';
 
       stateRef.activePopup = { trigger, filename };
 
@@ -120,6 +132,18 @@
       if (elements.animationPopupGiftValue) elements.animationPopupGiftValue.value = currentGiftValue;
       if (typeof callbacks.populateAnimationPopupStickerOptions === 'function') {
         callbacks.populateAnimationPopupStickerOptions(currentStickerKey);
+      }
+      if (elements.animationPopupMapFollow) {
+        elements.animationPopupMapFollow.checked = followTrigger === trigger;
+      }
+      if (elements.animationPopupMapShare) {
+        elements.animationPopupMapShare.checked = shareTrigger === trigger;
+      }
+      if (elements.animationPopupMapJoin) {
+        elements.animationPopupMapJoin.checked = joinTrigger === trigger;
+      }
+      if (elements.animationPopupMapLeave) {
+        elements.animationPopupMapLeave.checked = leaveTrigger === trigger;
       }
       if (elements.animationPopupMakeDefault) elements.animationPopupMakeDefault.checked = isDefaultGiftAnimation;
       elements.animationCardPopup.style.display = 'flex';
@@ -158,6 +182,10 @@
         return;
       }
 
+      const mapFollowToAnimation = Boolean(elements.animationPopupMapFollow?.checked);
+      const mapShareToAnimation = Boolean(elements.animationPopupMapShare?.checked);
+      const mapJoinToAnimation = Boolean(elements.animationPopupMapJoin?.checked);
+      const mapLeaveToAnimation = Boolean(elements.animationPopupMapLeave?.checked);
       const makeDefaultGiftAnimation = Boolean(elements.animationPopupMakeDefault?.checked);
       const nextGiftValue = hasGiftValueInput ? String(Math.floor(parsedGiftValue)) : '';
       const nextStickerKey = elements.animationPopupSticker ? elements.animationPopupSticker.value : '';
@@ -179,6 +207,7 @@
 
       callbacks.moveGiftAnimationReferences?.(oldTrigger, uniqueTrigger);
       callbacks.moveStickerAnimationReferences?.(oldTrigger, uniqueTrigger);
+      callbacks.moveEventAnimationReferences?.(oldTrigger, uniqueTrigger);
 
       if (oldTrigger !== uniqueTrigger) {
         delete mappings[oldTrigger];
@@ -205,10 +234,48 @@
         callbacks.removeDefaultGiftAnimationReference?.(uniqueTrigger);
       }
 
+      const previousFollowTrigger = helpers.getEventAnimationTrigger
+        ? helpers.getEventAnimationTrigger('follow')
+        : '';
+      const previousShareTrigger = helpers.getEventAnimationTrigger
+        ? helpers.getEventAnimationTrigger('share')
+        : '';
+      const previousJoinTrigger = helpers.getEventAnimationTrigger
+        ? helpers.getEventAnimationTrigger('join')
+        : '';
+      const previousLeaveTrigger = helpers.getEventAnimationTrigger
+        ? helpers.getEventAnimationTrigger('leave')
+        : '';
+
+      if (mapFollowToAnimation) {
+        callbacks.setEventAnimationTrigger?.('follow', uniqueTrigger);
+      } else if (previousFollowTrigger === oldTrigger || previousFollowTrigger === uniqueTrigger) {
+        callbacks.setEventAnimationTrigger?.('follow', '');
+      }
+
+      if (mapShareToAnimation) {
+        callbacks.setEventAnimationTrigger?.('share', uniqueTrigger);
+      } else if (previousShareTrigger === oldTrigger || previousShareTrigger === uniqueTrigger) {
+        callbacks.setEventAnimationTrigger?.('share', '');
+      }
+
+      if (mapJoinToAnimation) {
+        callbacks.setEventAnimationTrigger?.('join', uniqueTrigger);
+      } else if (previousJoinTrigger === oldTrigger || previousJoinTrigger === uniqueTrigger) {
+        callbacks.setEventAnimationTrigger?.('join', '');
+      }
+
+      if (mapLeaveToAnimation) {
+        callbacks.setEventAnimationTrigger?.('leave', uniqueTrigger);
+      } else if (previousLeaveTrigger === oldTrigger || previousLeaveTrigger === uniqueTrigger) {
+        callbacks.setEventAnimationTrigger?.('leave', '');
+      }
+
       callbacks.setStickerForAnimationTrigger?.(uniqueTrigger, nextStickerKey);
 
       await callbacks.saveAnimationMappings?.();
       callbacks.saveGiftMappings?.();
+      callbacks.saveEventAnimationMappings?.();
       callbacks.saveStickerMappings?.();
       callbacks.renderGiftMappings?.();
       callbacks.renderAnimationMappings?.();
@@ -243,12 +310,14 @@
             : '';
           if (file !== filename) return;
           callbacks.removeGiftAnimationReferences?.(trigger);
+          callbacks.removeEventAnimationReferences?.(trigger);
           callbacks.removeStickerAnimationReferences?.(trigger);
           delete mappings[trigger];
         });
 
         await callbacks.saveAnimationMappings?.();
         callbacks.saveGiftMappings?.();
+        callbacks.saveEventAnimationMappings?.();
         callbacks.saveStickerMappings?.();
         callbacks.renderGiftMappings?.();
         await callbacks.loadAvailableAnimations?.();

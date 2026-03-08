@@ -1,4 +1,10 @@
 const settingsStore = window.settingsStore;
+const collapsibleSectionsController = window.createCollapsibleSectionsController({
+  windowRef: window,
+  documentRef: document,
+  settingsStore
+});
+collapsibleSectionsController.init();
 
 // TTS Configuration
 const synth = window.speechSynthesis;
@@ -96,7 +102,7 @@ if (!window.userAvatars) {
 }
 
 let audioRuntimeController = null;
-let giftSoundsController = null;
+let soundAlertsController = null;
 let animationPermissionsUiController = null;
 let dashboardSettingsController = null;
 let chatUiController = null;
@@ -208,6 +214,8 @@ const rateSelect = document.getElementById('rateSelect');
 const pitchSelect = document.getElementById('pitchSelect');
 const volumeSlider = document.getElementById('volumeSlider');
 const volumeValue = document.getElementById('volumeValue');
+const soundAlertsVolumeSlider = document.getElementById('soundAlertsVolumeSlider');
+const soundAlertsVolumeValue = document.getElementById('soundAlertsVolumeValue');
 const readUsernamesCheckbox = document.getElementById('readUsernames');
 const readEmojisCheckbox = document.getElementById('readEmojis');
 const readLinksCheckbox = document.getElementById('readLinks');
@@ -344,6 +352,29 @@ const ONLINE_USER_TTL_BY_PLATFORM_MS = {
   tiktok: 45000
 };
 
+function handlePresenceLifecycleAlert(eventType, payload = {}) {
+  const normalizedEventType = String(eventType || '').trim().toLowerCase();
+  if (normalizedEventType !== 'join' && normalizedEventType !== 'leave') return;
+
+  const username = String(payload.username || '').trim();
+  const platform = String(payload.platform || '').trim().toLowerCase();
+  if (!username || !platform) return;
+
+  const eventTrigger = getEventAnimationTrigger(normalizedEventType);
+  if (eventTrigger && canUserTriggerAnimations(username, platform)) {
+    triggerAnimation(eventTrigger, platform, username, normalizedEventType);
+  }
+
+  const soundPath = resolveSoundAlert({
+    type: normalizedEventType,
+    platform,
+    username
+  });
+  if (soundPath) {
+    playAlertSound(soundPath);
+  }
+}
+
 const presenceController = window.createPresenceController({
   elements: {
     onlineYouTubeUsersEl,
@@ -360,7 +391,9 @@ const presenceController = window.createPresenceController({
     );
     rememberUserDisplayName(username, platform, resolved);
     return resolved;
-  }
+  },
+  onUserJoined: (payload) => handlePresenceLifecycleAlert('join', payload),
+  onUserLeft: (payload) => handlePresenceLifecycleAlert('leave', payload)
 });
 const onlineUsers = presenceController.onlineUsers;
 
@@ -472,7 +505,9 @@ dashboardSettingsController = window.createDashboardSettingsController({
     testMessageInput,
     voicePreviewTextInput: document.getElementById('voicePreviewText'),
     volumeSlider,
-    volumeValue
+    volumeValue,
+    soundAlertsVolumeSlider,
+    soundAlertsVolumeValue
   },
   defaults: {
     defaultApiKeys: ['AIzaSyAWVq4gtDP4rYaWKHH_2TvzBjxfRBr6kBE'],
@@ -480,7 +515,8 @@ dashboardSettingsController = window.createDashboardSettingsController({
     defaultStartupBacklog: '0',
     defaultYouTubeStartupBacklog: '0',
     defaultTestMessage: DEFAULT_TEST_MESSAGE,
-    defaultVolume: '100'
+    defaultVolume: '100',
+    defaultSoundAlertsVolume: '100'
   },
   callbacks: {
     setApiKeys: (keys) => apiKeyManagerController.setKeys(keys, { resetIndex: true }),
@@ -825,10 +861,11 @@ tiktokController = window.createTikTokController({
   speakText,
   getGiftAction,
   triggerAnimation,
+  getEventAnimationTrigger,
+  resolveSoundAlert,
+  playAlertSound,
+  registerKnownGiftName,
   playSpecificSound,
-  playGiftSound: () => {
-    if (window.playGiftSound) window.playGiftSound();
-  },
   getStartupBacklogCount: () => getStartupBacklogCount(),
   buildStickerChatListHtml,
   handleStickerAnimation,
@@ -1005,7 +1042,7 @@ startupOrchestratorController = window.createStartupOrchestratorController({
 });
 startupOrchestratorController.init();
 
-// ─── Gift Sounds (module) ────────────────────────────────────────────
+// ─── Sound Alerts (module) ───────────────────────────────────────────
 
 // ─── AI-Powered Gender Detection & Voice Assignment ─────────────────
 
@@ -1068,31 +1105,12 @@ async function autoAssignVoiceIfNeeded(author, platform) {
   return ollamaGenderController?.autoAssignVoiceIfNeeded(author, platform);
 }
 
-function playGiftSound() {
-  giftSoundsController?.playGiftSound();
-}
-
-function playBuiltInSound(type) {
-  giftSoundsController?.playBuiltInSound(type);
-}
-
-async function loadCustomSounds(selectedSoundOverride = '') {
-  return giftSoundsController?.loadCustomSounds(selectedSoundOverride);
-}
-
 function playSpecificSound(soundId) {
-  giftSoundsController?.playSpecificSound(soundId);
-}
-
-function populateGiftSoundOptions(selectElement, selectedValue) {
-  giftSoundsController?.populateGiftSoundOptions(selectElement, selectedValue);
+  return soundAlertsController?.playSound(soundId);
 }
 
 function renderGiftMappings() {
-  const defaultValue = document.getElementById('defaultGiftValue');
-  giftMappingsController.setDefaultSound(giftMappings.default?.value || '');
-  if (!defaultValue) return;
-  populateGiftSoundOptions(defaultValue, giftMappings.default.value);
+  soundAlertsController?.renderRules();
 }
 
 
@@ -1102,31 +1120,255 @@ function renderGiftMappings() {
 
 const giftMappingsController = window.createGiftMappingsController({ settingsStore });
 const giftMappings = giftMappingsController.state;
+const eventAnimationMappings = {
+  follow: '',
+  share: '',
+  join: '',
+  leave: ''
+};
 
-giftSoundsController = window.createGiftSoundsController({
+function normalizeEventAnimationMappings(raw) {
+  const next = (raw && typeof raw === 'object') ? raw : {};
+  return {
+    follow: String(next.follow || '').trim(),
+    share: String(next.share || '').trim(),
+    join: String(next.join || '').trim(),
+    leave: String(next.leave || '').trim()
+  };
+}
+
+function loadEventAnimationMappings() {
+  const saved = settingsStore.getItem('event_animation_mappings');
+  if (!saved) return;
+  try {
+    const parsed = JSON.parse(saved);
+    const normalized = normalizeEventAnimationMappings(parsed);
+    eventAnimationMappings.follow = normalized.follow;
+    eventAnimationMappings.share = normalized.share;
+  } catch (err) {
+    console.error('Error loading event animation mappings:', err);
+  }
+}
+
+function saveEventAnimationMappings() {
+  settingsStore.setItem('event_animation_mappings', JSON.stringify(eventAnimationMappings));
+}
+
+function getEventAnimationTrigger(eventType) {
+  const key = String(eventType || '').trim().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(eventAnimationMappings, key)) return '';
+  return String(eventAnimationMappings[key] || '').trim();
+}
+
+function setEventAnimationTrigger(eventType, trigger) {
+  const key = String(eventType || '').trim().toLowerCase();
+  if (!Object.prototype.hasOwnProperty.call(eventAnimationMappings, key)) return;
+  eventAnimationMappings[key] = String(trigger || '').trim();
+}
+
+function moveEventAnimationReferences(oldTrigger, newTrigger) {
+  if (!oldTrigger || !newTrigger || oldTrigger === newTrigger) return;
+  Object.keys(eventAnimationMappings).forEach((eventType) => {
+    if (eventAnimationMappings[eventType] === oldTrigger) {
+      eventAnimationMappings[eventType] = newTrigger;
+    }
+  });
+}
+
+function removeEventAnimationReferences(trigger) {
+  if (!trigger) return;
+  Object.keys(eventAnimationMappings).forEach((eventType) => {
+    if (eventAnimationMappings[eventType] === trigger) {
+      eventAnimationMappings[eventType] = '';
+    }
+  });
+}
+
+function resolveAnimationForSoundRule(rule) {
+  if (!rule) return '';
+
+  const normalizeRuleGiftName = (value) => String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+  const normalizeRuleGiftValue = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return '';
+    return String(Math.floor(parsed));
+  };
+
+  if (rule.eventType === 'gift_any') {
+    const defaultAction = giftMappingsController.getDefaultAnimationAction();
+    return toAnimationTriggerList(defaultAction?.value);
+  }
+
+  if (rule.eventType === 'gift_name') {
+    const target = normalizeRuleGiftName(rule.eventValue);
+    if (!target) return [];
+    for (const [giftName, action] of Object.entries(giftMappings.byName || {})) {
+      if (normalizeRuleGiftName(giftName) !== target) continue;
+      const normalized = normalizeGiftAction(action);
+      if (normalized.type !== 'animation') return [];
+      return toAnimationTriggerList(normalized.value);
+    }
+    return [];
+  }
+
+  if (rule.eventType === 'gift_value') {
+    const targetValue = normalizeRuleGiftValue(rule.eventValue);
+    if (!targetValue) return [];
+    const action = giftMappings.byValue?.[targetValue];
+    const normalized = normalizeGiftAction(action);
+    if (normalized.type !== 'animation') return [];
+    return toAnimationTriggerList(normalized.value);
+  }
+
+  if (rule.eventType === 'follow' || rule.eventType === 'share' || rule.eventType === 'join' || rule.eventType === 'leave') {
+    const trigger = getEventAnimationTrigger(rule.eventType);
+    return trigger ? [trigger] : [];
+  }
+
+  return [];
+}
+
+function getSoundAlertAnimationTriggerOptions() {
+  try {
+    return Object.keys(animationMappings || {}).sort((a, b) => a.localeCompare(b));
+  } catch (err) {
+    // Sound alerts can initialize before animation mappings are declared.
+    return [];
+  }
+}
+
+function assignAnimationToSoundRule(rule, trigger) {
+  if (!rule) return { ok: false, message: 'Rule not found' };
+  const normalizedTrigger = String(trigger || '').trim();
+  if (!normalizedTrigger) return { ok: false, message: 'Select animation first' };
+
+  const normalizeRuleGiftValue = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return '';
+    return String(Math.floor(parsed));
+  };
+
+  if (rule.eventType === 'gift_any') {
+    giftMappingsController.setDefaultAnimationAction({ type: 'animation', value: normalizedTrigger });
+    saveGiftMappings();
+    renderAnimationMappings();
+    return { ok: true };
+  }
+
+  if (rule.eventType === 'gift_name') {
+    const key = String(rule.eventValue || '').trim();
+    if (!key) return { ok: false, message: 'Set gift name first' };
+    giftMappings.byName[key] = { type: 'animation', value: normalizedTrigger };
+    saveGiftMappings();
+    renderAnimationMappings();
+    return { ok: true };
+  }
+
+  if (rule.eventType === 'gift_value') {
+    const key = normalizeRuleGiftValue(rule.eventValue);
+    if (!key) return { ok: false, message: 'Set gift diamond value first' };
+    giftMappings.byValue[key] = { type: 'animation', value: normalizedTrigger };
+    saveGiftMappings();
+    renderAnimationMappings();
+    return { ok: true };
+  }
+
+  if (rule.eventType === 'follow' || rule.eventType === 'share' || rule.eventType === 'join' || rule.eventType === 'leave') {
+    setEventAnimationTrigger(rule.eventType, normalizedTrigger);
+    saveEventAnimationMappings();
+    renderAnimationMappings();
+    return { ok: true };
+  }
+
+  return { ok: false, message: 'Unsupported event type' };
+}
+
+function clearAnimationForSoundRule(rule) {
+  if (!rule) return { ok: false, message: 'Rule not found' };
+
+  const normalizeRuleGiftValue = (value) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) return '';
+    return String(Math.floor(parsed));
+  };
+
+  if (rule.eventType === 'gift_any') {
+    giftMappingsController.setDefaultAnimationAction({ type: 'animation', value: '' });
+    saveGiftMappings();
+    renderAnimationMappings();
+    return { ok: true };
+  }
+
+  if (rule.eventType === 'gift_name') {
+    const key = String(rule.eventValue || '').trim();
+    if (!key) return { ok: false, message: 'Set gift name first' };
+    delete giftMappings.byName[key];
+    saveGiftMappings();
+    renderAnimationMappings();
+    return { ok: true };
+  }
+
+  if (rule.eventType === 'gift_value') {
+    const key = normalizeRuleGiftValue(rule.eventValue);
+    if (!key) return { ok: false, message: 'Set gift diamond value first' };
+    delete giftMappings.byValue[key];
+    saveGiftMappings();
+    renderAnimationMappings();
+    return { ok: true };
+  }
+
+  if (rule.eventType === 'follow' || rule.eventType === 'share' || rule.eventType === 'join' || rule.eventType === 'leave') {
+    setEventAnimationTrigger(rule.eventType, '');
+    saveEventAnimationMappings();
+    renderAnimationMappings();
+    return { ok: true };
+  }
+
+  return { ok: false, message: 'Unsupported event type' };
+}
+
+soundAlertsController = window.createSoundAlertsController({
   windowRef: window,
   documentRef: document,
-  navigatorRef: navigator,
   settingsStore,
   elements: {
-    giftSoundSelect: document.getElementById('giftSoundSelect'),
-    customSoundUpload: document.getElementById('customSoundUpload'),
-    uploadSoundBtn: document.getElementById('uploadSoundBtn'),
-    customSoundManageSelect: document.getElementById('customSoundManageSelect'),
-    deleteCustomSoundBtn: document.getElementById('deleteCustomSoundBtn'),
-    volumeSlider
+    soundLibraryUploadInput: document.getElementById('soundLibraryUploadInput'),
+    soundLibraryUploadBtn: document.getElementById('soundLibraryUploadBtn'),
+    soundLibraryCards: document.getElementById('soundLibraryCards'),
+    addSoundAlertRuleBtn: document.getElementById('addSoundAlertRuleBtn'),
+    refreshTikTokGiftsBtn: document.getElementById('refreshTikTokGiftsBtn'),
+    soundAlertRulesBody: document.getElementById('soundAlertRulesBody'),
+    soundAlertGiftNamesDatalist: document.getElementById('soundAlertGiftNamesDatalist')
   },
   callbacks: {
     updateStatus: (...args) => updateStatus(...args),
-    renderGiftMappings: () => renderGiftMappings(),
-    saveGiftMappings: () => saveGiftMappings(),
-    clearSoundReferences: (value) => giftMappingsController.clearSoundReferences(value),
-    ensureAudioContext: () => ensureAudioContext()
+    getVolume: () => Number(soundAlertsVolumeSlider?.value || 100) / 100,
+    resolveAnimationForRule: (rule) => resolveAnimationForSoundRule(rule),
+    getAnimationTriggerOptions: () => getSoundAlertAnimationTriggerOptions(),
+    assignAnimationForRule: (rule, trigger) => assignAnimationToSoundRule(rule, trigger),
+    clearAnimationForRule: (rule) => clearAnimationForSoundRule(rule),
+    fetchKnownGiftNames: async () => {
+      try {
+        const response = await fetch('/api/tiktok/gifts');
+        if (!response.ok) return [];
+        const data = await response.json();
+        const gifts = Array.isArray(data?.gifts) ? data.gifts : [];
+        return gifts
+          .map((gift) => String(gift?.name || '').trim())
+          .filter(Boolean);
+      } catch (err) {
+        console.warn('Failed to fetch known TikTok gifts:', err);
+        return [];
+      }
+    }
   },
   fetchFn: (...args) => fetch(...args),
   confirmFn: (message) => window.confirm(message)
 });
-giftSoundsController.init();
+soundAlertsController.init();
 
 function toAnimationTriggerList(value) {
   return giftMappingsController.toAnimationTriggerList(value);
@@ -1138,6 +1380,7 @@ function normalizeGiftAction(action) {
 
 function loadGiftMappings() {
   giftMappingsController.load();
+  loadEventAnimationMappings();
   renderGiftMappings();
 }
 
@@ -1149,6 +1392,18 @@ function getGiftAction(giftName, diamondCount) {
   return giftMappingsController.getGiftAction(giftName, diamondCount);
 }
 
+function resolveSoundAlert(event) {
+  return soundAlertsController?.resolveSoundForEvent(event) || '';
+}
+
+function playAlertSound(soundPath) {
+  return soundAlertsController?.playSound(soundPath);
+}
+
+function registerKnownGiftName(giftName) {
+  soundAlertsController?.registerGiftName(giftName);
+}
+
 // Initialize
 loadGiftMappings();
 
@@ -1156,21 +1411,6 @@ loadGiftMappings();
 setTimeout(() => {
   renderGiftMappings();
 }, 100);
-
-// Default gift sound event listener
-const defaultGiftValue = document.getElementById('defaultGiftValue');
-
-if (defaultGiftValue) {
-  giftMappingsController.setDefaultSound(giftMappings.default?.value || '');
-
-  defaultGiftValue.addEventListener('change', () => {
-    giftMappingsController.setDefaultSound(defaultGiftValue.value);
-    saveGiftMappings();
-    console.log('✓ Default gift sound changed to:', defaultGiftValue.value);
-  });
-
-  populateGiftSoundOptions(defaultGiftValue, giftMappings.default.value);
-}
 
 // ─── TikTok Sticker to Animation Mappings ───────────────────────────
 
@@ -1577,6 +1817,10 @@ function renderAnimationVisibilityBadges(trigger) {
   const stickerEntry = findFirstStickerEntryForAnimationTrigger(trigger);
   const stickerName = stickerEntry ? (stickerEntry.name || stickerEntry.key) : '';
   const isDefaultGiftAnimation = isDefaultGiftAnimationTrigger(trigger);
+  const isFollowAnimation = getEventAnimationTrigger('follow') === trigger;
+  const isShareAnimation = getEventAnimationTrigger('share') === trigger;
+  const isJoinAnimation = getEventAnimationTrigger('join') === trigger;
+  const isLeaveAnimation = getEventAnimationTrigger('leave') === trigger;
   const badges = [];
   let stickerCorner = '';
 
@@ -1601,6 +1845,22 @@ function renderAnimationVisibilityBadges(trigger) {
 
   if (isDefaultGiftAnimation) {
     badges.push('<span class="animation-visibility-badge default-gift" title="Included in default gift animation rotation (fallback when no name/value match)">Default</span>');
+  }
+
+  if (isFollowAnimation) {
+    badges.push('<span class="animation-visibility-badge gift-name" title="Triggered when a new follower/subscriber event arrives">👤 Follow</span>');
+  }
+
+  if (isShareAnimation) {
+    badges.push('<span class="animation-visibility-badge gift-value" title="Triggered when someone shares the stream">📤 Share</span>');
+  }
+
+  if (isJoinAnimation) {
+    badges.push('<span class="animation-visibility-badge gift-name" title="Triggered when a viewer joins the stream">🟢 Join</span>');
+  }
+
+  if (isLeaveAnimation) {
+    badges.push('<span class="animation-visibility-badge default-gift" title="Triggered when a viewer leaves the stream">🔴 Leave</span>');
   }
 
   if (badges.length === 0 && !stickerName) {
@@ -1703,15 +1963,18 @@ async function syncAnimationMappingsFromFiles({ showAlert = false } = {}) {
   if (changed) {
     triggerRenames.forEach(([fromTrigger, toTrigger]) => {
       moveGiftAnimationReferences(fromTrigger, toTrigger);
+      moveEventAnimationReferences(fromTrigger, toTrigger);
       moveStickerAnimationReferences(fromTrigger, toTrigger);
     });
     removedTriggers.forEach((trigger) => {
       removeGiftAnimationReferences(trigger);
+      removeEventAnimationReferences(trigger);
       removeStickerAnimationReferences(trigger);
     });
 
     await saveAnimationMappings();
     saveGiftMappings();
+    saveEventAnimationMappings();
     saveStickerMappings();
     renderGiftMappings();
   }
@@ -1831,6 +2094,10 @@ const animationPopupGiftName = document.getElementById('animationPopupGiftName')
 const animationPopupGiftValue = document.getElementById('animationPopupGiftValue');
 const animationPopupSticker = document.getElementById('animationPopupSticker');
 const animationPopupStickerPicker = document.getElementById('animationPopupStickerPicker');
+const animationPopupMapFollow = document.getElementById('animationPopupMapFollow');
+const animationPopupMapShare = document.getElementById('animationPopupMapShare');
+const animationPopupMapJoin = document.getElementById('animationPopupMapJoin');
+const animationPopupMapLeave = document.getElementById('animationPopupMapLeave');
 const animationPopupMakeDefault = document.getElementById('animationPopupMakeDefault');
 const animationPopupScaleUpBtn = document.getElementById('animationPopupScaleUpBtn');
 const animationPopupScaleDownBtn = document.getElementById('animationPopupScaleDownBtn');
@@ -1874,6 +2141,10 @@ const animationPopupController = window.createAnimationPopupController({
     animationPopupGiftName,
     animationPopupGiftValue,
     animationPopupSticker,
+    animationPopupMapFollow,
+    animationPopupMapShare,
+    animationPopupMapJoin,
+    animationPopupMapLeave,
     animationPopupMakeDefault,
     animationPopupScaleUpBtn,
     animationPopupScaleDownBtn,
@@ -1898,23 +2169,28 @@ const animationPopupController = window.createAnimationPopupController({
     findFirstGiftValueForAnimationTrigger,
     findStickerKeyForAnimationTrigger,
     isDefaultGiftAnimationTrigger,
+    getEventAnimationTrigger,
     getAnimationFileFromMapping
   },
   callbacks: {
     populateAnimationPopupStickerOptions,
     moveGiftAnimationReferences,
+    moveEventAnimationReferences,
     moveStickerAnimationReferences,
     removeGiftAnimationReferenceForKey,
     addGiftAnimationReference,
     addDefaultGiftAnimationReference,
     removeDefaultGiftAnimationReference,
+    setEventAnimationTrigger,
     setStickerForAnimationTrigger,
     saveAnimationMappings,
     saveGiftMappings,
+    saveEventAnimationMappings,
     saveStickerMappings,
     renderGiftMappings,
     renderAnimationMappings,
     removeGiftAnimationReferences,
+    removeEventAnimationReferences,
     removeStickerAnimationReferences,
     loadAvailableAnimations
   }

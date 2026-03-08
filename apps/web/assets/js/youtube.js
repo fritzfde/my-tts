@@ -410,7 +410,9 @@
           // Always render startup chat in UI so reload shows recent context,
           // while backlog count controls only what gets spoken.
           startupRenderableMessages.forEach(({ author, text }) => {
-            addChatMessage(author, text, 'youtube', false);
+            addChatMessage(author, text, 'youtube', false, '', false, undefined, {
+              emitPresenceLifecycle: false
+            });
           });
 
           let replayed = 0;

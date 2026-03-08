@@ -3,7 +3,9 @@
     elements,
     ttlMsByPlatform,
     initialTikTokTtlMs,
-    resolveDisplayName
+    resolveDisplayName,
+    onUserJoined,
+    onUserLeft
   }) {
     const state = {
       onlineUsers: {
@@ -30,12 +32,46 @@
       return Number(ttlMsByPlatform?.youtube || 120000);
     }
 
+    function emitUserJoined(platform, username, data = {}) {
+      if (typeof onUserJoined !== 'function') return;
+      try {
+        onUserJoined({
+          platform,
+          username,
+          displayName: data?.displayName || username,
+          avatar: data?.avatar || null,
+          source: data?.source || '',
+          lastSeen: data?.lastSeen || Date.now()
+        });
+      } catch (err) {
+        console.warn('Presence join callback failed:', err);
+      }
+    }
+
+    function emitUserLeft(platform, username, data = {}, reason = 'stale') {
+      if (typeof onUserLeft !== 'function') return;
+      try {
+        onUserLeft({
+          platform,
+          username,
+          displayName: data?.displayName || username,
+          avatar: data?.avatar || null,
+          source: data?.source || '',
+          lastSeen: data?.lastSeen || 0,
+          reason
+        });
+      } catch (err) {
+        console.warn('Presence leave callback failed:', err);
+      }
+    }
+
     function pruneOnlineUsers() {
       ['youtube', 'tiktok'].forEach((platform) => {
         const cutoff = Date.now() - getPlatformTtlMs(platform);
         state.onlineUsers[platform].forEach((value, username) => {
           if (!value || value.lastSeen < cutoff) {
             state.onlineUsers[platform].delete(username);
+            emitUserLeft(platform, username, value, 'stale');
           }
         });
       });
@@ -87,8 +123,14 @@
       renderPlatformList('tiktok', elements.onlineTikTokUsersEl, elements.onlineTikTokCountEl);
     }
 
-    function markUserOnline(username, platform, { displayName = '', avatar = null, lastSeen = Date.now() } = {}) {
+    function markUserOnline(username, platform, {
+      displayName = '',
+      avatar = null,
+      lastSeen = Date.now(),
+      emitLifecycleEvents = true
+    } = {}) {
       if (!username || !platform || !state.onlineUsers[platform]) return;
+      const isNewUser = !state.onlineUsers[platform].has(username);
 
       const resolvedDisplayName = resolveDisplayName({ username, platform, displayName });
       if (avatar) {
@@ -102,6 +144,15 @@
         avatar: avatar || existing.avatar || null,
         lastSeen: Number.isFinite(Number(lastSeen)) ? Number(lastSeen) : Date.now()
       });
+
+      if (isNewUser && emitLifecycleEvents !== false) {
+        emitUserJoined(platform, username, {
+          displayName: resolvedDisplayName,
+          avatar: avatar || existing.avatar || null,
+          source: existing?.source || '',
+          lastSeen
+        });
+      }
 
       render();
     }
@@ -135,8 +186,25 @@
       return state.tiktokOnlineUserTtlMs;
     }
 
-    function setPlatformUsers(platform, usersMap) {
+    function setPlatformUsers(platform, usersMap, options = {}) {
       if (!state.onlineUsers[platform] || !(usersMap instanceof Map)) return;
+      const previous = state.onlineUsers[platform];
+      const emitLifecycleEvents = options?.emitLifecycleEvents !== false;
+
+      if (emitLifecycleEvents) {
+        usersMap.forEach((data, username) => {
+          if (!previous.has(username)) {
+            emitUserJoined(platform, username, data);
+          }
+        });
+
+        previous.forEach((data, username) => {
+          if (!usersMap.has(username)) {
+            emitUserLeft(platform, username, data, 'snapshot');
+          }
+        });
+      }
+
       state.onlineUsers[platform] = usersMap;
     }
 

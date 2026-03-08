@@ -16,6 +16,8 @@
     const voicePreviewTextInput = elements.voicePreviewTextInput || null;
     const volumeSlider = elements.volumeSlider || null;
     const volumeValue = elements.volumeValue || null;
+    const soundAlertsVolumeSlider = elements.soundAlertsVolumeSlider || null;
+    const soundAlertsVolumeValue = elements.soundAlertsVolumeValue || null;
     const youtubeStartupBacklogInput = elements.youtubeStartupBacklogInput || null;
     const youtubeStartupBacklogLabel = elements.youtubeStartupBacklogLabel || null;
     const youtubeStartupBacklogDownBtn = elements.youtubeStartupBacklogDownBtn || null;
@@ -87,6 +89,14 @@
         volumeValue.textContent = `${volumeSlider.value}%`;
       }
 
+      const savedSoundAlertsVolume = settingsStore.getItem('sound_alerts_volume');
+      if (soundAlertsVolumeSlider) {
+        soundAlertsVolumeSlider.value = savedSoundAlertsVolume || defaults.defaultSoundAlertsVolume || '100';
+      }
+      if (soundAlertsVolumeValue && soundAlertsVolumeSlider) {
+        soundAlertsVolumeValue.textContent = `${soundAlertsVolumeSlider.value}%`;
+      }
+
       const savedStartupBacklog = settingsStore.getItem('yt_tts_startup_backlog_count');
       if (youtubeStartupBacklogInput) {
         const normalized = normalizeStartupBacklog(
@@ -122,6 +132,16 @@
           volumeValue.textContent = `${volumeSlider.value}%`;
         }
         settingsStore.setItem('yt_tts_volume', volumeSlider.value);
+      });
+    }
+
+    function bindSoundAlertsVolume() {
+      if (!soundAlertsVolumeSlider) return;
+      soundAlertsVolumeSlider.addEventListener('input', () => {
+        if (soundAlertsVolumeValue) {
+          soundAlertsVolumeValue.textContent = `${soundAlertsVolumeSlider.value}%`;
+        }
+        settingsStore.setItem('sound_alerts_volume', soundAlertsVolumeSlider.value);
       });
     }
 
@@ -164,6 +184,7 @@
       state.initialized = true;
       bindChannelAndStream();
       bindVolume();
+      bindSoundAlertsVolume();
       bindTestMessage();
       bindStartupBacklog();
     }

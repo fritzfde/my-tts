@@ -37,8 +37,31 @@
       return Number(volumeSlider.value || 100) / 100;
     }
 
+    function normalizeCustomSoundPath(pathValue) {
+      const raw = String(pathValue || '').trim();
+      if (!raw) return '';
+      if (raw.startsWith('/sounds/custom/')) {
+        return raw.replace('/sounds/custom/', '/sounds/');
+      }
+      return raw;
+    }
+
+    function normalizeCustomSoundValue(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      if (raw.startsWith('custom-')) {
+        const normalizedPath = normalizeCustomSoundPath(raw.slice('custom-'.length));
+        return normalizedPath ? `custom-${normalizedPath}` : '';
+      }
+      if (raw.startsWith('/sounds/')) {
+        const normalizedPath = normalizeCustomSoundPath(raw);
+        return normalizedPath ? `custom-${normalizedPath}` : '';
+      }
+      return raw;
+    }
+
     function getCustomSoundValue(filename) {
-      return `custom-/sounds/custom/${filename}`;
+      return `custom-/sounds/${filename}`;
     }
 
     function populateCustomSoundManageSelect(selectedFilename = '') {
@@ -63,16 +86,18 @@
     function rebuildGiftSoundSelect(selectedValue = '') {
       if (!giftSoundSelect || !doc) return;
 
-      const preferredValue = selectedValue
+      const preferredValue = normalizeCustomSoundValue(
+        selectedValue
         || settingsStore.getItem('gift_sound_preference')
         || giftSoundSelect.value
-        || '';
+        || ''
+      );
 
       giftSoundSelect.innerHTML = state.giftSoundSelectBaseMarkup;
 
       state.customGiftSounds.forEach((sound) => {
         const option = doc.createElement('option');
-        option.value = `custom-${sound.path}`;
+        option.value = normalizeCustomSoundValue(`custom-${sound.path}`);
         option.textContent = `🎵 ${sound.filename}`;
         giftSoundSelect.appendChild(option);
       });
@@ -223,7 +248,7 @@
       if (!selectedSound) return;
 
       if (selectedSound.startsWith('custom-')) {
-        const soundPath = selectedSound.replace('custom-', '');
+        const soundPath = normalizeCustomSoundPath(selectedSound.replace('custom-', ''));
         if (!win || typeof win.Audio !== 'function') return;
         const audio = new win.Audio(soundPath);
         audio.volume = getSliderVolume();
@@ -241,7 +266,7 @@
       }
 
       if (soundId.startsWith('custom-')) {
-        const soundPath = soundId.replace('custom-', '');
+        const soundPath = normalizeCustomSoundPath(soundId.replace('custom-', ''));
         if (!win || typeof win.Audio !== 'function') return;
         const audio = new win.Audio(soundPath);
         audio.volume = getSliderVolume();
@@ -272,8 +297,8 @@
         const data = await response.json();
         state.customGiftSounds = (data.custom || []).map((sound) => ({
           filename: sound.name,
-          path: sound.path
-        }));
+          path: normalizeCustomSoundPath(sound.path)
+        })).filter((sound) => sound.filename && sound.path);
         rebuildGiftSoundSelect(selectedSoundOverride);
       } catch (error) {
         console.error('Error loading custom sounds:', error);
@@ -314,7 +339,7 @@
             throw new Error(data.error || 'Upload failed');
           }
 
-          const uploadedSoundValue = `custom-${data.path}`;
+          const uploadedSoundValue = normalizeCustomSoundValue(`custom-${data.path}`);
           settingsStore.setItem('gift_sound_preference', uploadedSoundValue);
           await loadCustomSounds(uploadedSoundValue);
           callbacks.updateStatus?.(`✓ Sound uploaded: ${data.filename}`, false);
@@ -345,7 +370,7 @@
           deleteCustomSoundBtn.disabled = true;
           deleteCustomSoundBtn.textContent = 'Deleting...';
 
-          const response = await callFetch(`/api/sounds/custom/${encodeURIComponent(filename)}`, {
+          const response = await callFetch(`/api/sounds/${encodeURIComponent(filename)}`, {
             method: 'DELETE'
           });
           const data = await response.json().catch(() => ({}));
@@ -354,7 +379,10 @@
           }
 
           const removedSoundValue = getCustomSoundValue(filename);
-          if (giftSoundSelect && giftSoundSelect.value === removedSoundValue) {
+          if (
+            giftSoundSelect
+            && normalizeCustomSoundValue(giftSoundSelect.value) === removedSoundValue
+          ) {
             settingsStore.setItem('gift_sound_preference', '');
           }
 

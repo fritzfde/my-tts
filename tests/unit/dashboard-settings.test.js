@@ -56,6 +56,7 @@ test('dashboard settings: loadSettings hydrates fields and api keys', async () =
     tiktok_username_cache: 'live_user',
     yt_tts_test_message: 'hello test',
     yt_tts_volume: '77',
+    sound_alerts_volume: '33',
     yt_tts_startup_backlog_count: '5'
   });
 
@@ -66,6 +67,8 @@ test('dashboard settings: loadSettings hydrates fields and api keys', async () =
   const voicePreviewTextInput = createInput();
   const volumeSlider = createInput('100');
   const volumeValue = { textContent: '' };
+  const soundAlertsVolumeSlider = createInput('100');
+  const soundAlertsVolumeValue = { textContent: '' };
   const youtubeStartupBacklogInput = createInput('0');
   const youtubeStartupBacklogLabel = { textContent: '' };
   const youtubeStartupBacklogDownBtn = createInput();
@@ -84,6 +87,8 @@ test('dashboard settings: loadSettings hydrates fields and api keys', async () =
       voicePreviewTextInput,
       volumeSlider,
       volumeValue,
+      soundAlertsVolumeSlider,
+      soundAlertsVolumeValue,
       youtubeStartupBacklogInput,
       youtubeStartupBacklogLabel,
       youtubeStartupBacklogDownBtn,
@@ -94,7 +99,8 @@ test('dashboard settings: loadSettings hydrates fields and api keys', async () =
       defaultChannelUrl: 'https://youtube.com/@fallback',
       defaultYouTubeStartupBacklog: '0',
       defaultTestMessage: 'fallback text',
-      defaultVolume: '100'
+      defaultVolume: '100',
+      defaultSoundAlertsVolume: '100'
     },
     callbacks: {
       setApiKeys: (keys) => {
@@ -116,6 +122,8 @@ test('dashboard settings: loadSettings hydrates fields and api keys', async () =
   assert.equal(voicePreviewTextInput.value, 'hello test');
   assert.equal(volumeSlider.value, '77');
   assert.equal(volumeValue.textContent, '77%');
+  assert.equal(soundAlertsVolumeSlider.value, '33');
+  assert.equal(soundAlertsVolumeValue.textContent, '33%');
   assert.equal(youtubeStartupBacklogInput.value, '5');
   assert.equal(youtubeStartupBacklogLabel.textContent, 'Play last 5 chat messages on reload (YouTube + TikTok)');
 });
@@ -130,6 +138,8 @@ test('dashboard settings: init binds persistence for settings inputs', async () 
   const voicePreviewTextInput = createInput('old preview');
   const volumeSlider = createInput('64');
   const volumeValue = { textContent: '' };
+  const soundAlertsVolumeSlider = createInput('55');
+  const soundAlertsVolumeValue = { textContent: '' };
   const youtubeStartupBacklogInput = createInput('42');
   const youtubeStartupBacklogLabel = { textContent: '' };
   const youtubeStartupBacklogDownBtn = createInput();
@@ -144,6 +154,8 @@ test('dashboard settings: init binds persistence for settings inputs', async () 
       voicePreviewTextInput,
       volumeSlider,
       volumeValue,
+      soundAlertsVolumeSlider,
+      soundAlertsVolumeValue,
       youtubeStartupBacklogInput,
       youtubeStartupBacklogLabel,
       youtubeStartupBacklogDownBtn,
@@ -158,6 +170,7 @@ test('dashboard settings: init binds persistence for settings inputs', async () 
   channelUrlInput.trigger('change');
   streamUrlInput.trigger('change');
   volumeSlider.trigger('input');
+  soundAlertsVolumeSlider.trigger('input');
   testMessageInput.trigger('input');
   youtubeStartupBacklogInput.trigger('input');
   youtubeStartupBacklogDownBtn.trigger('click');
@@ -168,10 +181,12 @@ test('dashboard settings: init binds persistence for settings inputs', async () 
   assert.equal(saved.yt_tts_channel_url, 'https://youtube.com/@new');
   assert.equal(saved.yt_tts_stream_url, 'https://youtube.com/watch?v=xyz');
   assert.equal(saved.yt_tts_volume, '64');
+  assert.equal(saved.sound_alerts_volume, '55');
   assert.equal(saved.yt_tts_startup_backlog_count, '20');
   assert.equal(saved.yt_tts_test_message, 'new message');
   assert.equal(voicePreviewTextInput.value, 'new message');
   assert.equal(volumeValue.textContent, '64%');
+  assert.equal(soundAlertsVolumeValue.textContent, '55%');
   assert.equal(youtubeStartupBacklogInput.value, '20');
   assert.equal(youtubeStartupBacklogLabel.textContent, 'Play last 20 chat messages on reload (YouTube + TikTok)');
 });

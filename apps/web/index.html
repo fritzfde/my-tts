@@ -255,56 +255,66 @@
                 <span style="color: #00f2ea;">🎁</span> TikTok Gifts & Overlays
             </h3>
 
-            <div class="input-group gift-sound-settings-card" style="margin-bottom: 12px;">
-                <div class="gift-sound-main-row">
-                    <div class="input-group" style="margin-bottom: 0;">
-                        <label>Gift Sound Effect</label>
-                        <select id="giftSoundSelect">
-                            <option value="">🔇 No Sound</option>
-                            <optgroup label="Classic">
-                                <option value="ding">🔔 Ding</option>
-                                <option value="coin">💰 Coin Drop</option>
-                                <option value="chime">🎵 Chime</option>
-                                <option value="applause">👏 Applause</option>
-                            </optgroup>
-                            <optgroup label="Anime">
-                                <option value="anime-sparkle">✨ Anime Sparkle</option>
-                                <option value="anime-powerup">⚡ Power-Up</option>
-                                <option value="anime-notification">📢 Notification Beep</option>
-                                <option value="anime-coin">🪙 Mario Coin</option>
-                                <option value="anime-victory">🎊 Victory Jingle</option>
-                            </optgroup>
-                        </select>
-                    </div>
-                    <div class="input-group gift-sound-default-wrap" style="margin-bottom: 0;">
-                        <label style="text-transform: none; letter-spacing: normal;">Default Gift Sound</label>
-                        <select id="defaultGiftValue" style="font-size: 0.875rem; padding: 8px;">
-                            <!-- Populated dynamically -->
-                        </select>
-                    </div>
+            <div class="input-group sound-alerts-card" style="margin-bottom: 12px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px;">
+                    <label style="margin: 0;">Sound Alerts</label>
+                    <button id="refreshTikTokGiftsBtn" class="secondary sound-alert-toolbar-btn" title="Refresh TikTok gift names list">⟳ Refresh Gifts</button>
                 </div>
 
-                <div class="gift-sound-manage-grid">
-                    <div class="gift-sound-upload-row">
-                        <input type="file" id="customSoundUpload" accept=".mp3,.wav,.ogg" style="font-size: 0.75rem; padding: 6px;">
-                        <button id="uploadSoundBtn" class="secondary" style="padding: 8px 14px; font-size: 0.8125rem;">Upload</button>
-                    </div>
-                    <div class="gift-sound-delete-row">
-                        <select id="customSoundManageSelect" style="font-size: 0.8125rem;">
-                            <option value="">Custom sounds...</option>
-                        </select>
-                        <button id="deleteCustomSoundBtn" class="secondary" style="padding: 8px 14px; font-size: 0.8125rem;">🗑️ Delete</button>
+                <div class="sound-library-upload-row">
+                    <input type="file" id="soundLibraryUploadInput" accept=".mp3,.wav,.ogg">
+                    <button id="soundLibraryUploadBtn" class="secondary">Upload</button>
+                    <div class="sound-alert-volume-row">
+                        <label for="soundAlertsVolumeSlider" style="margin: 0;">
+                            Sounds Volume
+                            <span id="soundAlertsVolumeValue" style="color: var(--text-secondary); font-weight: 400;">100%</span>
+                        </label>
+                        <input type="range" id="soundAlertsVolumeSlider" min="0" max="100" value="100">
                     </div>
                 </div>
-            </div>
+                <div id="soundLibraryCards" class="sound-library-cards">
+                    <div class="sound-library-empty">No sounds uploaded yet.</div>
+                </div>
 
-            <div class="input-group" style="margin-bottom: 12px;">
-                <label>Gift Triggers (Sounds & Animations)</label>
-                <div style="margin-bottom: 8px; padding: 10px; background: rgba(255, 107, 107, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
-                    <strong>Priority:</strong> Gift Name > Diamond Value > Default Sound<br>
-                    Gift-to-animation mappings are now set directly from each animation card (⚙️ popup).
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; margin-bottom: 8px;">
+                    <label style="margin: 0;">Alert Rules</label>
+                    <div class="section-header-inline-actions">
+                        <button
+                          id="toggleSoundAlertRulesBtn"
+                          class="secondary sound-alert-toolbar-btn collapse-toggle-btn"
+                          type="button"
+                          data-collapse-target="soundAlertRulesPanel"
+                          data-collapse-key="ui_alert_rules_collapsed"
+                          data-collapse-label-expanded="Hide"
+                          data-collapse-label-collapsed="Show"
+                          data-collapse-default="expanded"
+                        >
+                          Hide
+                        </button>
+                        <button id="addSoundAlertRuleBtn" class="secondary sound-alert-toolbar-btn" type="button">+ Add Alert</button>
+                    </div>
                 </div>
-                
+                <div id="soundAlertRulesPanel" class="collapsible-panel">
+                    <div class="sound-alert-table-wrap">
+                        <table class="sound-alert-table">
+                            <thead>
+                                <tr>
+                                    <th>Event</th>
+                                    <th>Condition</th>
+                                    <th>Sound</th>
+                                    <th>Animation</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="soundAlertRulesBody">
+                                <tr>
+                                    <td colspan="5" class="sound-alert-empty-row">Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <datalist id="soundAlertGiftNamesDatalist"></datalist>
             </div>
         </div>
 
@@ -410,6 +420,24 @@
                             <label style="margin-top: 8px;">Sticker Mapping</label>
                             <div id="animationPopupStickerPicker" class="animation-sticker-picker">
                                 <!-- Sticker thumbnails added dynamically -->
+                            </div>
+                            <div class="animation-popup-event-row">
+                                <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
+                                    <input type="checkbox" id="animationPopupMapFollow" style="width: auto; margin-right: 8px;">
+                                    Trigger on new follower/subscriber
+                                </label>
+                                <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
+                                    <input type="checkbox" id="animationPopupMapShare" style="width: auto; margin-right: 8px;">
+                                    Trigger on stream share
+                                </label>
+                                <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
+                                    <input type="checkbox" id="animationPopupMapJoin" style="width: auto; margin-right: 8px;">
+                                    Trigger on viewer join
+                                </label>
+                                <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
+                                    <input type="checkbox" id="animationPopupMapLeave" style="width: auto; margin-right: 8px;">
+                                    Trigger on viewer leave
+                                </label>
                             </div>
                             <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
                                 <input type="checkbox" id="animationPopupMakeDefault" style="width: auto; margin-right: 8px;">
@@ -575,6 +603,7 @@
 <script src="assets/js/settings.js"></script>
 <script src="assets/js/api-key-manager.js"></script>
 <script src="assets/js/layout-resize.js"></script>
+<script src="assets/js/collapsible-sections.js"></script>
 <script src="assets/js/voices.js"></script>
 <script src="assets/js/dashboard-settings.js"></script>
 <script src="assets/js/audio-runtime.js"></script>
@@ -586,6 +615,7 @@
 <script src="assets/js/ollama-gender.js"></script>
 <script src="assets/js/gift-sounds.js"></script>
 <script src="assets/js/gift-mappings.js"></script>
+<script src="assets/js/sound-alerts.js"></script>
 <script src="assets/js/presence.js"></script>
 <script src="assets/js/animation-mappings.js"></script>
 <script src="assets/js/animation-playback.js"></script>

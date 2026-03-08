@@ -239,6 +239,7 @@ let animationOverlayClients = []; // SSE clients for animation overlay
 let tiktokViewerCount = 0;
 let tiktokTopViewers = [];
 let tiktokActiveUsers = new Map(); // uniqueId -> { uniqueId, nickname, avatar, source, lastSeen }
+let tiktokAvailableGifts = []; // [{ id, name, diamondCount, image }]
 
 function rememberTikTokUser({ uniqueId, nickname, avatar }, source = 'event') {
     if (!uniqueId) return;
@@ -265,6 +266,96 @@ function resetTikTokAudienceState() {
     tiktokViewerCount = 0;
     tiktokTopViewers = [];
     tiktokActiveUsers.clear();
+    tiktokAvailableGifts = [];
+}
+
+function normalizeTikTokGiftCatalog(gifts) {
+    const rows = Array.isArray(gifts) ? gifts : [];
+    const mapped = rows
+        .map((gift) => {
+            const id = Number(gift?.id ?? gift?.gift_id ?? gift?.giftId ?? 0);
+            const name = String(gift?.name || gift?.giftName || gift?.title || '').trim();
+            if (!name) return null;
+
+            const diamondRaw = Number(
+                gift?.diamond_count
+                ?? gift?.diamondCount
+                ?? gift?.price
+                ?? gift?.coin_count
+                ?? 0
+            );
+            const diamondCount = Number.isFinite(diamondRaw) && diamondRaw >= 0
+                ? Math.floor(diamondRaw)
+                : 0;
+            const image = gift?.image?.url_list?.[0]
+                || gift?.image?.url
+                || gift?.icon?.url_list?.[0]
+                || gift?.icon
+                || null;
+
+            return {
+                id: Number.isFinite(id) ? id : 0,
+                name,
+                diamondCount,
+                image
+            };
+        })
+        .filter(Boolean);
+
+    const dedupedByName = new Map();
+    mapped.forEach((gift) => {
+        const key = gift.name.toLowerCase();
+        if (!dedupedByName.has(key)) {
+            dedupedByName.set(key, gift);
+        }
+    });
+
+    return Array.from(dedupedByName.values())
+        .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function refreshTikTokAvailableGifts() {
+    if (!tiktokConnection || typeof tiktokConnection.fetchAvailableGifts !== 'function') {
+        return tiktokAvailableGifts;
+    }
+
+    try {
+        const gifts = await tiktokConnection.fetchAvailableGifts();
+        const normalized = normalizeTikTokGiftCatalog(gifts);
+        if (normalized.length > 0) {
+            tiktokAvailableGifts = normalized;
+        }
+    } catch (err) {
+        console.warn('Unable to fetch TikTok available gifts:', err?.message || err);
+    }
+
+    return tiktokAvailableGifts;
+}
+
+function rememberGiftInCatalog({ giftId = 0, name = '', diamondCount = 0, image = null } = {}) {
+    const normalizedName = String(name || '').trim();
+    if (!normalizedName) return;
+
+    const lowerName = normalizedName.toLowerCase();
+    const existing = tiktokAvailableGifts.find((entry) => String(entry?.name || '').toLowerCase() === lowerName);
+    if (existing) {
+        if (!existing.image && image) existing.image = image;
+        if ((!existing.diamondCount || existing.diamondCount <= 0) && Number.isFinite(Number(diamondCount))) {
+            existing.diamondCount = Math.max(0, Math.floor(Number(diamondCount)));
+        }
+        if ((!existing.id || existing.id <= 0) && Number.isFinite(Number(giftId))) {
+            existing.id = Math.max(0, Math.floor(Number(giftId)));
+        }
+        return;
+    }
+
+    tiktokAvailableGifts.push({
+        id: Number.isFinite(Number(giftId)) ? Math.max(0, Math.floor(Number(giftId))) : 0,
+        name: normalizedName,
+        diamondCount: Number.isFinite(Number(diamondCount)) ? Math.max(0, Math.floor(Number(diamondCount))) : 0,
+        image: image || null
+    });
+    tiktokAvailableGifts.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 app.post('/api/tiktok/connect', (req, res) => {
@@ -279,12 +370,19 @@ app.post('/api/tiktok/connect', (req, res) => {
     likerLeaderboard.clear();
     resetTikTokAudienceState();
 
-    tiktokConnection = new WebcastPushConnection(username);
+    tiktokConnection = new WebcastPushConnection(username, {
+        enableExtendedGiftInfo: true
+    });
 
     tiktokConnection.connect().then(state => {
         const statsViewerCount = Number(state?.roomInfo?.stats?.userCount || state?.roomInfo?.stats?.viewerCount || 0);
         if (Number.isFinite(statsViewerCount) && statsViewerCount > 0) {
             tiktokViewerCount = statsViewerCount;
+        }
+        if (Array.isArray(state?.availableGifts) && state.availableGifts.length > 0) {
+            tiktokAvailableGifts = normalizeTikTokGiftCatalog(state.availableGifts);
+        } else {
+            void refreshTikTokAvailableGifts();
         }
         console.log(`✅ SUCCESS: Connected to @${username}`);
         res.json({ success: true });
@@ -400,6 +498,12 @@ app.post('/api/tiktok/connect', (req, res) => {
         diamondCount: totalDiamonds,
         timestamp: Date.now()
       };
+      rememberGiftInCatalog({
+        giftId: data.gift?.id || data.giftId || data.id || 0,
+        name: resolvedGiftName,
+        diamondCount: unitDiamonds,
+        image: msg.giftPictureUrl
+      });
 
       // Deduplicate: create a robust signature and ignore if seen recently
       const normalizedGiftName = (msg.giftName || '').toLowerCase().trim();
@@ -595,6 +699,23 @@ app.get('/api/tiktok/audience', (req, res) => {
     });
 });
 
+app.get('/api/tiktok/gifts', async (req, res) => {
+    try {
+        const connected = Boolean(tiktokConnection && tiktokConnection.isConnected);
+        if (connected && (!Array.isArray(tiktokAvailableGifts) || tiktokAvailableGifts.length === 0)) {
+            await refreshTikTokAvailableGifts();
+        }
+
+        res.json({
+            connected,
+            gifts: Array.isArray(tiktokAvailableGifts) ? tiktokAvailableGifts : []
+        });
+    } catch (err) {
+        console.error('TikTok gifts endpoint failed:', err);
+        res.status(500).json({ error: 'Failed to load TikTok gifts' });
+    }
+});
+
 // SSE endpoint for gift overlay
 app.get('/overlay/gifts/stream', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -744,9 +865,42 @@ app.use('/sounds', express.static(path.join(__dirname, 'sounds')));
 
 // Upload custom sound
 const multer = require('multer');
-const { log } = require('console');
-function getCustomSoundsDir() {
-    return path.join(__dirname, 'sounds', 'custom');
+function getSoundsDir() {
+    return path.join(__dirname, 'sounds');
+}
+
+function ensureSoundsDir() {
+    const soundsDir = getSoundsDir();
+    if (!fs.existsSync(soundsDir)) {
+        fs.mkdirSync(soundsDir, { recursive: true });
+    }
+    return soundsDir;
+}
+
+function migrateLegacyCustomSoundsDir() {
+    const soundsDir = ensureSoundsDir();
+    const legacyCustomDir = path.join(soundsDir, 'custom');
+    if (!fs.existsSync(legacyCustomDir)) return;
+
+    const files = fs.readdirSync(legacyCustomDir).filter((filename) => filename.match(/\.(mp3|wav|ogg)$/i));
+    files.forEach((filename) => {
+        const fromPath = path.join(legacyCustomDir, filename);
+        const toPath = path.join(soundsDir, filename);
+        if (fs.existsSync(toPath)) {
+            fs.unlinkSync(fromPath);
+            return;
+        }
+        fs.renameSync(fromPath, toPath);
+    });
+
+    try {
+        const remaining = fs.readdirSync(legacyCustomDir);
+        if (remaining.length === 0) {
+            fs.rmdirSync(legacyCustomDir);
+        }
+    } catch (err) {
+        console.warn('Legacy sounds/custom cleanup skipped:', err.message);
+    }
 }
 
 function isSafeSoundFilename(filename) {
@@ -755,11 +909,7 @@ function isSafeSoundFilename(filename) {
 
 const soundStorage = multer.diskStorage({
     destination: (req, file, cb) => {
-        const soundsDir = getCustomSoundsDir();
-        if (!fs.existsSync(soundsDir)) {
-            fs.mkdirSync(soundsDir, { recursive: true });
-        }
-        cb(null, soundsDir);
+        cb(null, ensureSoundsDir());
     },
     filename: (req, file, cb) => {
         const ext = path.extname(file.originalname);
@@ -790,40 +940,32 @@ app.post('/api/sounds/upload', soundUpload.single('sound'), (req, res) => {
     res.json({
         success: true,
         filename: req.file.filename,
-        path: `/sounds/custom/${req.file.filename}`
+        path: `/sounds/${req.file.filename}`
     });
 });
 
 // Get available sounds
 app.get('/api/sounds/list', (req, res) => {
-    const soundsDir = path.join(__dirname, 'sounds');
-    const customDir = getCustomSoundsDir();
-
-    const builtIn = fs.existsSync(soundsDir)
-        ? fs.readdirSync(soundsDir).filter(f => f.match(/\.(mp3|wav|ogg)$/i))
-        : [];
-
-    const custom = fs.existsSync(customDir)
-        ? fs.readdirSync(customDir).filter(f => f.match(/\.(mp3|wav|ogg)$/i))
-        : [];
+    migrateLegacyCustomSoundsDir();
+    const soundsDir = ensureSoundsDir();
+    const allSounds = fs.readdirSync(soundsDir).filter(f => f.match(/\.(mp3|wav|ogg)$/i));
 
     res.json({
-        builtIn: builtIn.map(f => ({ name: f, path: `/sounds/${f}` })),
-        custom: custom.map(f => ({ name: f, path: `/sounds/custom/${f}` }))
+        builtIn: [],
+        custom: allSounds.map(f => ({ name: f, path: `/sounds/${f}` }))
     });
 });
 
-// Delete a custom sound
-app.delete('/api/sounds/custom/:filename', (req, res) => {
+function handleDeleteSoundRequest(req, res) {
     const filename = req.params.filename;
     if (!isSafeSoundFilename(filename)) {
         return res.status(400).json({ error: 'Invalid filename' });
     }
 
-    const customDir = getCustomSoundsDir();
-    const filePath = path.join(customDir, filename);
+    const soundsDir = ensureSoundsDir();
+    const filePath = path.join(soundsDir, filename);
 
-    if (!filePath.startsWith(customDir + path.sep)) {
+    if (!filePath.startsWith(soundsDir + path.sep)) {
         return res.status(400).json({ error: 'Invalid path' });
     }
     if (!fs.existsSync(filePath)) {
@@ -837,7 +979,11 @@ app.delete('/api/sounds/custom/:filename', (req, res) => {
         console.error('Delete sound error:', err);
         res.status(500).json({ error: 'Failed to delete sound' });
     }
-});
+}
+
+// Delete a sound (new endpoint + legacy alias)
+app.delete('/api/sounds/:filename', handleDeleteSoundRequest);
+app.delete('/api/sounds/custom/:filename', handleDeleteSoundRequest);
 
 // --- TIKTOK LOGIC END ---
 

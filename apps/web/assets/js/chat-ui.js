@@ -47,7 +47,16 @@
       }
     }
 
-    function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, extraClass = '', allowHtml = false, replayTextOverride = undefined) {
+    function addChatMessage(
+      author,
+      text,
+      platform = 'SYSTEM',
+      isSpeaking = false,
+      extraClass = '',
+      allowHtml = false,
+      replayTextOverride = undefined,
+      options = {}
+    ) {
       if (!chatFeed || !doc) return;
 
       const empty = chatFeed.querySelector('.empty-state');
@@ -126,7 +135,11 @@
 
       if (author !== 'SYSTEM') {
         callbacks.addRecentUser?.(`${platform}:${normalizedAuthor}`);
-        callbacks.markUserOnline?.(normalizedAuthor, platform, { displayName: resolvedDisplayName, avatar });
+        callbacks.markUserOnline?.(normalizedAuthor, platform, {
+          displayName: resolvedDisplayName,
+          avatar,
+          emitLifecycleEvents: options?.emitPresenceLifecycle !== false
+        });
       }
 
       if (isSpeaking) {

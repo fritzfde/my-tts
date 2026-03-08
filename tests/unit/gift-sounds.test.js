@@ -105,20 +105,20 @@ test('gift sounds: loadCustomSounds updates selectors and preference', async () 
     },
     fetchFn: async () => ({
       json: async () => ({
-        custom: [{ name: 'alpha.wav', path: '/sounds/custom/alpha.wav' }]
+        custom: [{ name: 'alpha.wav', path: '/sounds/alpha.wav' }]
       })
     })
   });
 
-  await controller.loadCustomSounds('custom-/sounds/custom/alpha.wav');
+  await controller.loadCustomSounds('custom-/sounds/alpha.wav');
   assert.equal(controller.state.customGiftSounds.length, 1);
   assert.equal(giftSoundSelect.options.length, 1);
-  assert.equal(giftSoundSelect.value, 'custom-/sounds/custom/alpha.wav');
-  assert.equal(settingsStore.getItem('gift_sound_preference'), 'custom-/sounds/custom/alpha.wav');
+  assert.equal(giftSoundSelect.value, 'custom-/sounds/alpha.wav');
+  assert.equal(settingsStore.getItem('gift_sound_preference'), 'custom-/sounds/alpha.wav');
   assert.equal(customSoundManageSelect.options.length, 1);
   assert.equal(renderGiftMappingsCount, 1);
 
-  controller.populateGiftSoundOptions(targetSelect, 'custom-/sounds/custom/alpha.wav');
+  controller.populateGiftSoundOptions(targetSelect, 'custom-/sounds/alpha.wav');
   assert.equal(targetSelect.options.length, 1);
   assert.equal(targetSelect.options[0].selected, true);
 });
@@ -127,7 +127,7 @@ test('gift sounds: playSpecificSound handles default and explicit custom sound',
   const { factory } = loadControllerFactory('gift-sounds.js', 'createGiftSoundsController');
   const settingsStore = createSettingsStore();
   const giftSoundSelect = createSelect('');
-  giftSoundSelect.value = 'custom-/sounds/custom/default.wav';
+  giftSoundSelect.value = 'custom-/sounds/default.wav';
 
   const played = [];
   class AudioMock {
@@ -158,9 +158,8 @@ test('gift sounds: playSpecificSound handles default and explicit custom sound',
   controller.playSpecificSound('custom-/sounds/custom/manual.wav');
 
   assert.equal(played.length, 2);
-  assert.equal(played[0].src, '/sounds/custom/default.wav');
-  assert.equal(played[1].src, '/sounds/custom/manual.wav');
+  assert.equal(played[0].src, '/sounds/default.wav');
+  assert.equal(played[1].src, '/sounds/manual.wav');
   assert.equal(played[0].volume, 0.55);
   assert.equal(played[1].volume, 0.55);
 });
-

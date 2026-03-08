@@ -19,9 +19,12 @@
       autoAssignVoiceIfNeeded,
       speakText,
       getGiftAction,
+      getEventAnimationTrigger,
       triggerAnimation,
+      resolveSoundAlert,
+      playAlertSound,
+      registerKnownGiftName,
       playSpecificSound,
-      playGiftSound,
       getStartupBacklogCount,
       buildStickerChatListHtml,
       handleStickerAnimation,
@@ -36,7 +39,8 @@
       seenMessages: new Set(),
       pollTimer: null,
       lastPollTime: null,
-      pollLoopToken: 0
+      pollLoopToken: 0,
+      hasAudienceSnapshot: false
     };
 
     function isConnected() {
@@ -145,10 +149,13 @@
         });
 
         if (typeof setPlatformUsers === 'function') {
-          setPlatformUsers('tiktok', nextTikTokUsers);
+          setPlatformUsers('tiktok', nextTikTokUsers, {
+            emitLifecycleEvents: state.hasAudienceSnapshot
+          });
         } else {
           onlineUsers.tiktok = nextTikTokUsers;
         }
+        state.hasAudienceSnapshot = true;
         renderOnlineUsers();
       } catch (err) {
         console.warn('TikTok audience fetch failed:', err?.message || err);
@@ -173,6 +180,12 @@
           if (msg.type === 'gift') {
             return `gift-${msg.author}-${msg.giftName}-${msg.repeatCount}-${msg.timestamp}`;
           }
+          if (msg.type === 'follow') {
+            return `follow-${msg.author}-${msg.timestamp}`;
+          }
+          if (msg.type === 'share') {
+            return `share-${msg.author}-${msg.timestamp}`;
+          }
           if (msg.type === 'emote') {
             const emoteId = msg.primaryEmoteId || (msg.emotes && msg.emotes[0]?.emoteId) || msg.emoteId;
             return `emote-${msg.author}-${emoteId}-${msg.timestamp}`;
@@ -193,16 +206,79 @@
 
           if (msg.type === 'gift') {
             const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
-            addChatMessage(msg.author, giftText, 'tiktok', false, 'gift');
+            addChatMessage(msg.author, giftText, 'tiktok', false, 'gift', false, undefined, {
+              emitPresenceLifecycle: !isFirstPoll
+            });
+            if (typeof registerKnownGiftName === 'function') {
+              registerKnownGiftName(msg.giftName);
+            }
 
             if (!isFirstPoll) {
               const action = getGiftAction(msg.giftName, [msg.diamondUnitCount, msg.diamondCount]);
               if (action && action.type === 'animation' && action.value) {
                 triggerAnimation(action.value, 'tiktok', msg.author);
+              }
+
+              const soundPath = typeof resolveSoundAlert === 'function'
+                ? resolveSoundAlert({
+                  type: 'gift',
+                  giftName: msg.giftName,
+                  diamondCount: msg.diamondCount,
+                  diamondUnitCount: msg.diamondUnitCount
+                })
+                : '';
+
+              if (soundPath) {
+                playAlertSound?.(soundPath);
               } else if (action && action.type === 'sound' && action.value) {
+                // Legacy compatibility for old gift mapping sound entries.
                 playSpecificSound(action.value);
-              } else {
-                playGiftSound();
+              }
+            }
+            return;
+          }
+
+          if (msg.type === 'follow') {
+            addChatMessage(msg.author, '👤 followed your stream', 'tiktok', false, 'follow', false, undefined, {
+              emitPresenceLifecycle: !isFirstPoll
+            });
+
+            if (!isFirstPoll) {
+              const followTrigger = typeof getEventAnimationTrigger === 'function'
+                ? getEventAnimationTrigger('follow')
+                : '';
+              if (followTrigger) {
+                triggerAnimation(followTrigger, 'tiktok', msg.author, 'follow');
+              }
+
+              const followSound = typeof resolveSoundAlert === 'function'
+                ? resolveSoundAlert({ type: 'follow' })
+                : '';
+              if (followSound) {
+                playAlertSound?.(followSound);
+              }
+            }
+            return;
+          }
+
+          if (msg.type === 'share') {
+            addChatMessage(msg.author, '📤 shared your stream', 'tiktok', false, 'share', false, undefined, {
+              emitPresenceLifecycle: !isFirstPoll
+            });
+
+            if (!isFirstPoll) {
+              const shareTrigger = typeof getEventAnimationTrigger === 'function'
+                ? getEventAnimationTrigger('share')
+                : '';
+              if (shareTrigger) {
+                triggerAnimation(shareTrigger, 'tiktok', msg.author, 'share');
+              }
+
+              const shareSound = typeof resolveSoundAlert === 'function'
+                ? resolveSoundAlert({ type: 'share' })
+                : '';
+              if (shareSound) {
+                playAlertSound?.(shareSound);
               }
             }
             return;
@@ -212,7 +288,9 @@
             const emotes = Array.isArray(msg.emotes) ? msg.emotes : [];
             const stickersHTML = buildStickerChatListHtml(emotes);
             const combinedHTML = `${escapeHtml(msg.text)}${stickersHTML ? `<br>${stickersHTML}` : ''}`;
-            addChatMessage(msg.author, combinedHTML, 'tiktok', false, 'combined', true, msg.text || '');
+            addChatMessage(msg.author, combinedHTML, 'tiktok', false, 'combined', true, msg.text || '', {
+              emitPresenceLifecycle: !isFirstPoll
+            });
 
             if (!isFirstPoll && emotes.length > 0 && typeof handleStickerAnimation === 'function') {
               if (canUserTriggerAnimations(msg.author, 'tiktok')) {
@@ -234,7 +312,9 @@
             if (emotes.length === 0) return;
 
             const stickersHTML = buildStickerChatListHtml(emotes);
-            addChatMessage(msg.author, stickersHTML, 'tiktok', false, 'sticker', true, null);
+            addChatMessage(msg.author, stickersHTML, 'tiktok', false, 'sticker', true, null, {
+              emitPresenceLifecycle: !isFirstPoll
+            });
 
             if (!isFirstPoll && typeof handleStickerAnimation === 'function') {
               if (canUserTriggerAnimations(msg.author, 'tiktok')) {
@@ -257,7 +337,9 @@
             if (shouldSpeak) {
               speakText(msg.author, msg.text, 'tiktok', true);
             } else {
-              addChatMessage(msg.author, msg.text, 'tiktok', false);
+              addChatMessage(msg.author, msg.text, 'tiktok', false, '', false, undefined, {
+                emitPresenceLifecycle: !isFirstPoll
+              });
             }
           }
         };
@@ -352,6 +434,7 @@
         state.connected = true;
         state.isFirstPoll = true;
         state.seenMessages.clear();
+        state.hasAudienceSnapshot = false;
         state.pollLoopToken += 1;
         elements.disconnectTikTokBtn.disabled = false;
         clearOnlineUsers('tiktok');
@@ -374,6 +457,7 @@
       state.connected = false;
       state.lastPollTime = Date.now();
       state.pollLoopToken += 1;
+      state.hasAudienceSnapshot = false;
       clearOnlineUsers('tiktok');
       stopPolling();
 
