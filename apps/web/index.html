@@ -262,8 +262,8 @@
                 </div>
 
                 <div class="sound-library-upload-row">
-                    <input type="file" id="soundLibraryUploadInput" accept=".mp3,.wav,.ogg">
-                    <button id="soundLibraryUploadBtn" class="secondary">Upload</button>
+                    <button id="soundLibraryUploadBtn" class="secondary sound-upload-btn" title="Upload sound file or drop it here">⬆️ Upload Sound</button>
+                    <input type="file" id="soundLibraryUploadInput" accept=".mp3,.wav,.ogg" style="display: none;">
                     <div class="sound-alert-volume-row">
                         <label for="soundAlertsVolumeSlider" style="margin: 0;">
                             Sounds Volume
@@ -346,19 +346,30 @@
                     Map emojis/stickers to .MOV files. For YouTube, uses LLM to detect emotions. For TikTok, uses actual emote names.
                 </div>
                 <div class="animation-controls-row">
-                    <select id="animationSortSelect" style="font-size: 0.8125rem;">
+                    <div class="animation-sort-chips" id="animationSortChips">
+                        <button type="button" class="secondary animation-sort-chip" data-sort-mode="name">Custom</button>
+                        <button type="button" class="secondary animation-sort-chip" data-sort-mode="gift">Gift name</button>
+                        <button type="button" class="secondary animation-sort-chip" data-sort-mode="value">Gift value</button>
+                    </div>
+                    <div class="animation-filter-chips">
+                        <button type="button" id="animationMapFilterBtn" class="secondary animation-filter-chip" data-filter-type="mapping">Mappings: All</button>
+                        <button type="button" id="animationStickerFilterBtn" class="secondary animation-filter-chip" data-filter-type="sticker">Stickers: All</button>
+                    </div>
+                </div>
+                <div class="animation-controls-hidden" aria-hidden="true">
+                    <select id="animationSortSelect" tabindex="-1">
                         <option value="name">Sort: Name</option>
                         <option value="newest">Sort: Newest</option>
                         <option value="oldest">Sort: Oldest</option>
                         <option value="gift">Sort: Gift Name</option>
-                        <option value="value">Sort: Value</option>
+                        <option value="value">Sort: Gift Value</option>
                     </select>
-                    <select id="animationMapFilterSelect" style="font-size: 0.8125rem;">
+                    <select id="animationMapFilterSelect" tabindex="-1">
                         <option value="all">All Mappings</option>
                         <option value="mapped">Mapped Only</option>
                         <option value="unmapped">Unmapped Only</option>
                     </select>
-                    <select id="animationStickerFilterSelect" style="font-size: 0.8125rem;">
+                    <select id="animationStickerFilterSelect" tabindex="-1">
                         <option value="all">All Stickers</option>
                         <option value="with-sticker">With Sticker</option>
                         <option value="without-sticker">Without Sticker</option>
@@ -369,10 +380,30 @@
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 8px;">
                     <button id="uploadAnimationBtn" class="secondary">⬆️ Upload Animation</button>
-                    <button id="syncAnimationsBtn" class="secondary">🔄 Sync all</button>
+                    <button id="resetAnimationsBtn" class="secondary">♻️ Reset</button>
                     <button id="stopAnimationBtn" class="stop" disabled>⏹️ Stop Animation</button>
                 </div>
                 <input type="file" id="uploadAnimationInput" accept=".mov,.mp4,.webm,.avi" style="display: none;">
+
+                <div id="animationResetPopup" class="animation-card-popup" style="display: none;">
+                    <div class="animation-card-popup-backdrop"></div>
+                    <div class="animation-card-popup-panel animation-reset-popup-panel">
+                        <h4>Reset Animation Mappings</h4>
+                        <div class="animation-reset-options">
+                            <label class="animation-reset-option"><input type="checkbox" id="animationResetSorting"> Sorting / filters / manual card order</label>
+                            <label class="animation-reset-option"><input type="checkbox" id="animationResetNames"> Card names (trigger names based on file names)</label>
+                            <label class="animation-reset-option"><input type="checkbox" id="animationResetScale"> Scale (set all to 1.0)</label>
+                            <label class="animation-reset-option"><input type="checkbox" id="animationResetPosition"> Position (set all to bottom-left)</label>
+                            <label class="animation-reset-option"><input type="checkbox" id="animationResetGifts"> Assigned gifts (name/value/default mappings)</label>
+                            <label class="animation-reset-option"><input type="checkbox" id="animationResetStickers"> Assigned stickers</label>
+                            <label class="animation-reset-option"><input type="checkbox" id="animationResetEvents"> Assigned events (follow/share/join/leave)</label>
+                        </div>
+                        <div class="animation-card-popup-actions">
+                            <button id="animationResetConfirmBtn" class="stop">Reset</button>
+                            <button id="animationResetCancelBtn" class="secondary">Cancel</button>
+                        </div>
+                    </div>
+                </div>
 
                 <div id="animationCardPopup" class="animation-card-popup" style="display: none;">
                     <div class="animation-card-popup-backdrop"></div>

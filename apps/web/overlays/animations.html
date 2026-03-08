@@ -177,16 +177,90 @@
         currentAnimations.forEach(applyTrackedVolume);
     }
 
+    function normalizePosition(position) {
+        const raw = String(position || '')
+            .trim()
+            .toLowerCase()
+            .replace(/[_\s]+/g, '-');
+
+        if (!raw) return 'bottom-left';
+
+        const aliases = {
+            'middle-left': 'center-left',
+            'left-middle': 'center-left',
+            'middle-right': 'center-right',
+            'right-middle': 'center-right',
+            'left-center': 'center-left',
+            'right-center': 'center-right',
+            'top-middle': 'top-center',
+            'middle-top': 'top-center',
+            'center-top': 'top-center',
+            'bottom-middle': 'bottom-center',
+            'middle-bottom': 'bottom-center',
+            'center-bottom': 'bottom-center',
+            'middle': 'center'
+        };
+        if (aliases[raw]) return aliases[raw];
+
+        const tokens = raw.split('-').filter(Boolean);
+        const has = (token) => tokens.includes(token);
+
+        let vertical = '';
+        if (has('top')) vertical = 'top';
+        else if (has('bottom')) vertical = 'bottom';
+        else if (has('center') || has('middle')) vertical = 'center';
+
+        let horizontal = '';
+        if (has('left')) horizontal = 'left';
+        else if (has('right')) horizontal = 'right';
+        else if (has('center') || has('middle')) horizontal = 'center';
+
+        if (!vertical && !horizontal) return raw;
+
+        if (!vertical) vertical = 'center';
+        if (!horizontal) horizontal = 'center';
+
+        if (vertical === 'center' && horizontal === 'center') {
+            return 'center';
+        }
+        return `${vertical}-${horizontal}`;
+    }
+
     function getPositionStyle(position) {
         const offset = "40px"; // Margin from the edge
+        const normalized = normalizePosition(position);
         const positions = {
             'top-left':      { top: offset, left: offset, bottom: 'auto', right: 'auto', transform: 'none' },
+            'top-center':    { top: offset, left: '50%', bottom: 'auto', right: 'auto', transform: 'translateX(-50%)' },
             'top-right':     { top: offset, right: offset, bottom: 'auto', left: 'auto', transform: 'none' },
+            'center-left':   { top: '50%', left: offset, bottom: 'auto', right: 'auto', transform: 'translateY(-50%)' },
+            'center':        { top: '50%', left: '50%', bottom: 'auto', right: 'auto', transform: 'translate(-50%, -50%)' },
+            'center-right':  { top: '50%', right: offset, bottom: 'auto', left: 'auto', transform: 'translateY(-50%)' },
             'bottom-left':   { bottom: offset, left: offset, top: 'auto', right: 'auto', transform: 'none' },
-            'bottom-right':  { bottom: offset, right: offset, top: 'auto', left: 'auto', transform: 'none' },
-            'center':        { top: '50%', left: '50%', transform: 'translate(-50%, -50%)', bottom: 'auto', right: 'auto' }
+            'bottom-center': { bottom: offset, left: '50%', top: 'auto', right: 'auto', transform: 'translateX(-50%)' },
+            'bottom-right':  { bottom: offset, right: offset, top: 'auto', left: 'auto', transform: 'none' }
         };
-        return positions[position] || positions['bottom-left'];
+        if (!positions[normalized]) {
+            console.warn('[animation-overlay] Unknown position "%s" (normalized "%s"), using bottom-left', position, normalized);
+            return positions['bottom-left'];
+        }
+        return positions[normalized];
+    }
+
+    function getTransformOrigin(position) {
+        const normalized = normalizePosition(position);
+        const origins = {
+            'top-left': 'top left',
+            'top-center': 'top center',
+            'top-right': 'top right',
+            'center-left': 'center left',
+            'center': 'center center',
+            'center-right': 'center right',
+            'bottom-left': 'bottom left',
+            'bottom-center': 'bottom center',
+            'bottom-right': 'bottom right'
+        };
+        return origins[normalized] || 'bottom left';
     }
 
     function applyChromaKey(video, canvas) {
@@ -308,6 +382,7 @@
         const posStyle = getPositionStyle(position);
         Object.assign(canvas.style, posStyle);
         canvas.style.transform = (posStyle.transform ? posStyle.transform + ' ' : '') + `scale(${scale})`;
+        canvas.style.transformOrigin = getTransformOrigin(position);
         canvas.style.pointerEvents = 'none';
 
         container.appendChild(canvas);
@@ -367,11 +442,7 @@
             // Combine transform and scale
             const baseTransform = posStyle.transform && posStyle.transform !== 'none' ? posStyle.transform : '';
             canvas.style.transform = `${baseTransform} scale(${scale})`.trim();
-            
-            // Set origin so it scales from the correct corner
-            if (position.includes('left')) canvas.style.transformOrigin = 'bottom left';
-            else if (position.includes('right')) canvas.style.transformOrigin = 'bottom right';
-            else canvas.style.transformOrigin = 'center';
+            canvas.style.transformOrigin = getTransformOrigin(position);
 
             if (tracked.cancelChroma) tracked.cancelChroma(); 
             tracked.cancelChroma = applyChromaKey(video, canvas);

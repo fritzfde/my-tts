@@ -1584,10 +1584,23 @@ const animationMappingsList = document.getElementById('animationMappingsList');
 const animationSortSelect = document.getElementById('animationSortSelect');
 const animationMapFilterSelect = document.getElementById('animationMapFilterSelect');
 const animationStickerFilterSelect = document.getElementById('animationStickerFilterSelect');
+const animationSortChipButtons = Array.from(document.querySelectorAll('#animationSortChips .animation-sort-chip'));
+const animationMapFilterBtn = document.getElementById('animationMapFilterBtn');
+const animationStickerFilterBtn = document.getElementById('animationStickerFilterBtn');
 const uploadAnimationBtn = document.getElementById('uploadAnimationBtn');
 const uploadAnimationInput = document.getElementById('uploadAnimationInput');
-const syncAnimationsBtn = document.getElementById('syncAnimationsBtn');
+const resetAnimationsBtn = document.getElementById('resetAnimationsBtn');
 const stopAnimationBtn = document.getElementById('stopAnimationBtn');
+const animationResetPopup = document.getElementById('animationResetPopup');
+const animationResetSorting = document.getElementById('animationResetSorting');
+const animationResetNames = document.getElementById('animationResetNames');
+const animationResetScale = document.getElementById('animationResetScale');
+const animationResetPosition = document.getElementById('animationResetPosition');
+const animationResetGifts = document.getElementById('animationResetGifts');
+const animationResetStickers = document.getElementById('animationResetStickers');
+const animationResetEvents = document.getElementById('animationResetEvents');
+const animationResetConfirmBtn = document.getElementById('animationResetConfirmBtn');
+const animationResetCancelBtn = document.getElementById('animationResetCancelBtn');
 const animationPlaybackController = window.createAnimationPlaybackController({
   documentRef: document,
   fetchFn: (...args) => fetch(...args),
@@ -1615,10 +1628,23 @@ const animationUiController = window.createAnimationUiController({
     animationSortSelect,
     animationMapFilterSelect,
     animationStickerFilterSelect,
+    animationSortChipButtons,
+    animationMapFilterBtn,
+    animationStickerFilterBtn,
     uploadAnimationBtn,
     uploadAnimationInput,
-    syncAnimationsBtn,
-    stopAnimationBtn
+    resetAnimationsBtn,
+    stopAnimationBtn,
+    animationResetPopup,
+    animationResetSorting,
+    animationResetNames,
+    animationResetScale,
+    animationResetPosition,
+    animationResetGifts,
+    animationResetStickers,
+    animationResetEvents,
+    animationResetConfirmBtn,
+    animationResetCancelBtn
   },
   state: {
     animationMappings,
@@ -1645,7 +1671,7 @@ const animationUiController = window.createAnimationUiController({
     triggerAnimation,
     openAnimationCardPopup,
     loadAvailableAnimations,
-    syncAnimationMappingsFromFiles,
+    applyAnimationReset,
     stopAllActiveAnimations
   }
 });
@@ -1984,6 +2010,151 @@ async function syncAnimationMappingsFromFiles({ showAlert = false } = {}) {
   }
 
   return { changed, created, removed, deduped };
+}
+
+function clearGiftAnimationAssignments() {
+  Object.entries(giftMappings.byName || {}).forEach(([giftName, entry]) => {
+    if (normalizeGiftAction(entry).type !== 'animation') return;
+    delete giftMappings.byName[giftName];
+  });
+  Object.entries(giftMappings.byValue || {}).forEach(([diamondValue, entry]) => {
+    if (normalizeGiftAction(entry).type !== 'animation') return;
+    delete giftMappings.byValue[diamondValue];
+  });
+  giftMappingsController.setDefaultAnimationAction({ type: 'animation', value: '' });
+}
+
+function clearStickerAnimationAssignments() {
+  Object.entries(stickerMappings || {}).forEach(([stickerKey, data]) => {
+    const normalized = normalizeStickerMappingEntry(stickerKey, data);
+    if (!normalized.trigger) return;
+    normalized.trigger = '';
+    stickerMappings[stickerKey] = normalized;
+  });
+}
+
+function clearEventAnimationAssignments() {
+  Object.keys(eventAnimationMappings).forEach((eventType) => {
+    eventAnimationMappings[eventType] = '';
+  });
+}
+
+function resetAnimationMappingNamesByFilename() {
+  const nextMappings = {};
+  const triggerRenames = [];
+
+  Object.entries(animationMappings).forEach(([trigger, rawData]) => {
+    const file = getAnimationFileFromMapping(rawData);
+    const normalized = animationMappingsController.toAnimationMappingObject(rawData, file);
+    const baseTrigger = normalizeTriggerFromFilename(file || trigger) || 'animation';
+    const uniqueTrigger = buildUniqueAnimationTrigger(baseTrigger, nextMappings);
+    if (uniqueTrigger !== trigger) {
+      triggerRenames.push([trigger, uniqueTrigger]);
+    }
+    nextMappings[uniqueTrigger] = {
+      file: normalized.file || file,
+      position: normalized.position || 'bottom-left',
+      scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1
+    };
+  });
+
+  Object.keys(animationMappings).forEach((key) => delete animationMappings[key]);
+  Object.entries(nextMappings).forEach(([key, value]) => {
+    animationMappings[key] = value;
+  });
+
+  triggerRenames.forEach(([fromTrigger, toTrigger]) => {
+    moveGiftAnimationReferences(fromTrigger, toTrigger);
+    moveEventAnimationReferences(fromTrigger, toTrigger);
+    moveStickerAnimationReferences(fromTrigger, toTrigger);
+  });
+}
+
+function resetAnimationScaleForAll() {
+  Object.entries(animationMappings).forEach(([trigger, rawData]) => {
+    const file = getAnimationFileFromMapping(rawData);
+    const normalized = animationMappingsController.toAnimationMappingObject(rawData, file);
+    animationMappings[trigger] = {
+      file: normalized.file || file,
+      position: normalized.position || 'bottom-left',
+      scale: 1
+    };
+  });
+}
+
+function resetAnimationPositionForAll() {
+  Object.entries(animationMappings).forEach(([trigger, rawData]) => {
+    const file = getAnimationFileFromMapping(rawData);
+    const normalized = animationMappingsController.toAnimationMappingObject(rawData, file);
+    animationMappings[trigger] = {
+      file: normalized.file || file,
+      position: 'bottom-left',
+      scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1
+    };
+  });
+}
+
+async function applyAnimationReset({
+  sorting = false,
+  names = false,
+  scale = false,
+  position = false,
+  gifts = false,
+  stickers = false,
+  events = false
+} = {}) {
+  const shouldResetMappings = Boolean(names || scale || position);
+  const shouldResetRefs = Boolean(gifts || stickers || events || names);
+  let renamedMappings = false;
+
+  if (shouldResetMappings) {
+    if (names) {
+      resetAnimationMappingNamesByFilename();
+      renamedMappings = true;
+    }
+    if (scale) resetAnimationScaleForAll();
+    if (position) resetAnimationPositionForAll();
+    settingsStore.removeItem('animation_custom_order');
+    await saveAnimationMappings();
+  }
+
+  if (gifts) {
+    clearGiftAnimationAssignments();
+    saveGiftMappings();
+  }
+
+  if (stickers) {
+    clearStickerAnimationAssignments();
+    saveStickerMappings();
+  }
+
+  if (events) {
+    clearEventAnimationAssignments();
+    saveEventAnimationMappings();
+  }
+
+  if (renamedMappings) {
+    if (!gifts) saveGiftMappings();
+    if (!stickers) saveStickerMappings();
+    if (!events) saveEventAnimationMappings();
+  }
+
+  if (sorting) {
+    settingsStore.removeItem('animation_sort_mode');
+    settingsStore.removeItem('animation_sort_direction');
+    settingsStore.removeItem('animation_map_filter');
+    settingsStore.removeItem('animation_sticker_filter');
+    settingsStore.removeItem('animation_custom_order');
+    if (animationUiController && typeof animationUiController.resetAnimationListControlsToDefaults === 'function') {
+      animationUiController.resetAnimationListControlsToDefaults({ rerender: false });
+    }
+  }
+
+  if (shouldResetRefs) {
+    renderGiftMappings();
+  }
+
+  renderAnimationMappings();
 }
 
 // Load animation mappings from settingsStore

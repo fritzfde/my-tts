@@ -847,13 +847,19 @@ input[type="range"] {
 
 .sound-library-upload-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(220px, 280px);
+  grid-template-columns: auto minmax(220px, 280px);
   gap: 10px;
   align-items: center;
 }
 
-.sound-library-upload-row input[type="file"] {
+.sound-upload-btn {
   min-height: 38px;
+  min-width: 160px;
+}
+
+.sound-upload-btn.is-drop-target {
+  border-color: rgba(34, 197, 94, 0.75);
+  background: rgba(34, 197, 94, 0.14);
 }
 
 .sound-alert-volume-row {
@@ -1617,10 +1623,53 @@ input[type="range"] {
 }
 
 .animation-controls-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+.animation-sort-chips,
+.animation-filter-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.animation-sort-chip,
+.animation-filter-chip {
+  font-size: 0.78rem;
+  padding: 6px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex: none;
+  width: auto;
+  min-width: max-content;
+}
+
+.animation-filter-chip {
+  min-width: 165px;
+  justify-content: center;
+  display: inline-flex;
+}
+
+.animation-sort-chip.active {
+  border-color: rgba(59, 130, 246, 0.65);
+  color: #bfdbfe;
+  background: rgba(59, 130, 246, 0.18);
+}
+
+.animation-filter-chip.active {
+  border-color: rgba(34, 197, 94, 0.65);
+  color: #bbf7d0;
+  background: rgba(34, 197, 94, 0.14);
+}
+
+.animation-controls-hidden {
+  display: none;
 }
 
 /* Animation mapping cards and thumbnails */
@@ -1639,6 +1688,23 @@ input[type="range"] {
   border: 1px solid var(--border);
   --play-progress: 0;
   transition: border-color 180ms ease, opacity 240ms ease, filter 240ms ease;
+}
+
+.animation-mapping-card.sort-draggable {
+  cursor: grab;
+}
+
+.animation-mapping-card.sort-draggable:active {
+  cursor: grabbing;
+}
+
+.animation-mapping-card.is-dragging {
+  opacity: 0.35;
+}
+
+.animation-mapping-card.drag-over {
+  border-color: rgba(34, 197, 94, 0.75);
+  box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.35) inset;
 }
 
 .animation-mapping-card:hover {
@@ -1837,6 +1903,11 @@ input[type="range"] {
   transform: none;
 }
 
+#uploadAnimationBtn.is-drop-target {
+  border-color: rgba(34, 197, 94, 0.75);
+  background: rgba(34, 197, 94, 0.14);
+}
+
 .animation-card-popup {
   position: fixed;
   inset: 0;
@@ -1865,6 +1936,10 @@ input[type="range"] {
   width: min(620px, calc(100vw - 32px));
 }
 
+.animation-reset-popup-panel {
+  width: min(420px, calc(100vw - 24px));
+}
+
 .animation-card-popup-panel h4 {
   margin: 0 0 12px;
   font-size: 0.95rem;
@@ -1875,6 +1950,28 @@ input[type="range"] {
   grid-template-columns: 1fr auto;
   gap: 10px;
   align-items: end;
+}
+
+.animation-reset-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.animation-reset-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.animation-reset-option input[type="checkbox"] {
+  width: auto;
+  margin: 0;
 }
 
 .animation-popup-scale-wrap {
@@ -2298,8 +2395,7 @@ input[type="range"] {
   }
 
   .sound-library-upload-row,
-  .overlay-url-row,
-  .animation-controls-row {
+  .overlay-url-row {
     grid-template-columns: 1fr;
   }
 
@@ -2309,9 +2405,15 @@ input[type="range"] {
 
   .animation-controls-row {
     gap: 6px;
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .animation-controls-row select,
+  .animation-sort-chips,
+  .animation-filter-chips {
+    width: 100%;
+  }
+
   .animation-popup-gift-row input,
   #animationPopupSticker {
     width: 100%;

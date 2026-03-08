@@ -551,12 +551,18 @@
       return '';
     }
 
-    async function handleUploadSound() {
+    function toggleSoundUploadDropState(enabled) {
+      const uploadBtn = elements.soundLibraryUploadBtn || null;
+      if (!uploadBtn || !uploadBtn.classList) return;
+      uploadBtn.classList.toggle('is-drop-target', Boolean(enabled));
+    }
+
+    async function handleUploadSound(overrideFile = null) {
       const uploadInput = elements.soundLibraryUploadInput || null;
       const uploadBtn = elements.soundLibraryUploadBtn || null;
       if (!uploadInput || !uploadBtn || !callFetch) return;
 
-      const file = uploadInput.files?.[0];
+      const file = overrideFile || uploadInput.files?.[0];
       if (!file) {
         callbacks.updateStatus?.('Select a sound file first', false, true);
         return;
@@ -586,7 +592,7 @@
         callbacks.updateStatus?.(`Upload failed: ${err.message}`, false, true);
       } finally {
         uploadBtn.disabled = false;
-        uploadBtn.textContent = 'Upload';
+        uploadBtn.textContent = '⬆️ Upload Sound';
       }
     }
 
@@ -654,7 +660,36 @@
 
       if (uploadBtn) {
         uploadBtn.addEventListener('click', () => {
+          if (uploadBtn.disabled) return;
+          elements.soundLibraryUploadInput?.click();
+        });
+      }
+
+      const uploadInput = elements.soundLibraryUploadInput || null;
+      if (uploadInput) {
+        uploadInput.addEventListener('change', () => {
           void handleUploadSound();
+        });
+      }
+
+      if (uploadBtn) {
+        ['dragenter', 'dragover'].forEach((eventName) => {
+          uploadBtn.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            toggleSoundUploadDropState(true);
+          });
+        });
+        ['dragleave', 'dragend'].forEach((eventName) => {
+          uploadBtn.addEventListener(eventName, () => {
+            toggleSoundUploadDropState(false);
+          });
+        });
+        uploadBtn.addEventListener('drop', (event) => {
+          event.preventDefault();
+          toggleSoundUploadDropState(false);
+          const file = event.dataTransfer?.files?.[0];
+          if (!file) return;
+          void handleUploadSound(file);
         });
       }
 
