@@ -18,6 +18,8 @@
       setTikTokOnlineUserTtlMs,
       autoAssignVoiceIfNeeded,
       speakText,
+      setPlatformSpeechSuppressed,
+      handleKeywordTriggers,
       getGiftAction,
       getEventAnimationTrigger,
       triggerAnimation,
@@ -45,6 +47,18 @@
 
     function isConnected() {
       return state.connected;
+    }
+
+    function normalizeTikTokUsernameInput(value) {
+      let raw = String(value || '').trim();
+      if (!raw) return '';
+
+      raw = raw.replace(/^https?:\/\/(www\.)?tiktok\.com\//i, '');
+      raw = raw.replace(/^@/, '');
+      raw = raw.split(/[/?#]/)[0] || '';
+      raw = raw.trim();
+
+      return raw.replace(/^@+/, '');
     }
 
     function notifyConnectionState(connected) {
@@ -174,7 +188,13 @@
         }
 
         state.lastPollTime = Date.now();
-        if (!messages || messages.length === 0) return;
+        if (!messages || messages.length === 0) {
+          if (isInitialPollCycle) {
+            addChatMessage('SYSTEM', 'TikTok chat synced. Waiting for new messages...', 'tiktok', false);
+            setPlatformSpeechSuppressed?.('tiktok', false);
+          }
+          return;
+        }
 
         const getMessageId = (msg) => {
           if (msg.type === 'gift') {
@@ -292,6 +312,10 @@
               emitPresenceLifecycle: !isFirstPoll
             });
 
+            if (!isFirstPoll && msg.text && typeof handleKeywordTriggers === 'function') {
+              handleKeywordTriggers(msg.author, msg.text, 'tiktok');
+            }
+
             if (!isFirstPoll && emotes.length > 0 && typeof handleStickerAnimation === 'function') {
               if (canUserTriggerAnimations(msg.author, 'tiktok')) {
                 handleStickerAnimation({
@@ -333,6 +357,9 @@
           }
 
           if (msg.text && msg.text.trim()) {
+            if (!isFirstPoll && typeof handleKeywordTriggers === 'function') {
+              handleKeywordTriggers(msg.author, msg.text, 'tiktok');
+            }
             await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
             if (shouldSpeak) {
               speakText(msg.author, msg.text, 'tiktok', true);
@@ -373,7 +400,7 @@
 
             for (const msg of replayCandidates) {
               await autoAssignVoiceIfNeeded(msg.author, 'tiktok');
-              speakText(msg.author, msg.text, 'tiktok', false);
+              speakText(msg.author, msg.text, 'tiktok', false, { bypassSuppression: true });
               replayed += 1;
             }
           }
@@ -383,6 +410,7 @@
           } else {
             addChatMessage('SYSTEM', 'TikTok chat synced. Waiting for new messages...', 'tiktok', false);
           }
+          setPlatformSpeechSuppressed?.('tiktok', false);
           return;
         }
 
@@ -408,27 +436,29 @@
     }
 
     async function connectToTikTok() {
-      const username = elements.tiktokUsernameInput.value.trim();
+      const username = normalizeTikTokUsernameInput(elements.tiktokUsernameInput.value);
       if (!username) {
         updateStatus('Enter TikTok username', false, true);
         return;
       }
 
+      elements.tiktokUsernameInput.value = username;
       settingsStore.setItem('tiktok_username_cache', username);
 
       elements.connectTikTokBtn.disabled = true;
       updateStatus('Connecting to TikTok...', true);
 
       try {
+        setPlatformSpeechSuppressed?.('tiktok', true);
         const response = await fetch('/api/tiktok/connect', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username })
         });
 
-        const data = await response.json();
+        const data = await response.json().catch(() => ({}));
         if (!data.success) {
-          throw new Error('Connection failed');
+          throw new Error(data.error || 'Connection failed');
         }
 
         state.connected = true;
@@ -443,10 +473,11 @@
 
         requestWakeLock();
         updateStatus('TikTok connected', true);
-        addChatMessage('SYSTEM', `Connected to @${username}`, 'tiktok', false);
+        addChatMessage('SYSTEM', `Connected to @${data.username || username}`, 'tiktok', false);
 
         schedulePoll(state.pollLoopToken, 0);
       } catch (err) {
+        setPlatformSpeechSuppressed?.('tiktok', false);
         updateStatus(`TikTok error: ${err.message}`, false, true);
         elements.connectTikTokBtn.disabled = false;
         notifyConnectionState(false);
@@ -454,6 +485,7 @@
     }
 
     function disconnectTikTok() {
+      setPlatformSpeechSuppressed?.('tiktok', false);
       state.connected = false;
       state.lastPollTime = Date.now();
       state.pollLoopToken += 1;

@@ -22,8 +22,18 @@
 
     const state = {
       refreshIntervalId: null,
-      initialized: false
+      initialized: false,
+      activeModel: ''
     };
+    const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434';
+
+    const OLLAMA_MODEL_PREFERENCE = [
+      'qwen2.5:7b-instruct',
+      'qwen2.5:14b',
+      'llama3:8b',
+      'llama3',
+      'qwen2.5:7b'
+    ];
 
     function loadGenderCache() {
       voicesController.loadGenderCache();
@@ -33,18 +43,70 @@
       voicesController.saveGenderCache();
     }
 
-    function setOllamaStatus(online) {
+    function getSavedOllamaModel() {
+      return String(settingsStore.getItem('ollama_gender_model') || '').trim();
+    }
+
+    function normalizeOllamaBaseUrl(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return DEFAULT_OLLAMA_BASE_URL;
+
+      const withProtocol = /^[a-z]+:\/\//i.test(raw) ? raw : `http://${raw}`;
+      return withProtocol.replace(/\/+$/, '');
+    }
+
+    function getSavedOllamaBaseUrl() {
+      return normalizeOllamaBaseUrl(settingsStore.getItem('ollama_base_url'));
+    }
+
+    function saveOllamaBaseUrl(baseUrl) {
+      settingsStore.setItem('ollama_base_url', normalizeOllamaBaseUrl(baseUrl));
+    }
+
+    function getOllamaBaseUrl() {
+      return normalizeOllamaBaseUrl(
+        elements.ollamaBaseUrlInput ? elements.ollamaBaseUrlInput.value : getSavedOllamaBaseUrl()
+      );
+    }
+
+    function saveOllamaModel(model) {
+      const normalized = String(model || '').trim();
+      if (!normalized) return;
+      settingsStore.setItem('ollama_gender_model', normalized);
+    }
+
+    function pickOllamaModel(modelNames = []) {
+      const available = Array.isArray(modelNames)
+        ? modelNames.map((name) => String(name || '').trim()).filter(Boolean)
+        : [];
+      if (available.length === 0) return '';
+
+      const savedModel = getSavedOllamaModel();
+      if (savedModel && available.includes(savedModel)) {
+        return savedModel;
+      }
+
+      const preferred = OLLAMA_MODEL_PREFERENCE.find((name) => available.includes(name));
+      return preferred || available[0];
+    }
+
+    function setOllamaStatus(online, model = '') {
       voicesController.setOllamaOnline(online);
       const statusEl = elements.ollamaStatusEl;
       if (!statusEl) return;
 
+      const baseUrl = getOllamaBaseUrl();
       statusEl.classList.remove('online', 'offline');
+      statusEl.title = baseUrl;
       if (online) {
         statusEl.classList.add('online');
-        statusEl.textContent = 'Ollama: online (LLM detection active)';
+        const label = String(model || '').trim();
+        statusEl.textContent = label
+          ? `Ollama: online (${label})`
+          : 'Ollama: online (LLM detection active)';
       } else {
         statusEl.classList.add('offline');
-        statusEl.textContent = 'Ollama: offline (start ollama serve to enable auto-detection)';
+        statusEl.textContent = `Ollama: offline (${baseUrl})`;
       }
     }
 
@@ -55,12 +117,22 @@
       const timeout = callSetTimeout(() => controller.abort(), 1800);
 
       try {
-        const response = await callFetch('http://localhost:11434/api/tags', {
+        const response = await callFetch(`${getOllamaBaseUrl()}/api/tags`, {
           method: 'GET',
           signal: controller.signal
         });
-        setOllamaStatus(response.ok);
+        const data = await response.json().catch(() => ({}));
+        const modelNames = Array.isArray(data?.models)
+          ? data.models
+            .map((entry) => String(entry?.name || '').trim())
+            .filter(Boolean)
+          : [];
+        const activeModel = response.ok ? pickOllamaModel(modelNames) : '';
+        state.activeModel = activeModel;
+        if (activeModel) saveOllamaModel(activeModel);
+        setOllamaStatus(Boolean(response.ok && activeModel), activeModel);
       } catch (error) {
+        state.activeModel = '';
         setOllamaStatus(false);
       } finally {
         clearTimeout(timeout);
@@ -113,7 +185,9 @@
     async function detectGenderWithLLM(username) {
       try {
         const gender = await voicesController.detectGenderWithLLM(username, {
-          fetchFn: callFetch
+          fetchFn: callFetch,
+          model: state.activeModel || getSavedOllamaModel() || undefined,
+          baseUrl: getOllamaBaseUrl()
         });
         if (gender) {
           console.log(`🤖 LLM detected: ${username} → ${gender}`);
@@ -199,6 +273,32 @@
       });
     }
 
+    function initOllamaBaseUrlPreference() {
+      const baseUrlInput = elements.ollamaBaseUrlInput;
+      if (!baseUrlInput) return;
+
+      const savedBaseUrl = getSavedOllamaBaseUrl();
+      baseUrlInput.value = savedBaseUrl;
+      baseUrlInput.placeholder = DEFAULT_OLLAMA_BASE_URL;
+      baseUrlInput.title = 'Ollama base URL';
+
+      const persistBaseUrl = () => {
+        const normalized = normalizeOllamaBaseUrl(baseUrlInput.value);
+        baseUrlInput.value = normalized;
+        saveOllamaBaseUrl(normalized);
+        refreshOllamaStatus();
+      };
+
+      baseUrlInput.addEventListener('change', persistBaseUrl);
+      baseUrlInput.addEventListener('blur', persistBaseUrl);
+      baseUrlInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          persistBaseUrl();
+        }
+      });
+    }
+
     function wireVoicesChangedHandler() {
       if (!speech) return;
 
@@ -221,6 +321,7 @@
       loadGenderCache();
       initGenderVoiceSelectPersistence();
       initAutoDetectionPreference();
+      initOllamaBaseUrlPreference();
       populateGenderVoiceSelects();
       refreshOllamaStatus();
       state.refreshIntervalId = callSetInterval(refreshOllamaStatus, 30000);

@@ -103,6 +103,7 @@ if (!window.userAvatars) {
 
 let audioRuntimeController = null;
 let soundAlertsController = null;
+let keywordTriggersController = null;
 let animationPermissionsUiController = null;
 let dashboardSettingsController = null;
 let chatUiController = null;
@@ -227,6 +228,7 @@ const testMessageInput = document.getElementById('testMessage');
 const testVoiceYouTubeBtn = document.getElementById('testVoiceYouTubeBtn');
 const testVoiceTikTokBtn = document.getElementById('testVoiceTikTokBtn');
 const ollamaStatusEl = document.getElementById('ollamaStatus');
+const ollamaBaseUrlInput = document.getElementById('ollamaBaseUrlInput');
 const onlineUsersPanel = document.getElementById('onlineUsersPanel');
 const onlineUsersGrid = document.getElementById('onlineUsersGrid');
 const onlineUsersSplitter = document.getElementById('onlineUsersSplitter');
@@ -250,12 +252,151 @@ const CHAT_LAYOUT_MIN_WIDTH = 260;
 const CHAT_LAYOUT_MAX_WIDTH = 760;
 const ONLINE_USERS_TOP_HEIGHT_KEY = 'online_users_youtube_height';
 const ONLINE_USERS_TOP_MIN_HEIGHT = 120;
+const ANIMATION_KEYWORD_JOB_KEY = 'animation_keyword_generation_job';
+let animationKeywordJob = null;
+let animationKeywordGenerationPromise = null;
 
 function getStartupBacklogCount() {
   const fallback = window.settingsStore?.getItem?.('yt_tts_startup_backlog_count') ?? '0';
   const raw = Number(youtubeStartupBacklogInput ? youtubeStartupBacklogInput.value : fallback);
   if (!Number.isFinite(raw)) return 0;
   return Math.max(0, Math.min(20, Math.floor(raw)));
+}
+
+function normalizeAnimationKeywordJob(value) {
+  const raw = value && typeof value === 'object' ? value : {};
+  const pendingItems = Array.isArray(raw.pendingItems)
+    ? raw.pendingItems
+      .map((entry) => ({ kind: 'animation', filename: String(entry?.filename || entry || '').trim() }))
+      .filter((entry) => entry.filename)
+    : [];
+  const total = Number(raw.total);
+  return {
+    pendingItems,
+    total: Number.isFinite(total) && total >= pendingItems.length
+      ? Math.floor(total)
+      : pendingItems.length
+  };
+}
+
+function loadAnimationKeywordJob() {
+  const raw = settingsStore.getItem(ANIMATION_KEYWORD_JOB_KEY);
+  if (!raw) {
+    animationKeywordJob = null;
+    return;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const job = normalizeAnimationKeywordJob(parsed);
+    animationKeywordJob = job.pendingItems.length > 0 ? job : null;
+  } catch (err) {
+    console.error('Failed to parse animation keyword job:', err);
+    animationKeywordJob = null;
+  }
+}
+
+function saveAnimationKeywordJob() {
+  if (!animationKeywordJob || !Array.isArray(animationKeywordJob.pendingItems) || animationKeywordJob.pendingItems.length === 0) {
+    settingsStore.removeItem(ANIMATION_KEYWORD_JOB_KEY);
+    animationKeywordJob = null;
+    return;
+  }
+
+  settingsStore.setItem(ANIMATION_KEYWORD_JOB_KEY, JSON.stringify({
+    pendingItems: animationKeywordJob.pendingItems,
+    total: animationKeywordJob.total
+  }));
+}
+
+function getAnimationKeywordJobProgress() {
+  const total = Number(animationKeywordJob?.total || 0);
+  const remaining = Array.isArray(animationKeywordJob?.pendingItems) ? animationKeywordJob.pendingItems.length : 0;
+  return {
+    total,
+    remaining,
+    completed: Math.max(0, total - remaining)
+  };
+}
+
+function updateAnimationKeywordGenerateButton() {
+  if (!generateAnimationKeywordsBtn) return;
+  const { total, completed } = getAnimationKeywordJobProgress();
+  generateAnimationKeywordsBtn.disabled = Boolean(animationKeywordGenerationPromise);
+  if (total > 0) {
+    generateAnimationKeywordsBtn.textContent = animationKeywordGenerationPromise
+      ? `Generating ${completed}/${total}`
+      : `Resume ${completed}/${total}`;
+    updateAnimationKeywordToggleButton();
+    return;
+  }
+  generateAnimationKeywordsBtn.textContent = '✨ Suggest Missing';
+  updateAnimationKeywordToggleButton();
+}
+
+function getAnimationKeywordToggleState() {
+  const eligibleEntries = Object.entries(animationMappings)
+    .map(([trigger, rawData]) => {
+      const file = getAnimationFileFromMapping(rawData);
+      const normalized = toAnimationMappingObject(rawData, file);
+      const keywords = Array.isArray(normalized.keywords) ? normalized.keywords : [];
+      if (keywords.length === 0) return null;
+      return {
+        trigger,
+        enabled: normalized.keywordTriggerEnabled === true
+      };
+    })
+    .filter(Boolean);
+  const enabledCount = eligibleEntries.filter((entry) => entry.enabled).length;
+  return {
+    total: eligibleEntries.length,
+    enabledCount,
+    allEnabled: eligibleEntries.length > 0 && enabledCount === eligibleEntries.length
+  };
+}
+
+function updateAnimationKeywordToggleButton() {
+  if (!animationKeywordToggleBtn) return;
+  const { total, allEnabled } = getAnimationKeywordToggleState();
+  animationKeywordToggleBtn.disabled = Boolean(animationKeywordGenerationPromise) || total === 0;
+  animationKeywordToggleBtn.textContent = allEnabled ? 'Disable all' : 'Enable all';
+  animationKeywordToggleBtn.title = total > 0
+    ? `${allEnabled ? 'Disable' : 'Enable'} keyword triggers for all ${total} animation(s) that already have keywords`
+    : 'Generate or enter keywords first, then you can enable them all here';
+}
+
+async function setAllAnimationKeywordTriggers(enabled = false) {
+  const normalizedEnabled = enabled === true;
+  let changedCount = 0;
+
+  Object.entries(animationMappings).forEach(([trigger, rawData]) => {
+    const file = getAnimationFileFromMapping(rawData);
+    const normalized = toAnimationMappingObject(rawData, file);
+    const keywords = Array.isArray(normalized.keywords) ? normalized.keywords : [];
+    if (keywords.length === 0) return;
+    if (normalized.keywordTriggerEnabled === normalizedEnabled) return;
+
+    animationMappings[trigger] = {
+      file: normalized.file || file,
+      position: normalized.position || 'bottom-left',
+      scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1,
+      keywords,
+      keywordTriggerEnabled: normalizedEnabled
+    };
+    changedCount += 1;
+  });
+
+  if (changedCount === 0) {
+    updateAnimationKeywordToggleButton();
+    return;
+  }
+
+  await saveAnimationMappings();
+  renderAnimationMappings();
+  updateStatus(
+    `✓ ${normalizedEnabled ? 'Enabled' : 'Disabled'} keyword triggers for ${changedCount} animation(s).`,
+    false
+  );
 }
 
 const ttsEngineController = window.createTtsEngineController({
@@ -359,20 +500,13 @@ function handlePresenceLifecycleAlert(eventType, payload = {}) {
   const username = String(payload.username || '').trim();
   const platform = String(payload.platform || '').trim().toLowerCase();
   if (!username || !platform) return;
-
-  const eventTrigger = getEventAnimationTrigger(normalizedEventType);
-  if (eventTrigger && canUserTriggerAnimations(username, platform)) {
-    triggerAnimation(eventTrigger, platform, username, normalizedEventType);
-  }
-
-  const soundPath = resolveSoundAlert({
+  soundAlertsController?.handleLifecycleEvent({
     type: normalizedEventType,
     platform,
-    username
+    username,
+    displayName: payload.displayName || '',
+    avatar: payload.avatar || null
   });
-  if (soundPath) {
-    playAlertSound(soundPath);
-  }
 }
 
 const presenceController = window.createPresenceController({
@@ -437,6 +571,7 @@ function markUserOnline(username, platform, payload = {}) {
 }
 
 function clearOnlineUsers(platform) {
+  soundAlertsController?.clearPresenceState(platform);
   presenceController.clearPlatform(platform);
 }
 
@@ -795,8 +930,20 @@ function escapeHtml(text) {
 }
 
 // Speak text with platform-specific voice
-function speakText(author, text, platform, shouldDisplay = true) {
-  ttsEngineController.speakText(author, text, platform, shouldDisplay);
+function speakText(author, text, platform, shouldDisplay = true, options = {}) {
+  ttsEngineController.speakText(author, text, platform, shouldDisplay, options);
+}
+
+function setPlatformSpeechSuppressed(platform, suppressed) {
+  ttsEngineController?.setPlatformSpeechSuppressed?.(platform, suppressed);
+}
+
+function handleKeywordTriggers(author, text, platform) {
+  return keywordTriggersController?.handleMessage({
+    author,
+    text,
+    platform
+  });
 }
 
 youtubeController = window.createYouTubeController({
@@ -827,6 +974,8 @@ youtubeController = window.createYouTubeController({
   renderOnlineUsers,
   autoAssignVoiceIfNeeded,
   speakText,
+  setPlatformSpeechSuppressed,
+  handleKeywordTriggers,
   getStartupBacklogCount: () => getStartupBacklogCount(),
   youtubeOnlineUserTtlMs: ONLINE_USER_TTL_BY_PLATFORM_MS.youtube,
   onConnectionStateChange: () => updateOnlinePlatformIndicators()
@@ -859,6 +1008,8 @@ tiktokController = window.createTikTokController({
   setTikTokOnlineUserTtlMs: (value) => presenceController.setTikTokTtlMs(value),
   autoAssignVoiceIfNeeded,
   speakText,
+  setPlatformSpeechSuppressed,
+  handleKeywordTriggers,
   getGiftAction,
   triggerAnimation,
   getEventAnimationTrigger,
@@ -1057,6 +1208,7 @@ ollamaGenderController = window.createOllamaGenderController({
   voicesController,
   elements: {
     ollamaStatusEl,
+    ollamaBaseUrlInput,
     autoGenderDetectionCheckbox,
     maleVoiceSelect,
     femaleVoiceSelect
@@ -1337,6 +1489,8 @@ soundAlertsController = window.createSoundAlertsController({
   elements: {
     soundLibraryUploadInput: document.getElementById('soundLibraryUploadInput'),
     soundLibraryUploadBtn: document.getElementById('soundLibraryUploadBtn'),
+    soundLibraryGenerateBtn: document.getElementById('soundLibraryGenerateBtn'),
+    soundLibraryKeywordToggleBtn: document.getElementById('soundLibraryKeywordToggleBtn'),
     soundLibraryCards: document.getElementById('soundLibraryCards'),
     addSoundAlertRuleBtn: document.getElementById('addSoundAlertRuleBtn'),
     refreshTikTokGiftsBtn: document.getElementById('refreshTikTokGiftsBtn'),
@@ -1350,6 +1504,8 @@ soundAlertsController = window.createSoundAlertsController({
     getAnimationTriggerOptions: () => getSoundAlertAnimationTriggerOptions(),
     assignAnimationForRule: (rule, trigger) => assignAnimationToSoundRule(rule, trigger),
     clearAnimationForRule: (rule) => clearAnimationForSoundRule(rule),
+    triggerAnimation: (trigger, platform, username, type) => triggerAnimation(trigger, platform, username, type),
+    canTriggerAnimation: (username, platform) => canUserTriggerAnimations(username, platform),
     fetchKnownGiftNames: async () => {
       try {
         const response = await fetch('/api/tiktok/gifts');
@@ -1366,9 +1522,23 @@ soundAlertsController = window.createSoundAlertsController({
     }
   },
   fetchFn: (...args) => fetch(...args),
-  confirmFn: (message) => window.confirm(message)
+  confirmFn: (message) => window.confirm(message),
+  setTimeoutFn: (cb, ms) => setTimeout(cb, ms),
+  clearTimeoutFn: (id) => clearTimeout(id),
+  nowFn: () => Date.now()
 });
 soundAlertsController.init();
+
+keywordTriggersController = window.createKeywordTriggersController({
+  windowRef: window,
+  callbacks: {
+    getAnimationMappings: () => animationMappings,
+    getSoundKeywordEntries: () => soundAlertsController?.getSoundKeywordEntries?.() || [],
+    canTriggerAnimation: (username, platform) => canUserTriggerAnimations(username, platform),
+    triggerAnimation: (trigger, platform, author, type) => triggerAnimation(trigger, platform, author, type),
+    playSound: (soundPath) => playAlertSound(soundPath)
+  }
+});
 
 function toAnimationTriggerList(value) {
   return giftMappingsController.toAnimationTriggerList(value);
@@ -1588,6 +1758,8 @@ const animationSortChipButtons = Array.from(document.querySelectorAll('#animatio
 const animationMapFilterBtn = document.getElementById('animationMapFilterBtn');
 const animationStickerFilterBtn = document.getElementById('animationStickerFilterBtn');
 const uploadAnimationBtn = document.getElementById('uploadAnimationBtn');
+const generateAnimationKeywordsBtn = document.getElementById('generateAnimationKeywordsBtn');
+const animationKeywordToggleBtn = document.getElementById('animationKeywordToggleBtn');
 const uploadAnimationInput = document.getElementById('uploadAnimationInput');
 const resetAnimationsBtn = document.getElementById('resetAnimationsBtn');
 const stopAnimationBtn = document.getElementById('stopAnimationBtn');
@@ -1615,6 +1787,9 @@ const animationPlaybackController = window.createAnimationPlaybackController({
   tickMs: 120
 });
 const activeAnimationCardPlayback = animationPlaybackController.state.activePlayback; // trigger -> playback state
+loadAnimationKeywordJob();
+updateAnimationKeywordGenerateButton();
+updateAnimationKeywordToggleButton();
 const animationUiController = window.createAnimationUiController({
   windowRef: window,
   documentRef: document,
@@ -1632,6 +1807,7 @@ const animationUiController = window.createAnimationUiController({
     animationMapFilterBtn,
     animationStickerFilterBtn,
     uploadAnimationBtn,
+    generateAnimationKeywordsBtn,
     uploadAnimationInput,
     resetAnimationsBtn,
     stopAnimationBtn,
@@ -1671,6 +1847,7 @@ const animationUiController = window.createAnimationUiController({
     triggerAnimation,
     openAnimationCardPopup,
     loadAvailableAnimations,
+    generateMissingAnimationKeywords,
     applyAnimationReset,
     stopAllActiveAnimations
   }
@@ -2054,7 +2231,9 @@ function resetAnimationMappingNamesByFilename() {
     nextMappings[uniqueTrigger] = {
       file: normalized.file || file,
       position: normalized.position || 'bottom-left',
-      scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1
+      scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1,
+      keywords: Array.isArray(normalized.keywords) ? normalized.keywords : [],
+      keywordTriggerEnabled: normalized.keywordTriggerEnabled === true
     };
   });
 
@@ -2077,7 +2256,9 @@ function resetAnimationScaleForAll() {
     animationMappings[trigger] = {
       file: normalized.file || file,
       position: normalized.position || 'bottom-left',
-      scale: 1
+      scale: 1,
+      keywords: Array.isArray(normalized.keywords) ? normalized.keywords : [],
+      keywordTriggerEnabled: normalized.keywordTriggerEnabled === true
     };
   });
 }
@@ -2089,7 +2270,9 @@ function resetAnimationPositionForAll() {
     animationMappings[trigger] = {
       file: normalized.file || file,
       position: 'bottom-left',
-      scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1
+      scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1,
+      keywords: Array.isArray(normalized.keywords) ? normalized.keywords : [],
+      keywordTriggerEnabled: normalized.keywordTriggerEnabled === true
     };
   });
 }
@@ -2211,11 +2394,121 @@ async function loadAvailableAnimations() {
       .catch(err => {
         console.error('Animation sync error:', err);
       });
+    updateAnimationKeywordGenerateButton();
+    void generateMissingAnimationKeywords({ resumeOnly: true });
   } catch (e) {
     console.error('Error loading animations:', e);
     availableAnimations.splice(0, availableAnimations.length);
     renderAnimationMappings();
+    updateAnimationKeywordGenerateButton();
   }
+}
+
+async function generateMissingAnimationKeywords({ resumeOnly = false } = {}) {
+  if (animationKeywordGenerationPromise) return animationKeywordGenerationPromise;
+  await syncAnimationMappingsFromFiles();
+
+  const missingItems = animationKeywordJob && animationKeywordJob.pendingItems.length > 0
+    ? animationKeywordJob.pendingItems
+    : (resumeOnly
+      ? []
+      : availableAnimations
+        .map((anim) => {
+          const mappingEntry = findAnimationMappingEntryByFile(anim.filename);
+          const mapping = mappingEntry?.data || animationMappingsController.toAnimationMappingObject(null, anim.filename);
+          const keywords = Array.isArray(mapping.keywords) ? mapping.keywords : [];
+          if (keywords.length > 0) return null;
+          return {
+            kind: 'animation',
+            filename: anim.filename
+          };
+        })
+        .filter(Boolean));
+
+  if (missingItems.length === 0) {
+    if (!resumeOnly) {
+      updateStatus('No animations need keyword suggestions.', false);
+    }
+    updateAnimationKeywordGenerateButton();
+    return;
+  }
+
+  animationKeywordJob = normalizeAnimationKeywordJob(
+    animationKeywordJob && animationKeywordJob.pendingItems.length > 0
+      ? animationKeywordJob
+      : { pendingItems: missingItems, total: missingItems.length }
+  );
+  saveAnimationKeywordJob();
+  updateAnimationKeywordGenerateButton();
+
+  const runner = (async () => {
+    let updatedCount = 0;
+    let warningCount = 0;
+
+    updateStatus(`Generating keyword suggestions for ${animationKeywordJob.total} animation file(s)...`, false);
+    const batchSize = 25;
+    while (animationKeywordJob && animationKeywordJob.pendingItems.length > 0) {
+      updateAnimationKeywordGenerateButton();
+      const chunk = animationKeywordJob.pendingItems.slice(0, batchSize);
+      const response = await fetch('/api/media-keywords/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: chunk })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Keyword generation failed');
+      }
+      (Array.isArray(data.results) ? data.results : []).forEach((entry) => {
+        const filename = String(entry?.filename || '').trim();
+        if (!filename) return;
+        const mappingEntry = findAnimationMappingEntryByFile(filename);
+        if (!mappingEntry) return;
+        const current = animationMappingsController.toAnimationMappingObject(mappingEntry.data, filename);
+        const keywords = keywordTriggersController?.parseKeywordList
+          ? keywordTriggersController.parseKeywordList(entry?.keywords)
+          : (Array.isArray(entry?.keywords) ? entry.keywords : []);
+        if (keywords.length === 0) {
+          if (entry?.warning) warningCount += 1;
+          return;
+        }
+        animationMappings[mappingEntry.trigger] = {
+          file: current.file,
+          position: current.position,
+          scale: current.scale,
+          keywords,
+          keywordTriggerEnabled: typeof current.keywordTriggerEnabled === 'boolean'
+            ? current.keywordTriggerEnabled
+            : false
+        };
+        updatedCount += 1;
+        if (entry?.warning) warningCount += 1;
+      });
+
+      animationKeywordJob.pendingItems = animationKeywordJob.pendingItems.slice(chunk.length);
+      saveAnimationKeywordJob();
+      await saveAnimationMappings();
+    }
+
+    renderAnimationMappings();
+    updateStatus(
+      updatedCount > 0
+        ? `✓ Suggested keywords for ${updatedCount} animation file(s)${warningCount ? ` (${warningCount} used filename fallback)` : ''}`
+        : 'No animation keywords could be suggested.',
+      false,
+      updatedCount === 0
+    );
+  })().catch((err) => {
+    console.error('Generate animation keywords failed:', err);
+    updateStatus(`Keyword generation failed: ${err.message}`, false, true);
+  }).finally(() => {
+    animationKeywordGenerationPromise = null;
+    updateAnimationKeywordGenerateButton();
+  });
+
+  animationKeywordGenerationPromise = runner;
+  updateAnimationKeywordGenerateButton();
+  return runner;
 }
 
 function ensureAnimationVideoSource(video) {
@@ -2249,6 +2542,7 @@ function getFilteredSortedAnimationCards() {
 // Render animation mappings list
 function renderAnimationMappings() {
   animationUiController.renderAnimationMappings();
+  updateAnimationKeywordToggleButton();
 }
 
 function initAnimationListControls() {
@@ -2257,18 +2551,26 @@ function initAnimationListControls() {
 
 animationUiController.init();
 
+if (animationKeywordToggleBtn) {
+  animationKeywordToggleBtn.addEventListener('click', async () => {
+    if (animationKeywordToggleBtn.disabled) return;
+    const { allEnabled } = getAnimationKeywordToggleState();
+    await setAllAnimationKeywordTriggers(!allEnabled);
+  });
+}
+
 const animationCardPopup = document.getElementById('animationCardPopup');
 const animationPopupName = document.getElementById('animationPopupName');
 const animationPopupPositionGrid = document.getElementById('animationPopupPositionGrid');
 const animationPopupScale = document.getElementById('animationPopupScale');
 const animationPopupGiftName = document.getElementById('animationPopupGiftName');
 const animationPopupGiftValue = document.getElementById('animationPopupGiftValue');
+const animationPopupKeywords = document.getElementById('animationPopupKeywords');
+const animationPopupKeywordEnabled = document.getElementById('animationPopupKeywordEnabled');
 const animationPopupSticker = document.getElementById('animationPopupSticker');
 const animationPopupStickerPicker = document.getElementById('animationPopupStickerPicker');
 const animationPopupMapFollow = document.getElementById('animationPopupMapFollow');
 const animationPopupMapShare = document.getElementById('animationPopupMapShare');
-const animationPopupMapJoin = document.getElementById('animationPopupMapJoin');
-const animationPopupMapLeave = document.getElementById('animationPopupMapLeave');
 const animationPopupMakeDefault = document.getElementById('animationPopupMakeDefault');
 const animationPopupScaleUpBtn = document.getElementById('animationPopupScaleUpBtn');
 const animationPopupScaleDownBtn = document.getElementById('animationPopupScaleDownBtn');
@@ -2311,11 +2613,11 @@ const animationPopupController = window.createAnimationPopupController({
     animationPopupScale,
     animationPopupGiftName,
     animationPopupGiftValue,
+    animationPopupKeywords,
+    animationPopupKeywordEnabled,
     animationPopupSticker,
     animationPopupMapFollow,
     animationPopupMapShare,
-    animationPopupMapJoin,
-    animationPopupMapLeave,
     animationPopupMakeDefault,
     animationPopupScaleUpBtn,
     animationPopupScaleDownBtn,

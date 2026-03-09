@@ -202,3 +202,37 @@ test('tts engine: muted user voice skips enqueue and speech', async () => {
   assert.equal(controller.state.messageQueue.length, 0);
   assert.equal(controller.state.isSpeaking, false);
 });
+
+test('tts engine: platform suppression blocks speech unless bypassed', async () => {
+  const { factory } = loadControllerFactory('tts-engine.js', 'createTtsEngineController');
+  const spoken = [];
+  const chatMessages = [];
+
+  const controller = factory({
+    synth: {
+      speak(utterance) {
+        spoken.push(utterance);
+      }
+    },
+    ensureAudioContext: () => {},
+    unlockAudio: () => {},
+    getReadOptions: () => ({ readUsernames: true, readEmojis: true, readLinks: true }),
+    getPlatformDefaultVoice: () => 'system-1',
+    getUserVoice: () => '',
+    resolveSystemVoice: (voiceId) => ({ id: voiceId }),
+    getSpeechSettings: () => ({ rate: 1, pitch: 1, volume: 1 }),
+    addChatMessage: (...args) => chatMessages.push(args)
+  });
+
+  controller.setPlatformSpeechSuppressed('youtube', true);
+  controller.speakText('alex', 'hello world', 'youtube', true);
+
+  assert.equal(chatMessages.length, 1);
+  assert.equal(spoken.length, 0);
+  assert.equal(controller.state.messageQueue.length, 0);
+
+  controller.speakText('alex', 'hello again', 'youtube', false, { bypassSuppression: true });
+
+  assert.equal(spoken.length, 1);
+  assert.equal(spoken[0].text, 'alex says: hello again');
+});

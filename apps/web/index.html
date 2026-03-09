@@ -192,6 +192,12 @@
                 <div style="margin-top: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border-radius: 6px; font-size: 0.75rem; color: var(--text-secondary);">
                     Uses local LLM (Ollama) to detect gender from usernames (e.g., "xXS4r4hXx" → Sarah → female voice). Results are cached for instant future assignments. Auto-detection runs only when Ollama is online.
                 </div>
+                <div class="ollama-config-row">
+                    <div class="input-group" style="margin-bottom: 0;">
+                        <label for="ollamaBaseUrlInput">Ollama URL</label>
+                        <input type="text" id="ollamaBaseUrlInput" placeholder="http://localhost:11434" spellcheck="false">
+                    </div>
+                </div>
                 <div id="ollamaStatus" class="ollama-status">Ollama: checking...</div>
             </div>
 
@@ -263,6 +269,8 @@
 
                 <div class="sound-library-upload-row">
                     <button id="soundLibraryUploadBtn" class="secondary sound-upload-btn" title="Upload sound file or drop it here">⬆️ Upload Sound</button>
+                    <button id="soundLibraryGenerateBtn" class="secondary sound-upload-btn" title="Generate keyword suggestions for sounds that do not have any yet">✨ Suggest Missing</button>
+                    <button id="soundLibraryKeywordToggleBtn" class="secondary sound-upload-btn" title="Enable or disable keyword triggers for all sounds that already have keywords">Enable all</button>
                     <input type="file" id="soundLibraryUploadInput" accept=".mp3,.wav,.ogg" style="display: none;">
                     <div class="sound-alert-volume-row">
                         <label for="soundAlertsVolumeSlider" style="margin: 0;">
@@ -300,6 +308,7 @@
                             <thead>
                                 <tr>
                                     <th>Event</th>
+                                    <th>On</th>
                                     <th>Condition</th>
                                     <th>Sound</th>
                                     <th>Animation</th>
@@ -308,7 +317,7 @@
                             </thead>
                             <tbody id="soundAlertRulesBody">
                                 <tr>
-                                    <td colspan="5" class="sound-alert-empty-row">Loading...</td>
+                                    <td colspan="6" class="sound-alert-empty-row">Loading...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -378,8 +387,10 @@
                 <div id="animationMappingsList" class="animation-mappings-grid" style="max-height: 500px; overflow-y: auto; padding-right: 5px;">
                     <!-- Mapping items will be added here dynamically -->
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 8px;">
+                <div style="display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 8px; margin-top: 8px;">
                     <button id="uploadAnimationBtn" class="secondary">⬆️ Upload Animation</button>
+                    <button id="generateAnimationKeywordsBtn" class="secondary" title="Generate keyword suggestions for animations that do not have any yet">✨ Suggest Missing</button>
+                    <button id="animationKeywordToggleBtn" class="secondary" title="Enable or disable keyword triggers for all animations that already have keywords">Enable all</button>
                     <button id="resetAnimationsBtn" class="secondary">♻️ Reset</button>
                     <button id="stopAnimationBtn" class="stop" disabled>⏹️ Stop Animation</button>
                 </div>
@@ -452,6 +463,13 @@
                             <div id="animationPopupStickerPicker" class="animation-sticker-picker">
                                 <!-- Sticker thumbnails added dynamically -->
                             </div>
+                            <div class="animation-popup-keyword-row">
+                                <textarea id="animationPopupKeywords" rows="3" placeholder="Keywords" title="Keywords"></textarea>
+                                <label class="animation-popup-keyword-toggle" title="Enable keyword-triggered animation from chat messages.">
+                                    <input type="checkbox" id="animationPopupKeywordEnabled" style="width: auto; margin-right: 8px;">
+                                    Keyword trigger
+                                </label>
+                            </div>
                             <div class="animation-popup-event-row">
                                 <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
                                     <input type="checkbox" id="animationPopupMapFollow" style="width: auto; margin-right: 8px;">
@@ -460,14 +478,6 @@
                                 <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
                                     <input type="checkbox" id="animationPopupMapShare" style="width: auto; margin-right: 8px;">
                                     Trigger on stream share
-                                </label>
-                                <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
-                                    <input type="checkbox" id="animationPopupMapJoin" style="width: auto; margin-right: 8px;">
-                                    Trigger on viewer join
-                                </label>
-                                <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
-                                    <input type="checkbox" id="animationPopupMapLeave" style="width: auto; margin-right: 8px;">
-                                    Trigger on viewer leave
                                 </label>
                             </div>
                             <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
@@ -647,6 +657,7 @@
 <script src="assets/js/gift-sounds.js"></script>
 <script src="assets/js/gift-mappings.js"></script>
 <script src="assets/js/sound-alerts.js"></script>
+<script src="assets/js/keyword-triggers.js"></script>
 <script src="assets/js/presence.js"></script>
 <script src="assets/js/animation-mappings.js"></script>
 <script src="assets/js/animation-playback.js"></script>

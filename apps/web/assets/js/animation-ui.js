@@ -938,6 +938,15 @@
         });
       }
 
+      if (elements.generateAnimationKeywordsBtn) {
+        elements.generateAnimationKeywordsBtn.addEventListener('click', async () => {
+          if (elements.generateAnimationKeywordsBtn.disabled) return;
+          if (typeof callbacks.generateMissingAnimationKeywords === 'function') {
+            await callbacks.generateMissingAnimationKeywords();
+          }
+        });
+      }
+
       if (elements.resetAnimationsBtn) {
         elements.resetAnimationsBtn.addEventListener('click', () => {
           openAnimationResetPopup();

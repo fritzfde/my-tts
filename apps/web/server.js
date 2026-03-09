@@ -3,6 +3,9 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const { createStorage } = require('./storage');
+const { isSafeSoundFilename } = require('./lib/sound-filenames');
+const { normalizeTikTokUsername, classifyTikTokConnectError } = require('./lib/tiktok-connect');
+const { generateMediaKeywords } = require('./lib/media-keywords');
 
 const app = express();
 const PORT = 3000;
@@ -359,11 +362,19 @@ function rememberGiftInCatalog({ giftId = 0, name = '', diamondCount = 0, image 
 }
 
 app.post('/api/tiktok/connect', (req, res) => {
-    const { username } = req.body;
+    const username = normalizeTikTokUsername(req.body?.username);
+    if (!username) {
+        return res.status(400).json({ success: false, error: 'Enter TikTok username' });
+    }
 
     if (tiktokConnection) {
-        tiktokConnection.removeAllListeners();
-        tiktokConnection.disconnect();
+        try {
+            tiktokConnection.removeAllListeners();
+            tiktokConnection.disconnect();
+        } catch (err) {
+            console.warn('TikTok disconnect-before-reconnect warning:', err?.message || err);
+        }
+        tiktokConnection = null;
     }
 
     // Reset leaderboard on new connection
@@ -371,7 +382,7 @@ app.post('/api/tiktok/connect', (req, res) => {
     resetTikTokAudienceState();
 
     tiktokConnection = new WebcastPushConnection(username, {
-        enableExtendedGiftInfo: true
+        enableExtendedGiftInfo: false
     });
 
     tiktokConnection.connect().then(state => {
@@ -385,10 +396,24 @@ app.post('/api/tiktok/connect', (req, res) => {
             void refreshTikTokAvailableGifts();
         }
         console.log(`✅ SUCCESS: Connected to @${username}`);
-        res.json({ success: true });
+        res.json({ success: true, username });
     }).catch(err => {
+        const failure = classifyTikTokConnectError(err);
         console.error(`❌ FAILURE:`, err.message);
-        res.status(500).json({ error: err.message });
+        try {
+            tiktokConnection?.removeAllListeners?.();
+            tiktokConnection?.disconnect?.();
+        } catch (cleanupErr) {
+            console.warn('TikTok cleanup warning:', cleanupErr?.message || cleanupErr);
+        }
+        tiktokConnection = null;
+        resetTikTokAudienceState();
+
+        if (failure.expected) {
+            return res.json({ success: false, code: failure.code, error: failure.message });
+        }
+
+        res.status(500).json({ success: false, error: failure.message });
     });
 
     // Capture Chat
@@ -417,7 +442,7 @@ app.post('/api/tiktok/connect', (req, res) => {
                 timestamp: Date.now()
             };
             
-            log(`💬🖼️ [Combined] ${msg.authorName}: ${msg.text} + ${msg.emotes.length} sticker(s)`);
+            console.log(`💬🖼️ [Combined] ${msg.authorName}: ${msg.text} + ${msg.emotes.length} sticker(s)`);
             tiktokMessageQueue.push(msg);
             
         } else if (hasEmotes) {
@@ -435,7 +460,7 @@ app.post('/api/tiktok/connect', (req, res) => {
                 timestamp: Date.now()
             };
             
-            log(`🖼️ [Stickers Only] ${msg.authorName} sent ${msg.emotes.length} sticker(s)`);
+            console.log(`🖼️ [Stickers Only] ${msg.authorName} sent ${msg.emotes.length} sticker(s)`);
             tiktokMessageQueue.push(msg);
             
         } else if (hasText) {
@@ -449,7 +474,7 @@ app.post('/api/tiktok/connect', (req, res) => {
                 timestamp: Date.now()
             };
             
-            log(`💬 [Chat] ${msg.authorName}: ${msg.text}`);
+            console.log(`💬 [Chat] ${msg.authorName}: ${msg.text}`);
             tiktokMessageQueue.push(msg);
         }
     });
@@ -903,10 +928,6 @@ function migrateLegacyCustomSoundsDir() {
     }
 }
 
-function isSafeSoundFilename(filename) {
-    return /^[a-zA-Z0-9._-]+\.(mp3|wav|ogg)$/i.test(String(filename || ''));
-}
-
 const soundStorage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, ensureSoundsDir());
@@ -1291,6 +1312,123 @@ app.get('/api/animations/list', (req, res) => {
   } catch (err) {
     console.error('Error listing animations:', err);
     res.status(500).json({ error: 'Failed to list animations' });
+  }
+});
+
+function resolveSoundMediaPath(soundPath = '') {
+  const normalizedPath = String(soundPath || '').trim();
+  const filename = path.basename(normalizedPath);
+  if (!isSafeSoundFilename(filename)) {
+    throw new Error('Invalid sound path');
+  }
+
+  const soundsDir = ensureSoundsDir();
+  const filePath = path.join(soundsDir, filename);
+  if (!filePath.startsWith(soundsDir + path.sep)) {
+    throw new Error('Invalid sound path');
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error('Sound file not found');
+  }
+
+  return {
+    filePath,
+    path: `/sounds/${filename}`,
+    displayName: path.basename(filename, path.extname(filename))
+  };
+}
+
+function resolveAnimationMediaPath(filename = '') {
+  const safeFilename = path.basename(String(filename || '').trim());
+  const ext = path.extname(safeFilename).toLowerCase();
+  if (!safeFilename || !ALLOWED_ANIMATION_EXTENSIONS.has(ext)) {
+    throw new Error('Invalid animation file');
+  }
+
+  const animationsDir = ensureAnimationsDir();
+  const filePath = path.join(animationsDir, safeFilename);
+  if (!filePath.startsWith(animationsDir + path.sep)) {
+    throw new Error('Invalid animation file');
+  }
+  if (!fs.existsSync(filePath)) {
+    throw new Error('Animation file not found');
+  }
+
+  return {
+    filePath,
+    filename: safeFilename,
+    displayName: path.basename(safeFilename, ext)
+  };
+}
+
+app.post('/api/media-keywords/generate', async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (items.length === 0) {
+      return res.status(400).json({ error: 'items array is required' });
+    }
+    if (items.length > 50) {
+      return res.status(400).json({ error: 'Too many items' });
+    }
+
+    const results = [];
+    for (const item of items) {
+      const kind = String(item?.kind || '').trim().toLowerCase();
+      try {
+        if (kind === 'sound') {
+          const resolved = resolveSoundMediaPath(item?.soundPath);
+          const generated = await generateMediaKeywords({
+            filePath: resolved.filePath,
+            displayName: resolved.displayName
+          });
+          results.push({
+            kind: 'sound',
+            soundPath: resolved.path,
+            keywords: generated.keywords,
+            source: generated.source,
+            warning: generated.warning || ''
+          });
+          continue;
+        }
+
+        if (kind === 'animation') {
+          const resolved = resolveAnimationMediaPath(item?.filename);
+          const generated = await generateMediaKeywords({
+            filePath: resolved.filePath,
+            displayName: resolved.displayName
+          });
+          results.push({
+            kind: 'animation',
+            filename: resolved.filename,
+            keywords: generated.keywords,
+            source: generated.source,
+            warning: generated.warning || ''
+          });
+          continue;
+        }
+
+        results.push({
+          kind,
+          keywords: [],
+          source: 'none',
+          warning: 'Unsupported media kind'
+        });
+      } catch (err) {
+        results.push({
+          kind,
+          soundPath: item?.soundPath || '',
+          filename: item?.filename || '',
+          keywords: [],
+          source: 'none',
+          warning: err?.message ? String(err.message) : 'Keyword generation failed'
+        });
+      }
+    }
+
+    res.json({ success: true, results });
+  } catch (err) {
+    console.error('Media keyword generation error:', err);
+    res.status(500).json({ error: 'Failed to generate media keywords' });
   }
 });
 

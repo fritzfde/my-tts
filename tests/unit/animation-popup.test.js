@@ -88,13 +88,15 @@ test('animation popup: open populates fields and active state', async () => {
     animationPopupScale: createElement(),
     animationPopupGiftName: createElement(),
     animationPopupGiftValue: createElement(),
+    animationPopupKeywords: createElement(),
+    animationPopupKeywordEnabled: createElement(),
     animationPopupSticker: createElement(),
     animationPopupMakeDefault: createElement()
   };
 
   const state = {
     animationMappings: {
-      dance: { file: 'dance.mov', position: 'top-right', scale: 1.25 }
+      dance: { file: 'dance.mov', position: 'top-right', scale: 1.25, keywords: ['dance', 'party'], keywordTriggerEnabled: true }
     },
     giftMappings: {
       byName: { Rose: { type: 'animation', value: 'dance' } },
@@ -111,7 +113,9 @@ test('animation popup: open populates fields and active state', async () => {
       toAnimationMappingObject: (data, fallbackFilename) => ({
         file: data?.file || fallbackFilename,
         position: data?.position || 'bottom-left',
-        scale: Number(data?.scale || 1)
+        scale: Number(data?.scale || 1),
+        keywords: Array.isArray(data?.keywords) ? data.keywords : [],
+        keywordTriggerEnabled: data?.keywordTriggerEnabled === true
       }),
       findFirstGiftNameForAnimationTrigger: () => 'Rose',
       findFirstGiftValueForAnimationTrigger: () => '1',
@@ -132,6 +136,8 @@ test('animation popup: open populates fields and active state', async () => {
   assert.equal(elements.animationPopupScale.value, '1.25');
   assert.equal(elements.animationPopupGiftName.value, 'Rose');
   assert.equal(elements.animationPopupGiftValue.value, '1');
+  assert.equal(elements.animationPopupKeywords.value, 'dance\nparty');
+  assert.equal(elements.animationPopupKeywordEnabled.checked, true);
   assert.equal(elements.animationPopupMakeDefault.checked, true);
   assert.equal(selectedStickerKey, 'sticker-1');
   assert.equal(controller.getActivePopup()?.trigger, 'dance');
@@ -157,6 +163,8 @@ test('animation popup: save updates mapping and persists through callbacks', asy
     animationPopupScale: createElement(),
     animationPopupGiftName: createElement(),
     animationPopupGiftValue: createElement(),
+    animationPopupKeywords: createElement(),
+    animationPopupKeywordEnabled: createElement(),
     animationPopupSticker: createElement(),
     animationPopupMakeDefault: createElement(),
     animationPopupSaveBtn: createElement()
@@ -187,7 +195,9 @@ test('animation popup: save updates mapping and persists through callbacks', asy
       toAnimationMappingObject: (data, fallbackFilename) => ({
         file: data?.file || fallbackFilename,
         position: data?.position || 'bottom-left',
-        scale: Number(data?.scale || 1)
+        scale: Number(data?.scale || 1),
+        keywords: Array.isArray(data?.keywords) ? data.keywords : [],
+        keywordTriggerEnabled: data?.keywordTriggerEnabled === true
       }),
       findFirstGiftNameForAnimationTrigger: () => '',
       findFirstGiftValueForAnimationTrigger: () => '',
@@ -224,6 +234,8 @@ test('animation popup: save updates mapping and persists through callbacks', asy
   controller.setAnimationPopupPosition('top-center');
   elements.animationPopupName.value = 'dance-new';
   elements.animationPopupScale.value = '2';
+  elements.animationPopupKeywords.value = 'dance, boogie';
+  elements.animationPopupKeywordEnabled.checked = true;
   elements.animationPopupSticker.value = 'sticker-a';
 
   controller.attachEvents();
@@ -233,6 +245,11 @@ test('animation popup: save updates mapping and persists through callbacks', asy
   assert.equal(state.animationMappings['dance-new']?.file, 'dance.mov');
   assert.equal(state.animationMappings['dance-new']?.position, 'top-center');
   assert.equal(state.animationMappings['dance-new']?.scale, 2);
+  assert.equal(
+    JSON.stringify(state.animationMappings['dance-new']?.keywords),
+    JSON.stringify(['dance', 'boogie'])
+  );
+  assert.equal(state.animationMappings['dance-new']?.keywordTriggerEnabled, true);
   assert.deepEqual(calls.setSticker, [['dance-new', 'sticker-a']]);
   assert.equal(calls.saveAnimationMappings, 1);
   assert.equal(calls.saveGiftMappings, 1);

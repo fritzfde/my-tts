@@ -27,16 +27,39 @@
       return {
         file: filename,
         position: 'bottom-left',
-        scale: 1.0
+        scale: 1.0,
+        keywords: [],
+        keywordTriggerEnabled: false
       };
+    }
+
+    function normalizeKeywordList(value) {
+      const rawItems = Array.isArray(value)
+        ? value
+        : String(value || '').split(/[\n,]/);
+
+      const unique = [];
+      rawItems.forEach((entry) => {
+        const normalized = String(entry || '').trim();
+        if (!normalized) return;
+        const key = normalized.toLowerCase();
+        if (unique.some((item) => item.toLowerCase() === key)) return;
+        unique.push(normalized);
+      });
+      return unique;
     }
 
     function toAnimationMappingObject(data, fallbackFilename = '') {
       if (typeof data === 'object' && data !== null) {
+        const normalizedKeywords = normalizeKeywordList(data.keywords);
         return {
           file: data.file || fallbackFilename,
           position: data.position || 'bottom-left',
-          scale: Number.isFinite(Number(data.scale)) ? Number(data.scale) : 1.0
+          scale: Number.isFinite(Number(data.scale)) ? Number(data.scale) : 1.0,
+          keywords: normalizedKeywords,
+          keywordTriggerEnabled: typeof data.keywordTriggerEnabled === 'boolean'
+            ? data.keywordTriggerEnabled
+            : normalizedKeywords.length > 0
         };
       }
 
@@ -127,7 +150,9 @@
         nextMappings[safeTrigger] = {
           file,
           position: normalized.position,
-          scale: normalized.scale
+          scale: normalized.scale,
+          keywords: normalizeKeywordList(normalized.keywords),
+          keywordTriggerEnabled: normalized.keywordTriggerEnabled === true
         };
         usedFiles.add(file);
       });

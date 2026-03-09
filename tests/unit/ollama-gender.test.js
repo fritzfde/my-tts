@@ -129,7 +129,12 @@ test('ollama gender: status, cache, and auto-detect preference persistence', asy
       getAllVoiceEntries: () => [],
       getVoiceName: (voiceId) => voiceId
     },
-    fetchFn: async () => ({ ok: true }),
+    fetchFn: async () => ({
+      ok: true,
+      json: async () => ({
+        models: [{ name: 'llama3:8b' }]
+      })
+    }),
     setIntervalFn: (cb, ms) => {
       intervals.push({ cb, ms });
       return 77;
@@ -147,6 +152,7 @@ test('ollama gender: status, cache, and auto-detect preference persistence', asy
   assert.equal(intervals.length, 1);
   assert.equal(setOnlineValue, true);
   assert.equal(statusEl.classList.has('online'), true);
+  assert.equal(settingsStore.getItem('ollama_gender_model'), 'llama3:8b');
 
   autoCheckbox.checked = false;
   autoCheckbox.trigger('change');
@@ -158,4 +164,83 @@ test('ollama gender: status, cache, and auto-detect preference persistence', asy
   assert.equal(second, 'female');
   assert.equal(llmCalls, 1);
   assert.equal(saveGenderCacheCount, 1);
+});
+
+test('ollama gender: refresh selects available local model and passes it to LLM detection', async () => {
+  const { factory } = loadControllerFactory('ollama-gender.js', 'createOllamaGenderController');
+  const settingsStore = createSettingsStore({
+    ollama_base_url: 'http://127.0.0.1:11435/'
+  });
+  const statusEl = createStatusElement();
+  const autoCheckbox = {
+    checked: true,
+    listeners: new Map(),
+    addEventListener(type, cb) {
+      this.listeners.set(type, cb);
+    }
+  };
+  const baseUrlInput = createSelect();
+
+  const calls = [];
+  const fetchCalls = [];
+  const voicesController = {
+    state: {
+      genderCache: {}
+    },
+    loadGenderCache() {},
+    saveGenderCache() {},
+    setOllamaOnline() {},
+    async detectGenderWithLLM(username, options = {}) {
+      calls.push({ username, options });
+      return 'male';
+    },
+    async autoAssignVoiceIfNeeded() {
+      return { assigned: false };
+    }
+  };
+
+  const controller = factory({
+    settingsStore,
+    voicesController,
+    elements: {
+      ollamaStatusEl: statusEl,
+      ollamaBaseUrlInput: baseUrlInput,
+      autoGenderDetectionCheckbox: autoCheckbox,
+      maleVoiceSelect: createSelect(),
+      femaleVoiceSelect: createSelect()
+    },
+    callbacks: {
+      populateVoiceSelectElement: (select, preferred) => {
+        select.value = preferred || '';
+        return select.value;
+      },
+      getAllVoiceEntries: () => [],
+      getVoiceName: (voiceId) => voiceId
+    },
+    fetchFn: async (url) => {
+      fetchCalls.push(url);
+      return {
+      ok: true,
+      json: async () => ({
+        models: [
+          { name: 'qwen2.5:14b' },
+          { name: 'qwen2.5:7b-instruct' }
+        ]
+      })
+      };
+    },
+    setIntervalFn: () => 1,
+    clearIntervalFn: () => {}
+  });
+
+  controller.init();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await controller.detectGenderWithLLM('Alex');
+
+  assert.equal(settingsStore.getItem('ollama_gender_model'), 'qwen2.5:7b-instruct');
+  assert.equal(statusEl.textContent, 'Ollama: online (qwen2.5:7b-instruct)');
+  assert.deepEqual(fetchCalls, ['http://127.0.0.1:11435/api/tags']);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].options.model, 'qwen2.5:7b-instruct');
+  assert.equal(calls[0].options.baseUrl, 'http://127.0.0.1:11435');
 });

@@ -6,13 +6,19 @@
     elements = {},
     callbacks = {},
     fetchFn,
-    confirmFn
+    confirmFn,
+    setTimeoutFn,
+    clearTimeoutFn,
+    nowFn
   }) {
     const win = windowRef || (typeof window !== 'undefined' ? window : null);
     const doc = documentRef || (win && win.document ? win.document : null);
     const callFetch = typeof fetchFn === 'function'
       ? fetchFn
       : (win && typeof win.fetch === 'function' ? win.fetch.bind(win) : null);
+    const callSetTimeout = typeof setTimeoutFn === 'function' ? setTimeoutFn : setTimeout;
+    const callClearTimeout = typeof clearTimeoutFn === 'function' ? clearTimeoutFn : clearTimeout;
+    const callNow = typeof nowFn === 'function' ? nowFn : Date.now;
     const callConfirm = typeof confirmFn === 'function'
       ? confirmFn
       : (win && typeof win.confirm === 'function' ? win.confirm.bind(win) : (() => true));
@@ -20,13 +26,29 @@
     const state = {
       initialized: false,
       customSounds: [],
+      soundKeywords: {},
+      soundKeywordEnabled: {},
+      soundKeywordJob: null,
+      soundKeywordGenerationPromise: null,
       rules: [],
       knownGiftNames: [],
-      activeAudio: null
+      activeAudio: null,
+      openSoundPickerRuleId: '',
+      pendingDeleteSoundPath: '',
+      pendingDeleteButton: null,
+      pendingDeleteResetTimer: null,
+      visitorHistory: {},
+      activePresenceSessions: {},
+      pendingLifecycleTimers: {}
     };
 
     const SOUND_ALERT_RULES_KEY = 'sound_alert_rules';
+    const SOUND_KEYWORDS_KEY = 'sound_keyword_map';
+    const SOUND_KEYWORDS_ENABLED_KEY = 'sound_keyword_enabled_map';
+    const SOUND_KEYWORD_JOB_KEY = 'sound_keyword_generation_job';
     const KNOWN_GIFT_NAMES_KEY = 'tiktok_known_gift_names';
+    const VISITOR_HISTORY_KEY = 'presence_visitor_history';
+    const LIFECYCLE_EVENT_TYPES = new Set(['join', 'leave']);
     const EVENT_TYPES = [
       { value: 'gift_any', label: 'Any gift' },
       { value: 'gift_name', label: 'Certain gift' },
@@ -54,6 +76,23 @@
         .trim()
         .toLowerCase()
         .replace(/\s+/g, ' ');
+    }
+
+    function normalizePresenceUserKey(platform, username) {
+      const normalizedPlatform = String(platform || '').trim().toLowerCase();
+      const normalizedUsername = String(username || '').trim().toLowerCase();
+      if (!normalizedPlatform || !normalizedUsername) return '';
+      return `${normalizedPlatform}:${normalizedUsername}`;
+    }
+
+    function normalizeMinStaySeconds(value) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+      return Math.min(86400, Math.floor(parsed));
+    }
+
+    function isLifecycleEventType(eventType) {
+      return LIFECYCLE_EVENT_TYPES.has(String(eventType || '').trim().toLowerCase());
     }
 
     function escapeHtml(value) {
@@ -84,6 +123,20 @@
       return withoutPrefix;
     }
 
+    function parseKeywordList(value) {
+      const rawItems = Array.isArray(value)
+        ? value
+        : String(value || '').split(/[\n,]/);
+      const keywords = [];
+      rawItems.forEach((entry) => {
+        const normalized = String(entry || '').trim();
+        if (!normalized) return;
+        if (keywords.some((item) => item.toLowerCase() === normalized.toLowerCase())) return;
+        keywords.push(normalized);
+      });
+      return keywords;
+    }
+
     function isSupportedEventType(value) {
       return EVENT_TYPES.some((entry) => entry.value === value);
     }
@@ -99,12 +152,18 @@
       }
       const soundPath = normalizeSoundPath(seed.soundPath || seed.sound || seed.value || '');
       const enabled = seed.enabled !== false;
+      const recurringOnly = isLifecycleEventType(eventType) ? seed.recurringOnly === true : false;
+      const minStaySeconds = isLifecycleEventType(eventType)
+        ? normalizeMinStaySeconds(seed.minStaySeconds)
+        : 0;
       return {
         id: seed.id || `rule-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         eventType,
         eventValue,
         soundPath,
-        enabled
+        enabled,
+        recurringOnly,
+        minStaySeconds
       };
     }
 
@@ -130,6 +189,167 @@
 
     function saveRules() {
       settingsStore.setItem(SOUND_ALERT_RULES_KEY, JSON.stringify(state.rules));
+    }
+
+    function loadSoundKeywords() {
+      const raw = settingsStore.getItem(SOUND_KEYWORDS_KEY);
+      if (!raw) {
+        state.soundKeywords = {};
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(raw);
+        const next = {};
+        Object.entries(parsed && typeof parsed === 'object' ? parsed : {}).forEach(([soundPath, keywords]) => {
+          const normalizedPath = normalizeSoundPath(soundPath);
+          if (!normalizedPath) return;
+          const normalizedKeywords = parseKeywordList(keywords);
+          if (normalizedKeywords.length === 0) return;
+          next[normalizedPath] = normalizedKeywords;
+        });
+        state.soundKeywords = next;
+      } catch (err) {
+        console.error('Failed to parse sound keywords:', err);
+        state.soundKeywords = {};
+      }
+    }
+
+    function saveSoundKeywords() {
+      settingsStore.setItem(SOUND_KEYWORDS_KEY, JSON.stringify(state.soundKeywords));
+    }
+
+    function loadSoundKeywordEnabled() {
+      const raw = settingsStore.getItem(SOUND_KEYWORDS_ENABLED_KEY);
+      if (!raw) {
+        state.soundKeywordEnabled = {};
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(raw);
+        const next = {};
+        Object.entries(parsed && typeof parsed === 'object' ? parsed : {}).forEach(([soundPath, enabled]) => {
+          const normalizedPath = normalizeSoundPath(soundPath);
+          if (!normalizedPath) return;
+          next[normalizedPath] = enabled === true;
+        });
+        state.soundKeywordEnabled = next;
+      } catch (err) {
+        console.error('Failed to parse sound keyword enabled map:', err);
+        state.soundKeywordEnabled = {};
+      }
+    }
+
+    function saveSoundKeywordEnabled() {
+      settingsStore.setItem(SOUND_KEYWORDS_ENABLED_KEY, JSON.stringify(state.soundKeywordEnabled));
+    }
+
+    function normalizeSoundKeywordJob(value) {
+      const raw = value && typeof value === 'object' ? value : {};
+      const pendingItems = Array.isArray(raw.pendingItems)
+        ? raw.pendingItems
+          .map((entry) => ({ kind: 'sound', soundPath: normalizeSoundPath(entry?.soundPath || entry) }))
+          .filter((entry) => entry.soundPath)
+        : [];
+      const total = Number(raw.total);
+      const normalizedTotal = Number.isFinite(total) && total >= pendingItems.length
+        ? Math.floor(total)
+        : pendingItems.length;
+      return {
+        pendingItems,
+        total: normalizedTotal
+      };
+    }
+
+    function loadSoundKeywordJob() {
+      const raw = settingsStore.getItem(SOUND_KEYWORD_JOB_KEY);
+      if (!raw) {
+        state.soundKeywordJob = null;
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(raw);
+        const job = normalizeSoundKeywordJob(parsed);
+        state.soundKeywordJob = job.pendingItems.length > 0 ? job : null;
+      } catch (err) {
+        console.error('Failed to parse sound keyword job:', err);
+        state.soundKeywordJob = null;
+      }
+    }
+
+    function saveSoundKeywordJob() {
+      if (!state.soundKeywordJob || !Array.isArray(state.soundKeywordJob.pendingItems) || state.soundKeywordJob.pendingItems.length === 0) {
+        settingsStore.removeItem(SOUND_KEYWORD_JOB_KEY);
+        state.soundKeywordJob = null;
+        return;
+      }
+
+      settingsStore.setItem(SOUND_KEYWORD_JOB_KEY, JSON.stringify({
+        pendingItems: state.soundKeywordJob.pendingItems,
+        total: state.soundKeywordJob.total
+      }));
+    }
+
+    function getSoundKeywordJobProgress() {
+      const total = Number(state.soundKeywordJob?.total || 0);
+      const remaining = Array.isArray(state.soundKeywordJob?.pendingItems) ? state.soundKeywordJob.pendingItems.length : 0;
+      const completed = Math.max(0, total - remaining);
+      return { total, remaining, completed };
+    }
+
+    function updateSoundKeywordGenerateButton() {
+      const button = elements.soundLibraryGenerateBtn || null;
+      if (!button) return;
+
+      const { total, completed } = getSoundKeywordJobProgress();
+      button.disabled = Boolean(state.soundKeywordGenerationPromise);
+      if (total > 0) {
+        button.textContent = state.soundKeywordGenerationPromise
+          ? `Generating ${completed}/${total}`
+          : `Resume ${completed}/${total}`;
+        updateSoundKeywordToggleButton();
+        return;
+      }
+
+      button.textContent = '✨ Suggest Missing';
+      updateSoundKeywordToggleButton();
+    }
+
+    function getSoundKeywordToggleState() {
+      const eligiblePaths = state.customSounds
+        .map((sound) => normalizeSoundPath(sound.path))
+        .filter((soundPath) => soundPath && getSoundKeywords(soundPath).length > 0);
+      const enabledCount = eligiblePaths.filter((soundPath) => isSoundKeywordTriggerEnabled(soundPath)).length;
+      return {
+        total: eligiblePaths.length,
+        enabledCount,
+        allEnabled: eligiblePaths.length > 0 && enabledCount === eligiblePaths.length
+      };
+    }
+
+    function updateSoundKeywordToggleButton() {
+      const button = elements.soundLibraryKeywordToggleBtn || null;
+      if (!button) return;
+
+      const { total, allEnabled } = getSoundKeywordToggleState();
+      button.disabled = Boolean(state.soundKeywordGenerationPromise) || total === 0;
+      button.textContent = allEnabled ? 'Disable all' : 'Enable all';
+      button.title = total > 0
+        ? `${allEnabled ? 'Disable' : 'Enable'} keyword triggers for all ${total} sound file(s) that already have keywords`
+        : 'Generate or enter keywords first, then you can enable them all here';
+    }
+
+    function migrateLegacySoundKeywordEnabled() {
+      let changed = false;
+      Object.keys(state.soundKeywords).forEach((soundPath) => {
+        if (Object.prototype.hasOwnProperty.call(state.soundKeywordEnabled, soundPath)) return;
+        if (parseKeywordList(state.soundKeywords[soundPath]).length === 0) return;
+        state.soundKeywordEnabled[soundPath] = true;
+        changed = true;
+      });
+      if (changed) saveSoundKeywordEnabled();
     }
 
     function loadKnownGiftNames() {
@@ -160,6 +380,37 @@
 
     function saveKnownGiftNames() {
       settingsStore.setItem(KNOWN_GIFT_NAMES_KEY, JSON.stringify(state.knownGiftNames));
+    }
+
+    function loadVisitorHistory() {
+      const raw = settingsStore.getItem(VISITOR_HISTORY_KEY);
+      if (!raw) {
+        state.visitorHistory = {};
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(raw);
+        const next = {};
+        Object.entries(parsed && typeof parsed === 'object' ? parsed : {}).forEach(([key, value]) => {
+          const normalizedKey = String(key || '').trim().toLowerCase();
+          if (!normalizedKey) return;
+          const visits = Number(value?.visits);
+          const lastSeen = Number(value?.lastSeen);
+          next[normalizedKey] = {
+            visits: Number.isFinite(visits) && visits > 0 ? Math.floor(visits) : 0,
+            lastSeen: Number.isFinite(lastSeen) && lastSeen > 0 ? Math.floor(lastSeen) : 0
+          };
+        });
+        state.visitorHistory = next;
+      } catch (err) {
+        console.error('Failed to parse visitor history:', err);
+        state.visitorHistory = {};
+      }
+    }
+
+    function saveVisitorHistory() {
+      settingsStore.setItem(VISITOR_HISTORY_KEY, JSON.stringify(state.visitorHistory));
     }
 
     function registerGiftName(name) {
@@ -201,14 +452,349 @@
       return state.knownGiftNames.slice();
     }
 
-    function toCustomSoundOptionsMarkup(selectedValue = '') {
-      const normalizedSelected = normalizeSoundPath(selectedValue);
-      const customMarkup = state.customSounds.map((sound) => {
+    function getSoundKeywords(soundPath = '') {
+      return parseKeywordList(state.soundKeywords[normalizeSoundPath(soundPath)] || []);
+    }
+
+    function setSoundKeywords(soundPath = '', keywords = []) {
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) return;
+      const normalizedKeywords = parseKeywordList(keywords);
+      if (normalizedKeywords.length === 0) {
+        delete state.soundKeywords[normalizedPath];
+      } else {
+        state.soundKeywords[normalizedPath] = normalizedKeywords;
+      }
+      saveSoundKeywords();
+    }
+
+    function isSoundKeywordTriggerEnabled(soundPath = '') {
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) return false;
+      if (Object.prototype.hasOwnProperty.call(state.soundKeywordEnabled, normalizedPath)) {
+        return state.soundKeywordEnabled[normalizedPath] === true;
+      }
+      return false;
+    }
+
+    function setSoundKeywordTriggerEnabled(soundPath = '', enabled = false) {
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) return;
+      state.soundKeywordEnabled[normalizedPath] = enabled === true;
+      saveSoundKeywordEnabled();
+    }
+
+    function pruneSoundKeywords() {
+      const validPaths = new Set(state.customSounds.map((sound) => normalizeSoundPath(sound.path)));
+      let changed = false;
+      Object.keys(state.soundKeywords).forEach((soundPath) => {
+        if (validPaths.has(soundPath)) return;
+        delete state.soundKeywords[soundPath];
+        changed = true;
+      });
+      if (changed) saveSoundKeywords();
+
+      let enabledChanged = false;
+      Object.keys(state.soundKeywordEnabled).forEach((soundPath) => {
+        if (validPaths.has(soundPath)) return;
+        delete state.soundKeywordEnabled[soundPath];
+        enabledChanged = true;
+      });
+      if (enabledChanged) saveSoundKeywordEnabled();
+    }
+
+    function getSoundKeywordEntries() {
+      return state.customSounds
+        .map((sound) => ({
+          soundPath: normalizeSoundPath(sound.path),
+          keywords: getSoundKeywords(sound.path),
+          enabled: isSoundKeywordTriggerEnabled(sound.path)
+        }))
+        .filter((entry) => entry.soundPath && entry.enabled && entry.keywords.length > 0);
+    }
+
+    function getActiveLifecycleRules(eventType) {
+      const normalizedEventType = String(eventType || '').trim().toLowerCase();
+      return state.rules.filter((rule) => (
+        rule.enabled !== false
+        && rule.eventType === normalizedEventType
+      ));
+    }
+
+    function hasActiveLifecycleRules(eventType) {
+      return getActiveLifecycleRules(eventType).length > 0;
+    }
+
+    function hasConfiguredLifecycleRules(eventType) {
+      const normalizedEventType = String(eventType || '').trim().toLowerCase();
+      return state.rules.some((rule) => rule.eventType === normalizedEventType);
+    }
+
+    function resolveLifecycleAnimationTrigger(eventType) {
+      if (typeof callbacks.resolveAnimationForRule !== 'function') return '';
+      const value = callbacks.resolveAnimationForRule({ eventType: String(eventType || '').trim().toLowerCase() });
+      if (Array.isArray(value)) {
+        return String(value[0] || '').trim();
+      }
+      return String(value || '').trim();
+    }
+
+    function canTriggerLifecycleAnimation(username, platform) {
+      if (typeof callbacks.canTriggerAnimation !== 'function') return true;
+      return callbacks.canTriggerAnimation(username, platform) !== false;
+    }
+
+    function triggerLifecycleAnimation(event = {}) {
+      const eventType = String(event.type || '').trim().toLowerCase();
+      const platform = String(event.platform || '').trim().toLowerCase();
+      const username = String(event.username || '').trim();
+      const trigger = resolveLifecycleAnimationTrigger(eventType);
+      if (!trigger || !platform || !username) return false;
+      if (!canTriggerLifecycleAnimation(username, platform)) return false;
+      callbacks.triggerAnimation?.(trigger, platform, username, eventType);
+      return true;
+    }
+
+    function clearPendingLifecycleTimer(userKey) {
+      const normalizedUserKey = String(userKey || '').trim().toLowerCase();
+      if (!normalizedUserKey) return;
+      const timerId = state.pendingLifecycleTimers[normalizedUserKey];
+      if (!timerId) return;
+      callClearTimeout(timerId);
+      delete state.pendingLifecycleTimers[normalizedUserKey];
+    }
+
+    function buildLifecycleContext(event = {}, session = null) {
+      const eventType = String(event.type || '').trim().toLowerCase();
+      const platform = String(event.platform || '').trim().toLowerCase();
+      const username = String(event.username || '').trim();
+      const userKey = normalizePresenceUserKey(platform, username);
+      const effectiveSession = session || state.activePresenceSessions[userKey] || null;
+      const joinedAt = Number(effectiveSession?.joinedAt || 0);
+      const recurring = Boolean(effectiveSession?.recurring);
+      const staySeconds = joinedAt > 0
+        ? Math.max(0, Math.floor((callNow() - joinedAt) / 1000))
+        : 0;
+
+      return {
+        type: eventType,
+        platform,
+        username,
+        displayName: String(event.displayName || effectiveSession?.displayName || username).trim() || username,
+        avatar: event.avatar || effectiveSession?.avatar || null,
+        userKey,
+        isRecurring: recurring,
+        staySeconds
+      };
+    }
+
+    function doesLifecycleRuleMatch(rule, event = {}) {
+      if (!rule || rule.enabled === false) return false;
+      if (!isLifecycleEventType(rule.eventType) || rule.eventType !== event.type) return false;
+      if (rule.recurringOnly && !event.isRecurring) return false;
+      if (normalizeMinStaySeconds(rule.minStaySeconds) > Number(event.staySeconds || 0)) return false;
+      return true;
+    }
+
+    function findMatchingLifecycleRule(event = {}) {
+      return getActiveLifecycleRules(event.type).find((rule) => doesLifecycleRuleMatch(rule, event)) || null;
+    }
+
+    function getNextLifecycleDelayMs(event = {}) {
+      const activeRules = getActiveLifecycleRules(event.type);
+      const currentStay = Number(event.staySeconds || 0);
+      const candidates = activeRules
+        .filter((rule) => !rule.recurringOnly || event.isRecurring)
+        .map((rule) => normalizeMinStaySeconds(rule.minStaySeconds) - currentStay)
+        .filter((seconds) => Number.isFinite(seconds) && seconds > 0);
+
+      if (candidates.length === 0) return 0;
+      return Math.min(...candidates) * 1000;
+    }
+
+    function markVisitorSeen(platform, username) {
+      const userKey = normalizePresenceUserKey(platform, username);
+      if (!userKey) return { userKey: '', recurring: false };
+
+      const previous = state.visitorHistory[userKey] || { visits: 0, lastSeen: 0 };
+      const recurring = Number(previous.visits || 0) > 0;
+      state.visitorHistory[userKey] = {
+        visits: Math.max(0, Number(previous.visits || 0)) + 1,
+        lastSeen: callNow()
+      };
+      saveVisitorHistory();
+      return { userKey, recurring };
+    }
+
+    function playLifecycleRule(rule, event = {}) {
+      if (!rule) return false;
+      const playedAnimation = triggerLifecycleAnimation(event);
+      const soundPath = normalizeSoundPath(rule.soundPath);
+      const playedSound = soundPath ? playSound(soundPath) : false;
+      return playedAnimation || playedSound;
+    }
+
+    function scheduleJoinLifecycleEvaluation(userKey, baseEvent = {}) {
+      const normalizedUserKey = String(userKey || '').trim().toLowerCase();
+      const session = state.activePresenceSessions[normalizedUserKey];
+      if (!session || session.lifecycleHandled) return false;
+
+      clearPendingLifecycleTimer(normalizedUserKey);
+      const context = buildLifecycleContext(baseEvent, session);
+      const delayMs = getNextLifecycleDelayMs(context);
+      if (!delayMs) return false;
+
+      state.pendingLifecycleTimers[normalizedUserKey] = callSetTimeout(() => {
+        delete state.pendingLifecycleTimers[normalizedUserKey];
+        const liveSession = state.activePresenceSessions[normalizedUserKey];
+        if (!liveSession || liveSession.lifecycleHandled) return;
+
+        const nextContext = buildLifecycleContext(baseEvent, liveSession);
+        const matchingRule = findMatchingLifecycleRule(nextContext);
+        if (matchingRule) {
+          liveSession.lifecycleHandled = true;
+          playLifecycleRule(matchingRule, nextContext);
+          return;
+        }
+
+        scheduleJoinLifecycleEvaluation(normalizedUserKey, baseEvent);
+      }, delayMs);
+
+      return true;
+    }
+
+    function clearPresenceState(platform = '') {
+      const normalizedPlatform = String(platform || '').trim().toLowerCase();
+      Object.keys(state.pendingLifecycleTimers).forEach((userKey) => {
+        if (normalizedPlatform && !userKey.startsWith(`${normalizedPlatform}:`)) return;
+        clearPendingLifecycleTimer(userKey);
+      });
+      Object.keys(state.activePresenceSessions).forEach((userKey) => {
+        if (normalizedPlatform && !userKey.startsWith(`${normalizedPlatform}:`)) return;
+        delete state.activePresenceSessions[userKey];
+      });
+    }
+
+    function handleLifecycleEvent(event = {}) {
+      const context = buildLifecycleContext(event);
+      if (!isLifecycleEventType(context.type) || !context.userKey) return false;
+
+      if (context.type === 'join') {
+        const visit = markVisitorSeen(context.platform, context.username);
+        const session = {
+          joinedAt: callNow(),
+          recurring: visit.recurring,
+          displayName: context.displayName,
+          avatar: context.avatar,
+          lifecycleHandled: false
+        };
+        state.activePresenceSessions[visit.userKey] = session;
+        clearPendingLifecycleTimer(visit.userKey);
+
+        const joinContext = buildLifecycleContext(event, session);
+        const matchingRule = findMatchingLifecycleRule(joinContext);
+        if (matchingRule) {
+          session.lifecycleHandled = true;
+          return playLifecycleRule(matchingRule, joinContext);
+        }
+
+        if (hasConfiguredLifecycleRules('join')) {
+          if (!hasActiveLifecycleRules('join')) return false;
+          return scheduleJoinLifecycleEvaluation(visit.userKey, event);
+        }
+
+        session.lifecycleHandled = true;
+        return triggerLifecycleAnimation(joinContext);
+      }
+
+      const existingSession = state.activePresenceSessions[context.userKey] || null;
+      clearPendingLifecycleTimer(context.userKey);
+      const leaveContext = buildLifecycleContext(event, existingSession);
+      if (existingSession) {
+        delete state.activePresenceSessions[context.userKey];
+      }
+
+      if (!hasConfiguredLifecycleRules('leave')) {
+        return triggerLifecycleAnimation(leaveContext);
+      }
+
+      if (!hasActiveLifecycleRules('leave')) return false;
+      const matchingRule = findMatchingLifecycleRule(leaveContext);
+      if (!matchingRule) return false;
+      return playLifecycleRule(matchingRule, leaveContext);
+    }
+
+    function getSoundLabel(soundPath = '') {
+      const normalized = normalizeSoundPath(soundPath);
+      if (!normalized) return 'No sound';
+
+      const matched = state.customSounds.find((sound) => normalizeSoundPath(sound.path) === normalized);
+      if (matched?.name) return matched.name;
+
+      const filename = normalized.split('/').pop() || normalized;
+      return filename;
+    }
+
+    function renderSoundPicker(rule) {
+      const selectedPath = normalizeSoundPath(rule.soundPath);
+      const selectedLabel = getSoundLabel(selectedPath);
+      const isOpen = state.openSoundPickerRuleId === rule.id;
+      const customOptionsMarkup = state.customSounds.map((sound) => {
         const path = normalizeSoundPath(sound.path);
-        const selected = path === normalizedSelected ? ' selected' : '';
-        return `<option value="${escapeAttribute(path)}"${selected}>🎵 ${escapeHtml(sound.name)}</option>`;
+        const label = String(sound.name || '').trim() || getSoundLabel(path);
+        const selectedClass = path === selectedPath ? ' is-selected' : '';
+        return `
+          <div class="sound-alert-sound-option-row">
+            <button
+              type="button"
+              class="sound-alert-sound-option${selectedClass}"
+              data-action="select-sound-option"
+              data-sound-path="${escapeAttribute(path)}"
+              title="${escapeAttribute(label)}"
+            >
+              <span class="sound-alert-sound-option-label">${escapeHtml(label)}</span>
+            </button>
+            <button
+              type="button"
+              class="secondary sound-alert-sound-option-play"
+              data-action="play-sound-option"
+              data-sound-path="${escapeAttribute(path)}"
+              title="Play ${escapeAttribute(label)}"
+            >
+              ▶
+            </button>
+          </div>
+        `;
       }).join('');
-      return `<option value="">🔇 No sound</option>${customMarkup}`;
+
+      return `
+        <div class="sound-alert-sound-picker${isOpen ? ' is-open' : ''}">
+          <button
+            type="button"
+            class="secondary sound-alert-sound-trigger"
+            data-action="toggle-sound-picker"
+            aria-expanded="${isOpen ? 'true' : 'false'}"
+            title="${escapeAttribute(selectedLabel)}"
+          >
+            <span class="sound-alert-sound-trigger-label">${escapeHtml(selectedLabel)}</span>
+            <span class="sound-alert-sound-trigger-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="sound-alert-sound-menu">
+            <div class="sound-alert-sound-option-row">
+              <button
+                type="button"
+                class="sound-alert-sound-option${selectedPath ? '' : ' is-selected'}"
+                data-action="select-sound-option"
+                data-sound-path=""
+                title="No sound"
+              >
+                <span class="sound-alert-sound-option-label">No sound</span>
+              </button>
+            </div>
+            ${customOptionsMarkup || '<div class="sound-alert-sound-empty">No sounds uploaded</div>'}
+          </div>
+        </div>
+      `;
     }
 
     function getRuleById(ruleId) {
@@ -275,7 +861,7 @@
       if (!Array.isArray(state.rules) || state.rules.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="5" class="sound-alert-empty-row">No alert rules yet. Add one below.</td>
+            <td colspan="6" class="sound-alert-empty-row">No alert rules yet. Add one below.</td>
           </tr>
         `;
         return;
@@ -284,8 +870,6 @@
       const eventOptionsMarkup = EVENT_TYPES
         .map((entry) => `<option value="${entry.value}">${escapeHtml(entry.label)}</option>`)
         .join('');
-      const soundOptionsMarkup = toCustomSoundOptionsMarkup();
-
       tbody.innerHTML = state.rules.map((rule) => {
         const conditionType = getEventConditionType(rule.eventType);
         let conditionCell = '<span class="sound-alert-muted">—</span>';
@@ -312,6 +896,28 @@
               class="sound-alert-gift-name-input"
             >
           `;
+        } else if (isLifecycleEventType(rule.eventType)) {
+          conditionCell = `
+            <div class="sound-alert-lifecycle-cell">
+              <label class="sound-alert-toggle" title="Only trigger for users seen before in a previous visit.">
+                <input type="checkbox" data-field="recurringOnly"${rule.recurringOnly ? ' checked' : ''}>
+                <span>Recurring</span>
+              </label>
+              <label class="sound-alert-stay-field" title="Trigger only after the viewer stayed this many seconds. 0 means immediately.">
+                <span>Stay</span>
+                <input
+                  type="number"
+                  data-field="minStaySeconds"
+                  value="${rule.minStaySeconds > 0 ? escapeAttribute(rule.minStaySeconds) : ''}"
+                  min="0"
+                  step="1"
+                  placeholder="0"
+                  class="sound-alert-stay-input"
+                >
+                <span>s</span>
+              </label>
+            </div>
+          `;
         }
 
         const animationTriggers = resolveAnimationTriggers(rule);
@@ -320,31 +926,29 @@
         const animationOptionsMarkup = toAnimationTriggerOptionsMarkup(primaryAnimationTrigger);
 
         return `
-          <tr data-rule-id="${escapeAttribute(rule.id)}">
+          <tr data-rule-id="${escapeAttribute(rule.id)}"${rule.enabled ? '' : ' class="sound-alert-row-disabled"'}>
             <td>
               <select data-field="eventType" class="sound-alert-event-type">
                 ${eventOptionsMarkup}
               </select>
             </td>
+            <td class="sound-alert-enabled-cell">
+              <label class="sound-alert-toggle sound-alert-enabled-toggle" title="Temporarily deactivate this alert rule without deleting it.">
+                <input type="checkbox" data-field="enabled"${rule.enabled ? ' checked' : ''}>
+                <span>${rule.enabled ? 'On' : 'Off'}</span>
+              </label>
+            </td>
             <td>${conditionCell}</td>
             <td>
               <div class="sound-alert-sound-cell">
-                <select data-field="soundPath" class="sound-alert-sound-select">
-                  ${soundOptionsMarkup}
-                </select>
-                <button type="button" class="secondary sound-alert-inline-play" data-action="preview-selected" title="Play selected sound">▶</button>
+                ${renderSoundPicker(rule)}
               </div>
             </td>
             <td>
               <div class="sound-alert-animation-cell">
-                <span class="sound-alert-animation-ref" title="${escapeAttribute(animationSummary)}">${escapeHtml(animationSummary)}</span>
-                <div class="sound-alert-animation-controls">
-                  <select data-field="animationTrigger" class="sound-alert-animation-select">
-                    ${animationOptionsMarkup}
-                  </select>
-                  <button type="button" class="secondary sound-alert-assign-btn" data-action="assign-animation">Assign</button>
-                  <button type="button" class="secondary sound-alert-clear-animation-btn" data-action="clear-animation">Clear</button>
-                </div>
+                <select data-field="animationTrigger" class="sound-alert-animation-select" title="${escapeAttribute(animationSummary)}">
+                  ${animationOptionsMarkup}
+                </select>
               </div>
             </td>
             <td class="sound-alert-row-actions">
@@ -365,14 +969,10 @@
           eventTypeSelect.value = rule.eventType;
         }
 
-        const soundSelect = row.querySelector('select[data-field="soundPath"]');
-        if (soundSelect) {
-          const normalizedSoundPath = normalizeSoundPath(rule.soundPath);
-          if (Array.from(soundSelect.options).some((opt) => opt.value === normalizedSoundPath)) {
-            soundSelect.value = normalizedSoundPath;
-          } else {
-            soundSelect.value = '';
-          }
+        const animationSelect = row.querySelector('select[data-field="animationTrigger"]');
+        if (animationSelect) {
+          const animationTriggers = resolveAnimationTriggers(rule);
+          animationSelect.value = animationTriggers[0] || '';
         }
       });
     }
@@ -380,27 +980,63 @@
     function renderSoundCards() {
       const cardsEl = elements.soundLibraryCards || null;
       if (!cardsEl) return;
+      clearPendingDeleteSoundConfirm();
 
       if (!Array.isArray(state.customSounds) || state.customSounds.length === 0) {
         cardsEl.innerHTML = '<div class="sound-library-empty">No custom sounds uploaded yet.</div>';
+        updateSoundKeywordToggleButton();
         return;
       }
 
       cardsEl.innerHTML = state.customSounds.map((sound) => {
         const path = normalizeSoundPath(sound.path);
         const label = String(sound.name || '').trim() || path;
+        const keywordsText = getSoundKeywords(path).join('\n');
+        const keywordEnabled = isSoundKeywordTriggerEnabled(path);
 
         return `
           <div class="sound-library-card" title="${escapeAttribute(label)}">
-            <button type="button" class="sound-library-card-main" data-action="play-card-sound" data-sound-path="${escapeAttribute(path)}">
-              <span class="sound-library-card-name">${escapeHtml(label)}</span>
-            </button>
-            <button type="button" class="sound-library-card-delete" data-action="delete-card-sound" data-sound-path="${escapeAttribute(path)}">
-              Delete
-            </button>
+            <div class="sound-library-card-top">
+              <button type="button" class="sound-library-card-main" data-action="play-card-sound" data-sound-path="${escapeAttribute(path)}">
+                <span class="sound-library-card-name">${escapeHtml(label)}</span>
+              </button>
+              <button
+                type="button"
+                class="sound-library-card-delete"
+                data-action="delete-card-sound"
+                data-sound-path="${escapeAttribute(path)}"
+                title="Delete sound"
+                aria-label="Delete sound"
+              >
+                <span class="sound-library-card-delete-track" aria-hidden="true">
+                  <span class="sound-library-card-delete-face">Delete</span>
+                  <span class="sound-library-card-delete-face">✓</span>
+                </span>
+              </button>
+            </div>
+            <div class="sound-library-card-meta">
+              <label class="sound-library-trigger-toggle" title="Enable keyword-triggered playback for this sound.">
+                <input
+                  type="checkbox"
+                  data-action="toggle-sound-keyword-enabled"
+                  data-sound-path="${escapeAttribute(path)}"
+                  ${keywordEnabled ? 'checked' : ''}
+                >
+                <span>Keyword trigger</span>
+              </label>
+              <textarea
+                class="sound-library-card-keywords"
+                data-action="edit-sound-keywords"
+                data-sound-path="${escapeAttribute(path)}"
+                rows="2"
+                placeholder="Keywords"
+                title="Keywords"
+              >${escapeHtml(keywordsText)}</textarea>
+            </div>
           </div>
         `;
       }).join('');
+      updateSoundKeywordToggleButton();
     }
 
     async function loadCustomSounds() {
@@ -415,6 +1051,8 @@
           }))
           .filter((entry) => entry.name && entry.path)
           .sort((a, b) => a.name.localeCompare(b.name));
+
+        pruneSoundKeywords();
 
         renderSoundCards();
         renderRules();
@@ -437,6 +1075,23 @@
       if (!changed) return;
       saveRules();
       renderRules();
+    }
+
+    function clearSoundKeywordReferences(soundPath) {
+      const normalized = normalizeSoundPath(soundPath);
+      if (!normalized) return;
+      let changed = false;
+      if (state.soundKeywords[normalized]) {
+        delete state.soundKeywords[normalized];
+        saveSoundKeywords();
+        changed = true;
+      }
+      if (Object.prototype.hasOwnProperty.call(state.soundKeywordEnabled, normalized)) {
+        delete state.soundKeywordEnabled[normalized];
+        saveSoundKeywordEnabled();
+        changed = true;
+      }
+      return changed;
     }
 
     function getVolume() {
@@ -464,6 +1119,38 @@
           state.activeAudio = null;
         }
       }
+    }
+
+    function clearPendingDeleteSoundConfirm() {
+      if (state.pendingDeleteResetTimer) {
+        callClearTimeout(state.pendingDeleteResetTimer);
+        state.pendingDeleteResetTimer = null;
+      }
+
+      const button = state.pendingDeleteButton;
+      if (button && button.classList) {
+        button.classList.remove('is-confirming');
+        button.removeAttribute('aria-pressed');
+        button.setAttribute('title', 'Delete sound');
+      }
+
+      state.pendingDeleteSoundPath = '';
+      state.pendingDeleteButton = null;
+    }
+
+    function armDeleteSoundConfirm(button, soundPath) {
+      if (!button || !soundPath) return;
+      clearPendingDeleteSoundConfirm();
+
+      state.pendingDeleteSoundPath = soundPath;
+      state.pendingDeleteButton = button;
+      button.classList.add('is-confirming');
+      button.setAttribute('aria-pressed', 'true');
+      button.setAttribute('title', 'Click again to delete');
+
+      state.pendingDeleteResetTimer = callSetTimeout(() => {
+        clearPendingDeleteSoundConfirm();
+      }, 2500);
     }
 
     function playSound(rawSoundPath) {
@@ -504,6 +1191,13 @@
       }
     }
 
+    function buildMissingSoundKeywordItems() {
+      return state.customSounds
+        .map((sound) => normalizeSoundPath(sound.path))
+        .filter((soundPath) => soundPath && getSoundKeywords(soundPath).length === 0)
+        .map((soundPath) => ({ kind: 'sound', soundPath }));
+    }
+
     function resolveSoundForEvent(event = {}) {
       const eventType = String(event.type || '').trim().toLowerCase();
       const activeRules = state.rules.filter((rule) => rule.enabled !== false);
@@ -540,12 +1234,23 @@
         if (anyGift) return normalizeSoundPath(anyGift.soundPath);
       }
 
-      if (eventType === 'follow' || eventType === 'share' || eventType === 'join' || eventType === 'leave') {
+      if (eventType === 'follow' || eventType === 'share') {
         const direct = activeRules.find((rule) => (
           rule.eventType === eventType
           && normalizeSoundPath(rule.soundPath)
         ));
         if (direct) return normalizeSoundPath(direct.soundPath);
+      }
+
+      if (isLifecycleEventType(eventType)) {
+        const matchingRule = findMatchingLifecycleRule({
+          type: eventType,
+          isRecurring: Boolean(event.isRecurring),
+          staySeconds: Number(event.staySeconds || 0)
+        });
+        if (matchingRule && normalizeSoundPath(matchingRule.soundPath)) {
+          return normalizeSoundPath(matchingRule.soundPath);
+        }
       }
 
       return '';
@@ -602,8 +1307,7 @@
       if (!selectedPath) return;
 
       const filename = selectedPath.split('/').pop() || '';
-      const shouldDelete = callConfirm(`Delete custom sound "${filename}"?`);
-      if (!shouldDelete) return;
+      clearPendingDeleteSoundConfirm();
 
       try {
         const response = await callFetch(`/api/sounds/${encodeURIComponent(filename)}`, {
@@ -615,11 +1319,119 @@
         }
 
         clearSoundReferences(selectedPath);
+        clearSoundKeywordReferences(selectedPath);
         await loadCustomSounds();
         callbacks.updateStatus?.(`✓ Sound deleted: ${filename}`, false);
       } catch (err) {
         console.error('Sound delete failed:', err);
         callbacks.updateStatus?.(`Delete failed: ${err.message}`, false, true);
+      }
+    }
+
+    async function generateMissingSoundKeywords({ resumeOnly = false } = {}) {
+      if (!callFetch) return;
+      if (state.soundKeywordGenerationPromise) return state.soundKeywordGenerationPromise;
+
+      const job = state.soundKeywordJob && state.soundKeywordJob.pendingItems.length > 0
+        ? state.soundKeywordJob
+        : (resumeOnly
+          ? null
+          : (() => {
+            const pendingItems = buildMissingSoundKeywordItems();
+            if (pendingItems.length === 0) return null;
+            return { pendingItems, total: pendingItems.length };
+          })());
+
+      if (!job) {
+        if (!resumeOnly) {
+          callbacks.updateStatus?.('No sounds need keyword suggestions.', false);
+        }
+        updateSoundKeywordGenerateButton();
+        return;
+      }
+
+      state.soundKeywordJob = normalizeSoundKeywordJob(job);
+      saveSoundKeywordJob();
+      updateSoundKeywordGenerateButton();
+
+      const runner = (async () => {
+        let updatedCount = 0;
+        let warningCount = 0;
+
+        callbacks.updateStatus?.(
+          `Generating keyword suggestions for ${state.soundKeywordJob.total} sound file(s)...`,
+          false
+        );
+
+        while (state.soundKeywordJob && state.soundKeywordJob.pendingItems.length > 0) {
+          updateSoundKeywordGenerateButton();
+          const chunk = state.soundKeywordJob.pendingItems.slice(0, 25);
+          const response = await callFetch('/api/media-keywords/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: chunk })
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Keyword generation failed');
+          }
+
+          (Array.isArray(data.results) ? data.results : []).forEach((entry) => {
+            const soundPath = normalizeSoundPath(entry?.soundPath || '');
+            if (!soundPath) return;
+            const keywords = parseKeywordList(entry?.keywords);
+            if (keywords.length > 0) {
+              setSoundKeywords(soundPath, keywords);
+              if (!Object.prototype.hasOwnProperty.call(state.soundKeywordEnabled, soundPath)) {
+                setSoundKeywordTriggerEnabled(soundPath, false);
+              }
+              updatedCount += 1;
+            }
+            if (entry?.warning) warningCount += 1;
+          });
+
+          state.soundKeywordJob.pendingItems = state.soundKeywordJob.pendingItems.slice(chunk.length);
+          saveSoundKeywordJob();
+        }
+
+        renderSoundCards();
+        callbacks.updateStatus?.(
+          updatedCount > 0
+            ? `✓ Suggested keywords for ${updatedCount} sound file(s)${warningCount ? ` (${warningCount} used filename fallback)` : ''}`
+            : 'No sound keywords could be suggested.',
+          false,
+          updatedCount === 0
+        );
+      })().catch((err) => {
+        console.error('Generate sound keywords failed:', err);
+        callbacks.updateStatus?.(`Keyword generation failed: ${err.message}`, false, true);
+      }).finally(() => {
+        state.soundKeywordGenerationPromise = null;
+        updateSoundKeywordGenerateButton();
+      });
+
+      state.soundKeywordGenerationPromise = runner;
+      updateSoundKeywordGenerateButton();
+      return runner;
+    }
+
+    function setAllSoundKeywordTriggers(enabled = false) {
+      const normalizedEnabled = enabled === true;
+      let changedCount = 0;
+      state.customSounds.forEach((sound) => {
+        const soundPath = normalizeSoundPath(sound.path);
+        if (!soundPath || getSoundKeywords(soundPath).length === 0) return;
+        if (isSoundKeywordTriggerEnabled(soundPath) === normalizedEnabled) return;
+        setSoundKeywordTriggerEnabled(soundPath, normalizedEnabled);
+        changedCount += 1;
+      });
+
+      renderSoundCards();
+      if (changedCount > 0) {
+        callbacks.updateStatus?.(
+          `✓ ${normalizedEnabled ? 'Enabled' : 'Disabled'} keyword triggers for ${changedCount} sound file(s).`,
+          false
+        );
       }
     }
 
@@ -642,6 +1454,8 @@
       const rulesBody = elements.soundAlertRulesBody || null;
       const refreshGiftsBtn = elements.refreshTikTokGiftsBtn || null;
       const uploadBtn = elements.soundLibraryUploadBtn || null;
+      const generateBtn = elements.soundLibraryGenerateBtn || null;
+      const keywordToggleBtn = elements.soundLibraryKeywordToggleBtn || null;
       const soundCards = elements.soundLibraryCards || null;
 
       if (addRuleBtn) {
@@ -662,6 +1476,21 @@
         uploadBtn.addEventListener('click', () => {
           if (uploadBtn.disabled) return;
           elements.soundLibraryUploadInput?.click();
+        });
+      }
+
+      if (generateBtn) {
+        generateBtn.addEventListener('click', async () => {
+          if (generateBtn.disabled) return;
+          await generateMissingSoundKeywords();
+        });
+      }
+
+      if (keywordToggleBtn) {
+        keywordToggleBtn.addEventListener('click', () => {
+          if (keywordToggleBtn.disabled) return;
+          const { allEnabled } = getSoundKeywordToggleState();
+          setAllSoundKeywordTriggers(!allEnabled);
         });
       }
 
@@ -694,6 +1523,17 @@
       }
 
       if (soundCards) {
+        soundCards.addEventListener('input', (event) => {
+          const target = event.target instanceof Element ? event.target : null;
+          if (!target) return;
+          const input = target.closest('textarea[data-action="edit-sound-keywords"]');
+          if (!input) return;
+          const soundPath = normalizeSoundPath(input.getAttribute('data-sound-path') || '');
+          if (!soundPath) return;
+          setSoundKeywords(soundPath, parseKeywordList(input.value));
+          updateSoundKeywordToggleButton();
+        });
+
         soundCards.addEventListener('click', (event) => {
           const target = event.target instanceof Element ? event.target : null;
           if (!target) return;
@@ -706,13 +1546,38 @@
           if (!soundPath || !action) return;
 
           if (action === 'play-card-sound') {
+            clearPendingDeleteSoundConfirm();
             playSound(soundPath);
             return;
           }
 
           if (action === 'delete-card-sound') {
-            void handleDeleteSound(soundPath);
+            if (state.pendingDeleteSoundPath === soundPath) {
+              void handleDeleteSound(soundPath);
+              return;
+            }
+            armDeleteSoundConfirm(actionButton, soundPath);
           }
+        });
+      }
+
+      if (doc) {
+        doc.addEventListener('click', (event) => {
+          const target = event.target instanceof Element ? event.target : null;
+          if (!target) return;
+
+          if (state.openSoundPickerRuleId) {
+            const picker = target.closest('.sound-alert-sound-picker');
+            if (!picker) {
+              state.openSoundPickerRuleId = '';
+              renderRules();
+            }
+          }
+
+          if (!state.pendingDeleteButton) return;
+          const deleteButton = target.closest('.sound-library-card-delete');
+          if (deleteButton === state.pendingDeleteButton) return;
+          clearPendingDeleteSoundConfirm();
         });
       }
 
@@ -720,7 +1585,7 @@
         rulesBody.addEventListener('input', (event) => {
           const target = event.target instanceof Element ? event.target : null;
           if (!target) return;
-          const input = target.closest('input[data-field="eventValue"]');
+          const input = target.closest('input[data-field]');
           if (!input) return;
 
           const row = input.closest('tr[data-rule-id]');
@@ -728,13 +1593,19 @@
           const rule = getRuleById(ruleId);
           if (!rule) return;
 
-          if (rule.eventType === 'gift_value') {
+          const field = input.getAttribute('data-field');
+          if (field === 'eventValue' && rule.eventType === 'gift_value') {
             rule.eventValue = normalizeGiftValue(input.value || '');
             if (String(input.value || '') !== rule.eventValue) {
               input.value = rule.eventValue;
             }
-          } else {
+          } else if (field === 'eventValue') {
             rule.eventValue = String(input.value || '').trim();
+          } else if (field === 'minStaySeconds') {
+            rule.minStaySeconds = normalizeMinStaySeconds(input.value);
+            if (String(input.value || '') !== (rule.minStaySeconds > 0 ? String(rule.minStaySeconds) : '')) {
+              input.value = rule.minStaySeconds > 0 ? String(rule.minStaySeconds) : '';
+            }
           }
           saveRules();
         });
@@ -759,6 +1630,10 @@
             } else if (nextConditionType === 'gift_value') {
               rule.eventValue = normalizeGiftValue(rule.eventValue);
             }
+            if (!isLifecycleEventType(rule.eventType)) {
+              rule.recurringOnly = false;
+              rule.minStaySeconds = 0;
+            }
             saveRules();
             renderRules();
             return;
@@ -768,6 +1643,46 @@
             rule.soundPath = normalizeSoundPath(target.value);
             saveRules();
             renderRules();
+            return;
+          }
+
+          if (field === 'enabled') {
+            rule.enabled = Boolean(target.checked);
+            saveRules();
+            renderRules();
+            return;
+          }
+
+          if (field === 'animationTrigger') {
+            const selectedAnimation = String(target.value || '').trim();
+            const result = selectedAnimation
+              ? callbacks.assignAnimationForRule?.(rule, selectedAnimation)
+              : callbacks.clearAnimationForRule?.(rule);
+            if (result === false) {
+              renderRules();
+              return;
+            }
+            if (result && typeof result === 'object' && result.ok === false) {
+              callbacks.updateStatus?.(result.message || 'Failed to update animation', false, true);
+              renderRules();
+              return;
+            }
+            renderRules();
+            return;
+          }
+
+          if (field === 'recurringOnly') {
+            rule.recurringOnly = Boolean(target.checked);
+            saveRules();
+            return;
+          }
+
+          if (field === 'minStaySeconds') {
+            rule.minStaySeconds = normalizeMinStaySeconds(target.value);
+            if ('value' in target) {
+              target.value = rule.minStaySeconds > 0 ? String(rule.minStaySeconds) : '';
+            }
+            saveRules();
           }
         });
 
@@ -783,49 +1698,27 @@
           if (!rule) return;
 
           const action = actionBtn.getAttribute('data-action');
-          if (action === 'preview-selected') {
-            const select = row?.querySelector('select[data-field="soundPath"]');
-            playSound(select?.value || '');
+          if (action === 'toggle-sound-picker') {
+            state.openSoundPickerRuleId = state.openSoundPickerRuleId === ruleId ? '' : ruleId;
+            renderRules();
+            return;
+          }
+
+          if (action === 'select-sound-option') {
+            rule.soundPath = normalizeSoundPath(actionBtn.getAttribute('data-sound-path') || '');
+            state.openSoundPickerRuleId = '';
+            saveRules();
+            renderRules();
+            return;
+          }
+
+          if (action === 'play-sound-option') {
+            playSound(actionBtn.getAttribute('data-sound-path') || '');
             return;
           }
 
           if (action === 'play') {
             playSound(rule.soundPath);
-            return;
-          }
-
-          if (action === 'assign-animation') {
-            const selectedAnimation = String(
-              row?.querySelector('select[data-field="animationTrigger"]')?.value || ''
-            ).trim();
-            if (!selectedAnimation) {
-              callbacks.updateStatus?.('Select animation first', false, true);
-              return;
-            }
-
-            const result = callbacks.assignAnimationForRule?.(rule, selectedAnimation);
-            if (result === false) {
-              return;
-            }
-            if (result && typeof result === 'object' && result.ok === false) {
-              callbacks.updateStatus?.(result.message || 'Failed to assign animation', false, true);
-              return;
-            }
-
-            renderRules();
-            return;
-          }
-
-          if (action === 'clear-animation') {
-            const result = callbacks.clearAnimationForRule?.(rule);
-            if (result === false) {
-              return;
-            }
-            if (result && typeof result === 'object' && result.ok === false) {
-              callbacks.updateStatus?.(result.message || 'Failed to clear animation', false, true);
-              return;
-            }
-            renderRules();
             return;
           }
 
@@ -836,16 +1729,37 @@
           }
         });
       }
+
+      if (soundCards) {
+        soundCards.addEventListener('change', (event) => {
+          const target = event.target instanceof Element ? event.target : null;
+          if (!target) return;
+
+          const checkbox = target.closest('input[data-action="toggle-sound-keyword-enabled"]');
+          if (!checkbox) return;
+          const soundPath = normalizeSoundPath(checkbox.getAttribute('data-sound-path') || '');
+          if (!soundPath) return;
+          setSoundKeywordTriggerEnabled(soundPath, Boolean(checkbox.checked));
+          updateSoundKeywordToggleButton();
+        });
+      }
     }
 
     function init() {
       if (state.initialized) return;
       state.initialized = true;
       loadRules();
+      loadSoundKeywords();
+      loadSoundKeywordEnabled();
+      loadSoundKeywordJob();
+      migrateLegacySoundKeywordEnabled();
       loadKnownGiftNames();
+      loadVisitorHistory();
       bindEvents();
+      updateSoundKeywordGenerateButton();
+      updateSoundKeywordToggleButton();
       renderRules();
-      void loadCustomSounds();
+      void loadCustomSounds().then(() => generateMissingSoundKeywords({ resumeOnly: true }));
       void refreshKnownGiftsFromTikTok();
     }
 
@@ -857,10 +1771,15 @@
       registerGiftName,
       setKnownGiftNames,
       getKnownGiftNames,
+      getSoundKeywordEntries,
       resolveSoundForEvent,
+      handleLifecycleEvent,
+      clearPresenceState,
       playSound,
       clearSoundReferences,
-      normalizeSoundPath
+      normalizeSoundPath,
+      loadVisitorHistory,
+      saveVisitorHistory
     };
   }
 

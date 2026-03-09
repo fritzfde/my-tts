@@ -17,6 +17,8 @@
       renderOnlineUsers,
       autoAssignVoiceIfNeeded,
       speakText,
+      setPlatformSpeechSuppressed,
+      handleKeywordTriggers,
       getStartupBacklogCount,
       youtubeOnlineUserTtlMs,
       onConnectionStateChange
@@ -420,7 +422,7 @@
             const replayCandidates = startupRenderableMessages.slice(-startupBacklogCount);
             for (const msg of replayCandidates) {
               await autoAssignVoiceIfNeeded(msg.author, 'youtube');
-              speakText(msg.author, msg.text, 'youtube', false);
+              speakText(msg.author, msg.text, 'youtube', false, { bypassSuppression: true });
               replayed += 1;
             }
           }
@@ -430,6 +432,7 @@
           } else {
             addChatMessage('SYSTEM', 'YouTube chat synced. Waiting for new messages...', 'youtube', false);
           }
+          setPlatformSpeechSuppressed?.('youtube', false);
         } else {
           for (const msg of messages) {
             if (state.seenMessages.has(msg.id)) continue;
@@ -455,6 +458,9 @@
             });
 
             renderOnlineUsers();
+            if (typeof handleKeywordTriggers === 'function') {
+              handleKeywordTriggers(author, text, 'youtube');
+            }
             await autoAssignVoiceIfNeeded(author, 'youtube');
             speakText(author, text, 'youtube');
           }
@@ -508,6 +514,7 @@
       updateStatus('Connecting to YouTube...', true);
 
       try {
+        setPlatformSpeechSuppressed?.('youtube', true);
         state.liveChatId = await getLiveChatId(videoId, getNextApiKey());
 
         const now = Date.now();
@@ -531,6 +538,7 @@
 
         pollYouTubeMessages(isReconnect, state.pollLoopToken);
       } catch (error) {
+        setPlatformSpeechSuppressed?.('youtube', false);
         updateStatus(`YouTube error: ${error.message}`, false, true);
         elements.connectYouTubeBtn.disabled = false;
         notifyConnectionState(false);
@@ -538,6 +546,7 @@
     }
 
     function disconnectYouTube() {
+      setPlatformSpeechSuppressed?.('youtube', false);
       state.connected = false;
       state.liveChatId = null;
       state.nextPageToken = null;

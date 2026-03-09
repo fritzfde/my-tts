@@ -17,9 +17,14 @@
   }) {
     const state = {
       currentUtterance: null,
+      currentAudio: null,
       messageQueue: [],
       isSpeaking: false,
-      speakingWatchdog: null
+      speakingWatchdog: null,
+      speechSuppressedByPlatform: {
+        youtube: false,
+        tiktok: false
+      }
     };
 
     function getReadOptionsSafe() {
@@ -211,18 +216,28 @@
           if (result && result.isCloned && result.audio) {
             result.audio.onended = () => {
               console.log('🔊 Cloned audio ended');
+              if (state.currentAudio === result.audio) {
+                state.currentAudio = null;
+              }
               clearWatchdog();
               state.isSpeaking = false;
               processQueue();
             };
             result.audio.onerror = () => {
               console.error('🔊 Cloned audio error');
+              if (state.currentAudio === result.audio) {
+                state.currentAudio = null;
+              }
               clearWatchdog();
               state.isSpeaking = false;
               processQueue();
             };
+            state.currentAudio = result.audio;
             result.audio.play().catch(() => {
               console.warn('⏸️ Audio autoplay blocked. Click page to enable audio.');
+              if (state.currentAudio === result.audio) {
+                state.currentAudio = null;
+              }
               clearWatchdog();
               state.isSpeaking = false;
               if (typeof unlockAudio === 'function') {
@@ -281,6 +296,22 @@
       state.currentUtterance = null;
       state.isSpeaking = false;
       clearWatchdog();
+
+      if (state.currentAudio) {
+        try {
+          if (typeof state.currentAudio.pause === 'function') {
+            state.currentAudio.pause();
+          }
+          if (typeof state.currentAudio.currentTime === 'number') {
+            state.currentAudio.currentTime = 0;
+          }
+        } catch (err) {
+          // Ignore cloned audio cancellation errors.
+        } finally {
+          state.currentAudio = null;
+        }
+      }
+
       if (synth && typeof synth.cancel === 'function') {
         try {
           synth.cancel();
@@ -290,7 +321,19 @@
       }
     }
 
-    function speakText(author, text, platform, shouldDisplay = true) {
+    function setPlatformSpeechSuppressed(platform, suppressed) {
+      const normalizedPlatform = String(platform || '').trim().toLowerCase();
+      if (!normalizedPlatform) return;
+      state.speechSuppressedByPlatform[normalizedPlatform] = Boolean(suppressed);
+    }
+
+    function isPlatformSpeechSuppressed(platform) {
+      const normalizedPlatform = String(platform || '').trim().toLowerCase();
+      if (!normalizedPlatform) return false;
+      return state.speechSuppressedByPlatform[normalizedPlatform] === true;
+    }
+
+    function speakText(author, text, platform, shouldDisplay = true, options = {}) {
       const defaultVoice = typeof getPlatformDefaultVoice === 'function'
         ? (getPlatformDefaultVoice(platform) || '')
         : '';
@@ -308,6 +351,10 @@
         } catch (e) {
           // Ignore UI rendering errors, keep speaking pipeline running.
         }
+      }
+
+      if (isPlatformSpeechSuppressed(platform) && options?.bypassSuppression !== true) {
+        return;
       }
 
       if (isMuted) {
@@ -332,6 +379,8 @@
       setupUtteranceHandlers,
       enqueueMessage,
       speakText,
+      setPlatformSpeechSuppressed,
+      isPlatformSpeechSuppressed,
       clearWatchdog,
       stopAllSpeech
     };

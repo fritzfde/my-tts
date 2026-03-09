@@ -212,3 +212,33 @@ test('animation mappings: sync removes stale, dedupes files, and auto-adds missi
   const saved = settingsStore.getItem('animation_mappings');
   assert.ok(saved && saved.includes('a.mov') && saved.includes('b.mov'));
 });
+
+test('animation mappings: preserves normalized keyword lists', async () => {
+  const settingsStore = createSettingsStore({
+    animation_mappings: JSON.stringify({
+      dance: {
+        file: 'dance.mov',
+        position: 'center',
+        scale: 1.4,
+        keywords: ['Dance', 'party', 'dance']
+      }
+    })
+  });
+  const { factory } = loadControllerFactory('animation-mappings.js', 'createAnimationMappingsController');
+  const controller = factory({ settingsStore });
+
+  controller.loadMappings();
+
+  assert.equal(
+    JSON.stringify(controller.state.animationMappings.dance.keywords),
+    JSON.stringify(['Dance', 'party'])
+  );
+  assert.equal(controller.state.animationMappings.dance.keywordTriggerEnabled, true);
+  controller.saveMappings();
+  const saved = JSON.parse(settingsStore.getItem('animation_mappings'));
+  assert.equal(
+    JSON.stringify(saved.dance.keywords),
+    JSON.stringify(['Dance', 'party'])
+  );
+  assert.equal(saved.dance.keywordTriggerEnabled, true);
+});

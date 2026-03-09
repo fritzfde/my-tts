@@ -116,13 +116,6 @@
       const shareTrigger = helpers.getEventAnimationTrigger
         ? helpers.getEventAnimationTrigger('share')
         : '';
-      const joinTrigger = helpers.getEventAnimationTrigger
-        ? helpers.getEventAnimationTrigger('join')
-        : '';
-      const leaveTrigger = helpers.getEventAnimationTrigger
-        ? helpers.getEventAnimationTrigger('leave')
-        : '';
-
       stateRef.activePopup = { trigger, filename };
 
       elements.animationPopupName.value = trigger;
@@ -130,6 +123,17 @@
       setAnimationPopupScaleValue(currentData.scale ?? 1.0);
       if (elements.animationPopupGiftName) elements.animationPopupGiftName.value = currentGiftName;
       if (elements.animationPopupGiftValue) elements.animationPopupGiftValue.value = currentGiftValue;
+      if (elements.animationPopupKeywords) {
+        elements.animationPopupKeywords.value = Array.isArray(currentData.keywords)
+          ? currentData.keywords.join('\n')
+          : '';
+        if (typeof elements.animationPopupKeywords.setAttribute === 'function') {
+          elements.animationPopupKeywords.setAttribute('title', 'Keywords');
+        }
+      }
+      if (elements.animationPopupKeywordEnabled) {
+        elements.animationPopupKeywordEnabled.checked = currentData.keywordTriggerEnabled === true;
+      }
       if (typeof callbacks.populateAnimationPopupStickerOptions === 'function') {
         callbacks.populateAnimationPopupStickerOptions(currentStickerKey);
       }
@@ -139,15 +143,23 @@
       if (elements.animationPopupMapShare) {
         elements.animationPopupMapShare.checked = shareTrigger === trigger;
       }
-      if (elements.animationPopupMapJoin) {
-        elements.animationPopupMapJoin.checked = joinTrigger === trigger;
-      }
-      if (elements.animationPopupMapLeave) {
-        elements.animationPopupMapLeave.checked = leaveTrigger === trigger;
-      }
       if (elements.animationPopupMakeDefault) elements.animationPopupMakeDefault.checked = isDefaultGiftAnimation;
       elements.animationCardPopup.style.display = 'flex';
       elements.animationPopupName.focus();
+    }
+
+    function parseKeywordList(value) {
+      const seen = new Set();
+      return String(value || '')
+        .split(/[\n,]/)
+        .map((entry) => String(entry || '').trim())
+        .filter((entry) => {
+          if (!entry) return false;
+          const key = entry.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
     }
 
     async function handlePopupSave() {
@@ -184,8 +196,6 @@
 
       const mapFollowToAnimation = Boolean(elements.animationPopupMapFollow?.checked);
       const mapShareToAnimation = Boolean(elements.animationPopupMapShare?.checked);
-      const mapJoinToAnimation = Boolean(elements.animationPopupMapJoin?.checked);
-      const mapLeaveToAnimation = Boolean(elements.animationPopupMapLeave?.checked);
       const makeDefaultGiftAnimation = Boolean(elements.animationPopupMakeDefault?.checked);
       const nextGiftValue = hasGiftValueInput ? String(Math.floor(parsedGiftValue)) : '';
       const nextStickerKey = elements.animationPopupSticker ? elements.animationPopupSticker.value : '';
@@ -202,7 +212,11 @@
       const updatedData = {
         file: filename,
         position: stateRef.activePosition || currentData.position || 'bottom-left',
-        scale: Number.isFinite(scaleValue) ? scaleValue : currentData.scale
+        scale: Number.isFinite(scaleValue) ? scaleValue : currentData.scale,
+        keywords: elements.animationPopupKeywords
+          ? parseKeywordList(elements.animationPopupKeywords.value)
+          : (Array.isArray(currentData.keywords) ? currentData.keywords : []),
+        keywordTriggerEnabled: Boolean(elements.animationPopupKeywordEnabled?.checked)
       };
 
       callbacks.moveGiftAnimationReferences?.(oldTrigger, uniqueTrigger);
@@ -240,13 +254,6 @@
       const previousShareTrigger = helpers.getEventAnimationTrigger
         ? helpers.getEventAnimationTrigger('share')
         : '';
-      const previousJoinTrigger = helpers.getEventAnimationTrigger
-        ? helpers.getEventAnimationTrigger('join')
-        : '';
-      const previousLeaveTrigger = helpers.getEventAnimationTrigger
-        ? helpers.getEventAnimationTrigger('leave')
-        : '';
-
       if (mapFollowToAnimation) {
         callbacks.setEventAnimationTrigger?.('follow', uniqueTrigger);
       } else if (previousFollowTrigger === oldTrigger || previousFollowTrigger === uniqueTrigger) {
@@ -257,18 +264,6 @@
         callbacks.setEventAnimationTrigger?.('share', uniqueTrigger);
       } else if (previousShareTrigger === oldTrigger || previousShareTrigger === uniqueTrigger) {
         callbacks.setEventAnimationTrigger?.('share', '');
-      }
-
-      if (mapJoinToAnimation) {
-        callbacks.setEventAnimationTrigger?.('join', uniqueTrigger);
-      } else if (previousJoinTrigger === oldTrigger || previousJoinTrigger === uniqueTrigger) {
-        callbacks.setEventAnimationTrigger?.('join', '');
-      }
-
-      if (mapLeaveToAnimation) {
-        callbacks.setEventAnimationTrigger?.('leave', uniqueTrigger);
-      } else if (previousLeaveTrigger === oldTrigger || previousLeaveTrigger === uniqueTrigger) {
-        callbacks.setEventAnimationTrigger?.('leave', '');
       }
 
       callbacks.setStickerForAnimationTrigger?.(uniqueTrigger, nextStickerKey);

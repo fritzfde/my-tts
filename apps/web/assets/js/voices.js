@@ -447,7 +447,8 @@
 
     async function detectGenderWithLLM(username, {
       fetchFn,
-      model = 'llama3:8b'
+      model = 'llama3:8b',
+      baseUrl = 'http://localhost:11434'
     } = {}) {
       if (!isOllamaOnline()) return null;
 
@@ -455,6 +456,10 @@
         ? fetchFn
         : (typeof window !== 'undefined' && typeof window.fetch === 'function' ? window.fetch.bind(window) : null);
       if (!resolvedFetch) return null;
+
+      const normalizedBaseUrl = String(baseUrl || 'http://localhost:11434')
+        .trim()
+        .replace(/\/+$/, '');
 
       const prompt = `Username: "${username}"
 
@@ -472,7 +477,7 @@ neutral
 
 Answer:`;
 
-      const response = await resolvedFetch('http://localhost:11434/api/generate', {
+      const response = await resolvedFetch(`${normalizedBaseUrl}/api/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
