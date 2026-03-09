@@ -90,13 +90,21 @@ test('animation popup: open populates fields and active state', async () => {
     animationPopupGiftValue: createElement(),
     animationPopupKeywords: createElement(),
     animationPopupKeywordEnabled: createElement(),
+    animationPopupVoiceKeywordEnabled: createElement(),
     animationPopupSticker: createElement(),
     animationPopupMakeDefault: createElement()
   };
 
   const state = {
     animationMappings: {
-      dance: { file: 'dance.mov', position: 'top-right', scale: 1.25, keywords: ['dance', 'party'], keywordTriggerEnabled: true }
+      dance: {
+        file: 'dance.mov',
+        position: 'top-right',
+        scale: 1.25,
+        keywords: ['dance', 'party'],
+        keywordTriggerEnabled: true,
+        voiceKeywordTriggerEnabled: true
+      }
     },
     giftMappings: {
       byName: { Rose: { type: 'animation', value: 'dance' } },
@@ -115,7 +123,8 @@ test('animation popup: open populates fields and active state', async () => {
         position: data?.position || 'bottom-left',
         scale: Number(data?.scale || 1),
         keywords: Array.isArray(data?.keywords) ? data.keywords : [],
-        keywordTriggerEnabled: data?.keywordTriggerEnabled === true
+        keywordTriggerEnabled: data?.keywordTriggerEnabled === true,
+        voiceKeywordTriggerEnabled: data?.voiceKeywordTriggerEnabled === true
       }),
       findFirstGiftNameForAnimationTrigger: () => 'Rose',
       findFirstGiftValueForAnimationTrigger: () => '1',
@@ -138,6 +147,7 @@ test('animation popup: open populates fields and active state', async () => {
   assert.equal(elements.animationPopupGiftValue.value, '1');
   assert.equal(elements.animationPopupKeywords.value, 'dance\nparty');
   assert.equal(elements.animationPopupKeywordEnabled.checked, true);
+  assert.equal(elements.animationPopupVoiceKeywordEnabled.checked, true);
   assert.equal(elements.animationPopupMakeDefault.checked, true);
   assert.equal(selectedStickerKey, 'sticker-1');
   assert.equal(controller.getActivePopup()?.trigger, 'dance');
@@ -165,6 +175,7 @@ test('animation popup: save updates mapping and persists through callbacks', asy
     animationPopupGiftValue: createElement(),
     animationPopupKeywords: createElement(),
     animationPopupKeywordEnabled: createElement(),
+    animationPopupVoiceKeywordEnabled: createElement(),
     animationPopupSticker: createElement(),
     animationPopupMakeDefault: createElement(),
     animationPopupSaveBtn: createElement()
@@ -197,7 +208,8 @@ test('animation popup: save updates mapping and persists through callbacks', asy
         position: data?.position || 'bottom-left',
         scale: Number(data?.scale || 1),
         keywords: Array.isArray(data?.keywords) ? data.keywords : [],
-        keywordTriggerEnabled: data?.keywordTriggerEnabled === true
+        keywordTriggerEnabled: data?.keywordTriggerEnabled === true,
+        voiceKeywordTriggerEnabled: data?.voiceKeywordTriggerEnabled === true
       }),
       findFirstGiftNameForAnimationTrigger: () => '',
       findFirstGiftValueForAnimationTrigger: () => '',
@@ -236,6 +248,7 @@ test('animation popup: save updates mapping and persists through callbacks', asy
   elements.animationPopupScale.value = '2';
   elements.animationPopupKeywords.value = 'dance, boogie';
   elements.animationPopupKeywordEnabled.checked = true;
+  elements.animationPopupVoiceKeywordEnabled.checked = true;
   elements.animationPopupSticker.value = 'sticker-a';
 
   controller.attachEvents();
@@ -250,6 +263,7 @@ test('animation popup: save updates mapping and persists through callbacks', asy
     JSON.stringify(['dance', 'boogie'])
   );
   assert.equal(state.animationMappings['dance-new']?.keywordTriggerEnabled, true);
+  assert.equal(state.animationMappings['dance-new']?.voiceKeywordTriggerEnabled, true);
   assert.deepEqual(calls.setSticker, [['dance-new', 'sticker-a']]);
   assert.equal(calls.saveAnimationMappings, 1);
   assert.equal(calls.saveGiftMappings, 1);

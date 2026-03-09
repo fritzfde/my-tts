@@ -28,11 +28,13 @@
       customSounds: [],
       soundKeywords: {},
       soundKeywordEnabled: {},
+      soundVoiceKeywordEnabled: {},
       soundKeywordJob: null,
       soundKeywordGenerationPromise: null,
       rules: [],
       knownGiftNames: [],
       activeAudio: null,
+      activeSoundPath: '',
       openSoundPickerRuleId: '',
       pendingDeleteSoundPath: '',
       pendingDeleteButton: null,
@@ -45,6 +47,7 @@
     const SOUND_ALERT_RULES_KEY = 'sound_alert_rules';
     const SOUND_KEYWORDS_KEY = 'sound_keyword_map';
     const SOUND_KEYWORDS_ENABLED_KEY = 'sound_keyword_enabled_map';
+    const SOUND_VOICE_KEYWORDS_ENABLED_KEY = 'sound_voice_keyword_enabled_map';
     const SOUND_KEYWORD_JOB_KEY = 'sound_keyword_generation_job';
     const KNOWN_GIFT_NAMES_KEY = 'tiktok_known_gift_names';
     const VISITOR_HISTORY_KEY = 'presence_visitor_history';
@@ -245,6 +248,32 @@
       settingsStore.setItem(SOUND_KEYWORDS_ENABLED_KEY, JSON.stringify(state.soundKeywordEnabled));
     }
 
+    function loadSoundVoiceKeywordEnabled() {
+      const raw = settingsStore.getItem(SOUND_VOICE_KEYWORDS_ENABLED_KEY);
+      if (!raw) {
+        state.soundVoiceKeywordEnabled = {};
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(raw);
+        const next = {};
+        Object.entries(parsed && typeof parsed === 'object' ? parsed : {}).forEach(([soundPath, enabled]) => {
+          const normalizedPath = normalizeSoundPath(soundPath);
+          if (!normalizedPath) return;
+          next[normalizedPath] = enabled === true;
+        });
+        state.soundVoiceKeywordEnabled = next;
+      } catch (err) {
+        console.error('Failed to parse sound voice keyword enabled map:', err);
+        state.soundVoiceKeywordEnabled = {};
+      }
+    }
+
+    function saveSoundVoiceKeywordEnabled() {
+      settingsStore.setItem(SOUND_VOICE_KEYWORDS_ENABLED_KEY, JSON.stringify(state.soundVoiceKeywordEnabled));
+    }
+
     function normalizeSoundKeywordJob(value) {
       const raw = value && typeof value === 'object' ? value : {};
       const pendingItems = Array.isArray(raw.pendingItems)
@@ -309,19 +338,26 @@
         button.textContent = state.soundKeywordGenerationPromise
           ? `Generating ${completed}/${total}`
           : `Resume ${completed}/${total}`;
-        updateSoundKeywordToggleButton();
+        updateSoundKeywordToggleButtons();
         return;
       }
 
       button.textContent = '✨ Suggest Missing';
-      updateSoundKeywordToggleButton();
+      updateSoundKeywordToggleButtons();
     }
 
-    function getSoundKeywordToggleState() {
-      const eligiblePaths = state.customSounds
+    function getEligibleSoundKeywordPaths() {
+      return state.customSounds
         .map((sound) => normalizeSoundPath(sound.path))
         .filter((soundPath) => soundPath && getSoundKeywords(soundPath).length > 0);
-      const enabledCount = eligiblePaths.filter((soundPath) => isSoundKeywordTriggerEnabled(soundPath)).length;
+    }
+
+    function getSoundKeywordToggleState(kind = 'viewer') {
+      const eligiblePaths = getEligibleSoundKeywordPaths();
+      const isEnabled = kind === 'voice'
+        ? isSoundVoiceKeywordTriggerEnabled
+        : isSoundKeywordTriggerEnabled;
+      const enabledCount = eligiblePaths.filter((soundPath) => isEnabled(soundPath)).length;
       return {
         total: eligiblePaths.length,
         enabledCount,
@@ -329,16 +365,27 @@
       };
     }
 
-    function updateSoundKeywordToggleButton() {
-      const button = elements.soundLibraryKeywordToggleBtn || null;
-      if (!button) return;
-
-      const { total, allEnabled } = getSoundKeywordToggleState();
-      button.disabled = Boolean(state.soundKeywordGenerationPromise) || total === 0;
-      button.textContent = allEnabled ? 'Disable all' : 'Enable all';
-      button.title = total > 0
-        ? `${allEnabled ? 'Disable' : 'Enable'} keyword triggers for all ${total} sound file(s) that already have keywords`
-        : 'Generate or enter keywords first, then you can enable them all here';
+    function updateSoundKeywordToggleButtons() {
+      [
+        {
+          button: elements.soundLibraryViewerKeywordToggleBtn || null,
+          kind: 'viewer',
+          label: 'viewer chat'
+        },
+        {
+          button: elements.soundLibraryVoiceKeywordToggleBtn || null,
+          kind: 'voice',
+          label: 'voice'
+        }
+      ].forEach(({ button, kind, label }) => {
+        if (!button) return;
+        const { total, allEnabled } = getSoundKeywordToggleState(kind);
+        button.disabled = Boolean(state.soundKeywordGenerationPromise) || total === 0;
+        button.textContent = allEnabled ? `Disable all ${label}` : `Enable all ${label}`;
+        button.title = total > 0
+          ? `${allEnabled ? 'Disable' : 'Enable'} ${label} keyword triggers for all ${total} sound file(s) that already have keywords`
+          : `Generate or enter keywords first, then you can enable all ${label} triggers here`;
+      });
     }
 
     function migrateLegacySoundKeywordEnabled() {
@@ -350,6 +397,17 @@
         changed = true;
       });
       if (changed) saveSoundKeywordEnabled();
+    }
+
+    function migrateLegacySoundVoiceKeywordEnabled() {
+      let changed = false;
+      Object.keys(state.soundKeywords).forEach((soundPath) => {
+        if (Object.prototype.hasOwnProperty.call(state.soundVoiceKeywordEnabled, soundPath)) return;
+        if (parseKeywordList(state.soundKeywords[soundPath]).length === 0) return;
+        state.soundVoiceKeywordEnabled[soundPath] = true;
+        changed = true;
+      });
+      if (changed) saveSoundVoiceKeywordEnabled();
     }
 
     function loadKnownGiftNames() {
@@ -484,6 +542,22 @@
       saveSoundKeywordEnabled();
     }
 
+    function isSoundVoiceKeywordTriggerEnabled(soundPath = '') {
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) return false;
+      if (Object.prototype.hasOwnProperty.call(state.soundVoiceKeywordEnabled, normalizedPath)) {
+        return state.soundVoiceKeywordEnabled[normalizedPath] === true;
+      }
+      return false;
+    }
+
+    function setSoundVoiceKeywordTriggerEnabled(soundPath = '', enabled = false) {
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) return;
+      state.soundVoiceKeywordEnabled[normalizedPath] = enabled === true;
+      saveSoundVoiceKeywordEnabled();
+    }
+
     function pruneSoundKeywords() {
       const validPaths = new Set(state.customSounds.map((sound) => normalizeSoundPath(sound.path)));
       let changed = false;
@@ -501,6 +575,14 @@
         enabledChanged = true;
       });
       if (enabledChanged) saveSoundKeywordEnabled();
+
+      let voiceEnabledChanged = false;
+      Object.keys(state.soundVoiceKeywordEnabled).forEach((soundPath) => {
+        if (validPaths.has(soundPath)) return;
+        delete state.soundVoiceKeywordEnabled[soundPath];
+        voiceEnabledChanged = true;
+      });
+      if (voiceEnabledChanged) saveSoundVoiceKeywordEnabled();
     }
 
     function getSoundKeywordEntries() {
@@ -508,9 +590,21 @@
         .map((sound) => ({
           soundPath: normalizeSoundPath(sound.path),
           keywords: getSoundKeywords(sound.path),
-          enabled: isSoundKeywordTriggerEnabled(sound.path)
+          viewerEnabled: isSoundKeywordTriggerEnabled(sound.path),
+          voiceEnabled: isSoundVoiceKeywordTriggerEnabled(sound.path)
         }))
-        .filter((entry) => entry.soundPath && entry.enabled && entry.keywords.length > 0);
+        .filter((entry) => entry.soundPath && entry.viewerEnabled && entry.keywords.length > 0);
+    }
+
+    function getAllSoundKeywordEntries() {
+      return state.customSounds
+        .map((sound) => ({
+          soundPath: normalizeSoundPath(sound.path),
+          keywords: getSoundKeywords(sound.path),
+          viewerEnabled: isSoundKeywordTriggerEnabled(sound.path),
+          voiceEnabled: isSoundVoiceKeywordTriggerEnabled(sound.path)
+        }))
+        .filter((entry) => entry.soundPath && entry.keywords.length > 0);
     }
 
     function getActiveLifecycleRules(eventType) {
@@ -984,7 +1078,7 @@
 
       if (!Array.isArray(state.customSounds) || state.customSounds.length === 0) {
         cardsEl.innerHTML = '<div class="sound-library-empty">No custom sounds uploaded yet.</div>';
-        updateSoundKeywordToggleButton();
+        updateSoundKeywordToggleButtons();
         return;
       }
 
@@ -993,6 +1087,7 @@
         const label = String(sound.name || '').trim() || path;
         const keywordsText = getSoundKeywords(path).join('\n');
         const keywordEnabled = isSoundKeywordTriggerEnabled(path);
+        const voiceKeywordEnabled = isSoundVoiceKeywordTriggerEnabled(path);
 
         return `
           <div class="sound-library-card" title="${escapeAttribute(label)}">
@@ -1015,15 +1110,26 @@
               </button>
             </div>
             <div class="sound-library-card-meta">
-              <label class="sound-library-trigger-toggle" title="Enable keyword-triggered playback for this sound.">
-                <input
-                  type="checkbox"
-                  data-action="toggle-sound-keyword-enabled"
-                  data-sound-path="${escapeAttribute(path)}"
-                  ${keywordEnabled ? 'checked' : ''}
-                >
-                <span>Keyword trigger</span>
-              </label>
+              <div class="sound-library-trigger-toggles">
+                <label class="sound-library-trigger-toggle" title="Enable viewer chat keyword-triggered playback for this sound.">
+                  <input
+                    type="checkbox"
+                    data-action="toggle-sound-keyword-enabled"
+                    data-sound-path="${escapeAttribute(path)}"
+                    ${keywordEnabled ? 'checked' : ''}
+                  >
+                  <span>Viewer chat</span>
+                </label>
+                <label class="sound-library-trigger-toggle" title="Enable microphone voice keyword-triggered playback for this sound.">
+                  <input
+                    type="checkbox"
+                    data-action="toggle-sound-voice-keyword-enabled"
+                    data-sound-path="${escapeAttribute(path)}"
+                    ${voiceKeywordEnabled ? 'checked' : ''}
+                  >
+                  <span>Voice</span>
+                </label>
+              </div>
               <textarea
                 class="sound-library-card-keywords"
                 data-action="edit-sound-keywords"
@@ -1036,7 +1142,7 @@
           </div>
         `;
       }).join('');
-      updateSoundKeywordToggleButton();
+      updateSoundKeywordToggleButtons();
     }
 
     async function loadCustomSounds() {
@@ -1091,6 +1197,11 @@
         saveSoundKeywordEnabled();
         changed = true;
       }
+      if (Object.prototype.hasOwnProperty.call(state.soundVoiceKeywordEnabled, normalized)) {
+        delete state.soundVoiceKeywordEnabled[normalized];
+        saveSoundVoiceKeywordEnabled();
+        changed = true;
+      }
       return changed;
     }
 
@@ -1117,6 +1228,7 @@
       } finally {
         if (state.activeAudio === active) {
           state.activeAudio = null;
+          state.activeSoundPath = '';
         }
       }
     }
@@ -1163,11 +1275,13 @@
         const audio = new win.Audio(soundPath);
         audio.volume = getVolume();
         state.activeAudio = audio;
+        state.activeSoundPath = soundPath;
 
         if (typeof audio.addEventListener === 'function') {
           const clearActiveIfCurrent = () => {
             if (state.activeAudio === audio) {
               state.activeAudio = null;
+              state.activeSoundPath = '';
             }
           };
           audio.addEventListener('ended', clearActiveIfCurrent);
@@ -1178,6 +1292,7 @@
         audio.play().catch((err) => {
           if (state.activeAudio === audio) {
             state.activeAudio = null;
+            state.activeSoundPath = '';
           }
           console.error('Sound play error:', err);
         });
@@ -1185,6 +1300,7 @@
       } catch (err) {
         if (state.activeAudio) {
           state.activeAudio = null;
+          state.activeSoundPath = '';
         }
         console.error('Failed to play sound:', err);
         return false;
@@ -1385,6 +1501,9 @@
               if (!Object.prototype.hasOwnProperty.call(state.soundKeywordEnabled, soundPath)) {
                 setSoundKeywordTriggerEnabled(soundPath, false);
               }
+              if (!Object.prototype.hasOwnProperty.call(state.soundVoiceKeywordEnabled, soundPath)) {
+                setSoundVoiceKeywordTriggerEnabled(soundPath, false);
+              }
               updatedCount += 1;
             }
             if (entry?.warning) warningCount += 1;
@@ -1415,21 +1534,25 @@
       return runner;
     }
 
-    function setAllSoundKeywordTriggers(enabled = false) {
+    function setAllSoundKeywordTriggers(kind = 'viewer', enabled = false) {
       const normalizedEnabled = enabled === true;
+      const isEnabled = kind === 'voice'
+        ? isSoundVoiceKeywordTriggerEnabled
+        : isSoundKeywordTriggerEnabled;
+      const setEnabled = kind === 'voice'
+        ? setSoundVoiceKeywordTriggerEnabled
+        : setSoundKeywordTriggerEnabled;
       let changedCount = 0;
-      state.customSounds.forEach((sound) => {
-        const soundPath = normalizeSoundPath(sound.path);
-        if (!soundPath || getSoundKeywords(soundPath).length === 0) return;
-        if (isSoundKeywordTriggerEnabled(soundPath) === normalizedEnabled) return;
-        setSoundKeywordTriggerEnabled(soundPath, normalizedEnabled);
+      getEligibleSoundKeywordPaths().forEach((soundPath) => {
+        if (isEnabled(soundPath) === normalizedEnabled) return;
+        setEnabled(soundPath, normalizedEnabled);
         changedCount += 1;
       });
 
       renderSoundCards();
       if (changedCount > 0) {
         callbacks.updateStatus?.(
-          `✓ ${normalizedEnabled ? 'Enabled' : 'Disabled'} keyword triggers for ${changedCount} sound file(s).`,
+          `✓ ${normalizedEnabled ? 'Enabled' : 'Disabled'} ${kind === 'voice' ? 'voice' : 'viewer chat'} keyword triggers for ${changedCount} sound file(s).`,
           false
         );
       }
@@ -1455,7 +1578,8 @@
       const refreshGiftsBtn = elements.refreshTikTokGiftsBtn || null;
       const uploadBtn = elements.soundLibraryUploadBtn || null;
       const generateBtn = elements.soundLibraryGenerateBtn || null;
-      const keywordToggleBtn = elements.soundLibraryKeywordToggleBtn || null;
+      const viewerKeywordToggleBtn = elements.soundLibraryViewerKeywordToggleBtn || null;
+      const voiceKeywordToggleBtn = elements.soundLibraryVoiceKeywordToggleBtn || null;
       const soundCards = elements.soundLibraryCards || null;
 
       if (addRuleBtn) {
@@ -1486,11 +1610,19 @@
         });
       }
 
-      if (keywordToggleBtn) {
-        keywordToggleBtn.addEventListener('click', () => {
-          if (keywordToggleBtn.disabled) return;
-          const { allEnabled } = getSoundKeywordToggleState();
-          setAllSoundKeywordTriggers(!allEnabled);
+      if (viewerKeywordToggleBtn) {
+        viewerKeywordToggleBtn.addEventListener('click', () => {
+          if (viewerKeywordToggleBtn.disabled) return;
+          const { allEnabled } = getSoundKeywordToggleState('viewer');
+          setAllSoundKeywordTriggers('viewer', !allEnabled);
+        });
+      }
+
+      if (voiceKeywordToggleBtn) {
+        voiceKeywordToggleBtn.addEventListener('click', () => {
+          if (voiceKeywordToggleBtn.disabled) return;
+          const { allEnabled } = getSoundKeywordToggleState('voice');
+          setAllSoundKeywordTriggers('voice', !allEnabled);
         });
       }
 
@@ -1531,7 +1663,7 @@
           const soundPath = normalizeSoundPath(input.getAttribute('data-sound-path') || '');
           if (!soundPath) return;
           setSoundKeywords(soundPath, parseKeywordList(input.value));
-          updateSoundKeywordToggleButton();
+          updateSoundKeywordToggleButtons();
         });
 
         soundCards.addEventListener('click', (event) => {
@@ -1736,11 +1868,19 @@
           if (!target) return;
 
           const checkbox = target.closest('input[data-action="toggle-sound-keyword-enabled"]');
-          if (!checkbox) return;
-          const soundPath = normalizeSoundPath(checkbox.getAttribute('data-sound-path') || '');
+          if (checkbox) {
+            const soundPath = normalizeSoundPath(checkbox.getAttribute('data-sound-path') || '');
+            if (!soundPath) return;
+            setSoundKeywordTriggerEnabled(soundPath, Boolean(checkbox.checked));
+            updateSoundKeywordToggleButtons();
+            return;
+          }
+
+          const voiceCheckbox = target.closest('input[data-action="toggle-sound-voice-keyword-enabled"]');
+          if (!voiceCheckbox) return;
+          const soundPath = normalizeSoundPath(voiceCheckbox.getAttribute('data-sound-path') || '');
           if (!soundPath) return;
-          setSoundKeywordTriggerEnabled(soundPath, Boolean(checkbox.checked));
-          updateSoundKeywordToggleButton();
+          setSoundVoiceKeywordTriggerEnabled(soundPath, Boolean(voiceCheckbox.checked));
         });
       }
     }
@@ -1751,13 +1891,15 @@
       loadRules();
       loadSoundKeywords();
       loadSoundKeywordEnabled();
+      loadSoundVoiceKeywordEnabled();
       loadSoundKeywordJob();
       migrateLegacySoundKeywordEnabled();
+      migrateLegacySoundVoiceKeywordEnabled();
       loadKnownGiftNames();
       loadVisitorHistory();
       bindEvents();
       updateSoundKeywordGenerateButton();
-      updateSoundKeywordToggleButton();
+      updateSoundKeywordToggleButtons();
       renderRules();
       void loadCustomSounds().then(() => generateMissingSoundKeywords({ resumeOnly: true }));
       void refreshKnownGiftsFromTikTok();
@@ -1772,6 +1914,9 @@
       setKnownGiftNames,
       getKnownGiftNames,
       getSoundKeywordEntries,
+      getAllSoundKeywordEntries,
+      getSoundKeywords,
+      getActiveSoundPath: () => state.activeSoundPath,
       resolveSoundForEvent,
       handleLifecycleEvent,
       clearPresenceState,

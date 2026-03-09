@@ -22,19 +22,36 @@ test('keyword triggers: parses keyword lists, respects enable flags, and round-r
   const { factory } = loadControllerFactory('keyword-triggers.js', 'createKeywordTriggersController');
   const triggered = [];
   const played = [];
+  let activeAnimations = false;
+  let suppressedKeywords = [];
 
   const controller = factory({
     callbacks: {
       getAnimationMappings: () => ({
-        dance: { keywords: ['dance party', 'boogie'], keywordTriggerEnabled: true },
-        zebra: { keywords: ['dance party'], keywordTriggerEnabled: true },
-        hidden: { keywords: ['dance party'], keywordTriggerEnabled: false }
+        dance: { keywords: ['dance party', 'boogie'], keywordTriggerEnabled: true, voiceKeywordTriggerEnabled: true },
+        zebra: { keywords: ['dance party'], keywordTriggerEnabled: true, voiceKeywordTriggerEnabled: true },
+        hidden: { keywords: ['secret phrase'], keywordTriggerEnabled: false, voiceKeywordTriggerEnabled: true },
+        legacy: { keywords: ['very very low'], keywordTriggerEnabled: true }
+      }),
+      normalizeAnimationMapping: (data) => ({
+        keywords: Array.isArray(data?.keywords) ? data.keywords : [],
+        keywordTriggerEnabled: data?.keywordTriggerEnabled === true,
+        voiceKeywordTriggerEnabled: typeof data?.voiceKeywordTriggerEnabled === 'boolean'
+          ? data.voiceKeywordTriggerEnabled
+          : data?.keywordTriggerEnabled === true
       }),
       getSoundKeywordEntries: () => ([
-        { soundPath: '/sounds/horn.wav', keywords: ['horn', 'beep beep'], enabled: true },
-        { soundPath: '/sounds/zhorn.wav', keywords: ['beep beep'], enabled: true }
+        { soundPath: '/sounds/horn.wav', keywords: ['horn', 'beep beep'], viewerEnabled: true, voiceEnabled: true },
+        { soundPath: '/sounds/zhorn.wav', keywords: ['beep beep'], viewerEnabled: true, voiceEnabled: true }
       ]),
+      getAllSoundKeywordEntries: () => ([
+        { soundPath: '/sounds/horn.wav', keywords: ['horn', 'beep beep'], viewerEnabled: true, voiceEnabled: true },
+        { soundPath: '/sounds/zhorn.wav', keywords: ['beep beep'], viewerEnabled: true, voiceEnabled: true },
+        { soundPath: '/sounds/secret.wav', keywords: ['secret phrase'], viewerEnabled: false, voiceEnabled: true }
+      ]),
+      getSuppressedKeywords: () => suppressedKeywords,
       canTriggerAnimation: () => true,
+      hasActiveAnimations: () => activeAnimations,
       triggerAnimation: (...args) => triggered.push(args),
       playSound: (path) => played.push(path)
     }
@@ -51,6 +68,7 @@ test('keyword triggers: parses keyword lists, respects enable flags, and round-r
   assert.equal(exact.animationMatch?.trigger, 'dance');
   assert.equal(played.length, 0);
   assert.equal(triggered.length, 1);
+  assert.equal(exact.playedKind, 'animation');
 
   const fuzzy = controller.handleMessage({
     author: 'alex',
@@ -59,6 +77,35 @@ test('keyword triggers: parses keyword lists, respects enable flags, and round-r
   });
   assert.equal(fuzzy.animationMatch?.trigger, 'zebra');
   assert.equal(triggered.length, 2);
+  assert.equal(fuzzy.playedKind, 'animation');
+
+  const micStrict = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'can we do a dence partie now',
+    source: 'mic'
+  });
+  assert.equal(micStrict.animationMatch, null);
+  assert.equal(micStrict.soundMatch, null);
+  assert.equal(triggered.length, 2);
+
+  const micPartial = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'saying something here',
+    source: 'mic'
+  });
+  assert.equal(micPartial.animationMatch, null);
+  assert.equal(micPartial.soundMatch, null);
+
+  const micNearExact = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'boogi right now',
+    source: 'mic'
+  });
+  assert.equal(micNearExact.animationMatch?.trigger, 'dance');
+  assert.equal(triggered.length, 3);
 
   const sound = controller.handleMessage({
     author: 'alex',
@@ -73,4 +120,50 @@ test('keyword triggers: parses keyword lists, respects enable flags, and round-r
   });
   assert.equal(soundAgain.soundMatch?.soundPath, '/sounds/zhorn.wav');
   assert.deepEqual(played, ['/sounds/horn.wav', '/sounds/zhorn.wav']);
+  assert.equal(soundAgain.playedKind, 'sound');
+
+  const mic = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'secret phrase right now',
+    source: 'mic'
+  });
+  assert.equal(mic.animationMatch?.trigger, 'hidden');
+  assert.equal(mic.soundMatch?.soundPath, '/sounds/secret.wav');
+  assert.deepEqual(triggered[3], ['hidden', 'mic', 'host-mic', 'keyword']);
+  assert.equal(mic.playedKind, 'animation');
+  assert.deepEqual(played, ['/sounds/horn.wav', '/sounds/zhorn.wav']);
+
+  activeAnimations = true;
+  const blocked = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'horn right now',
+    source: 'mic'
+  });
+  assert.equal(blocked.blockedByActiveAnimation, true);
+  assert.equal(triggered.length, 4);
+  assert.deepEqual(played, ['/sounds/horn.wav', '/sounds/zhorn.wav']);
+
+  activeAnimations = false;
+  suppressedKeywords = ['secret phrase'];
+  const suppressed = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'secret phrase right now',
+    source: 'mic'
+  });
+  assert.equal(suppressed.ignoredBySuppressedKeywords, true);
+  assert.equal(triggered.length, 4);
+  assert.deepEqual(played, ['/sounds/horn.wav', '/sounds/zhorn.wav']);
+
+  const legacyMic = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'we flew very very low',
+    source: 'mic'
+  });
+  assert.equal(legacyMic.animationMatch?.trigger, 'legacy');
+  assert.equal(controller.hasExactMicKeywordMatch('we flew very very low tonight'), true);
+  assert.equal(controller.hasExactMicKeywordMatch('say secert phraze now'), false);
 });

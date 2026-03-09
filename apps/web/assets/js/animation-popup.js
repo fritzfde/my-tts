@@ -134,6 +134,9 @@
       if (elements.animationPopupKeywordEnabled) {
         elements.animationPopupKeywordEnabled.checked = currentData.keywordTriggerEnabled === true;
       }
+      if (elements.animationPopupVoiceKeywordEnabled) {
+        elements.animationPopupVoiceKeywordEnabled.checked = currentData.voiceKeywordTriggerEnabled === true;
+      }
       if (typeof callbacks.populateAnimationPopupStickerOptions === 'function') {
         callbacks.populateAnimationPopupStickerOptions(currentStickerKey);
       }
@@ -216,7 +219,8 @@
         keywords: elements.animationPopupKeywords
           ? parseKeywordList(elements.animationPopupKeywords.value)
           : (Array.isArray(currentData.keywords) ? currentData.keywords : []),
-        keywordTriggerEnabled: Boolean(elements.animationPopupKeywordEnabled?.checked)
+        keywordTriggerEnabled: Boolean(elements.animationPopupKeywordEnabled?.checked),
+        voiceKeywordTriggerEnabled: Boolean(elements.animationPopupVoiceKeywordEnabled?.checked)
       };
 
       callbacks.moveGiftAnimationReferences?.(oldTrigger, uniqueTrigger);

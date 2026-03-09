@@ -462,17 +462,50 @@ test('sound alerts: persists keyword edits and requires enable toggle before exp
 
   assert.equal(
     JSON.stringify(controller.getSoundKeywordEntries()),
-    JSON.stringify([{ soundPath: '/sounds/horn.wav', keywords: ['horn', 'beep'], enabled: true }])
+    JSON.stringify([{
+      soundPath: '/sounds/horn.wav',
+      keywords: ['horn', 'beep'],
+      viewerEnabled: true,
+      voiceEnabled: false
+    }])
   );
   assert.equal(
     JSON.stringify(JSON.parse(settingsStore.getItem('sound_keyword_enabled_map'))),
     JSON.stringify({ '/sounds/horn.wav': true })
   );
+
+  const voiceCheckbox = Object.assign(new ElementMock(), {
+    checked: true,
+    attributes: {
+      'data-action': 'toggle-sound-voice-keyword-enabled',
+      'data-sound-path': '/sounds/horn.wav'
+    },
+    getAttribute(name) {
+      return this.attributes[name] || '';
+    },
+    closest(selector) {
+      if (selector === 'input[data-action="toggle-sound-keyword-enabled"]') {
+        return null;
+      }
+      if (selector === 'input[data-action="toggle-sound-voice-keyword-enabled"]') {
+        return this;
+      }
+      return null;
+    }
+  });
+
+  changeHandler({ target: voiceCheckbox });
+
+  assert.equal(
+    JSON.stringify(JSON.parse(settingsStore.getItem('sound_voice_keyword_enabled_map'))),
+    JSON.stringify({ '/sounds/horn.wav': true })
+  );
 });
 
-test('sound alerts: bulk keyword toggle enables and disables all eligible sounds', async () => {
+test('sound alerts: bulk keyword toggles manage viewer chat and voice separately', async () => {
   const ElementMock = class {};
-  const listeners = new Map();
+  const viewerListeners = new Map();
+  const voiceListeners = new Map();
   const settingsStore = createSettingsStore({
     sound_keyword_map: JSON.stringify({
       '/sounds/horn.wav': ['horn'],
@@ -481,6 +514,10 @@ test('sound alerts: bulk keyword toggle enables and disables all eligible sounds
     sound_keyword_enabled_map: JSON.stringify({
       '/sounds/horn.wav': false,
       '/sounds/beep.wav': true
+    }),
+    sound_voice_keyword_enabled_map: JSON.stringify({
+      '/sounds/horn.wav': true,
+      '/sounds/beep.wav': false
     })
   });
 
@@ -488,12 +525,20 @@ test('sound alerts: bulk keyword toggle enables and disables all eligible sounds
     innerHTML: '',
     addEventListener() {}
   };
-  const soundLibraryKeywordToggleBtn = {
+  const soundLibraryViewerKeywordToggleBtn = {
     textContent: '',
     disabled: false,
     title: '',
     addEventListener(type, cb) {
-      listeners.set(type, cb);
+      viewerListeners.set(type, cb);
+    }
+  };
+  const soundLibraryVoiceKeywordToggleBtn = {
+    textContent: '',
+    disabled: false,
+    title: '',
+    addEventListener(type, cb) {
+      voiceListeners.set(type, cb);
     }
   };
 
@@ -507,7 +552,8 @@ test('sound alerts: bulk keyword toggle enables and disables all eligible sounds
     settingsStore,
     elements: {
       soundLibraryCards,
-      soundLibraryKeywordToggleBtn
+      soundLibraryViewerKeywordToggleBtn,
+      soundLibraryVoiceKeywordToggleBtn
     },
     fetchFn: async (url) => {
       if (url === '/api/sounds/list') {
@@ -531,13 +577,17 @@ test('sound alerts: bulk keyword toggle enables and disables all eligible sounds
   controller.init();
   await controller.loadCustomSounds();
 
-  assert.equal(soundLibraryKeywordToggleBtn.textContent, 'Enable all');
-  assert.equal(soundLibraryKeywordToggleBtn.disabled, false);
+  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Enable all viewer chat');
+  assert.equal(soundLibraryViewerKeywordToggleBtn.disabled, false);
+  assert.equal(soundLibraryVoiceKeywordToggleBtn.textContent, 'Enable all voice');
+  assert.equal(soundLibraryVoiceKeywordToggleBtn.disabled, false);
 
-  const clickHandler = listeners.get('click');
-  assert.equal(typeof clickHandler, 'function');
+  const viewerClickHandler = viewerListeners.get('click');
+  const voiceClickHandler = voiceListeners.get('click');
+  assert.equal(typeof viewerClickHandler, 'function');
+  assert.equal(typeof voiceClickHandler, 'function');
 
-  clickHandler();
+  viewerClickHandler();
   assert.deepEqual(
     JSON.parse(settingsStore.getItem('sound_keyword_enabled_map')),
     {
@@ -545,9 +595,19 @@ test('sound alerts: bulk keyword toggle enables and disables all eligible sounds
       '/sounds/beep.wav': true
     }
   );
-  assert.equal(soundLibraryKeywordToggleBtn.textContent, 'Disable all');
+  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Disable all viewer chat');
 
-  clickHandler();
+  voiceClickHandler();
+  assert.deepEqual(
+    JSON.parse(settingsStore.getItem('sound_voice_keyword_enabled_map')),
+    {
+      '/sounds/horn.wav': true,
+      '/sounds/beep.wav': true
+    }
+  );
+  assert.equal(soundLibraryVoiceKeywordToggleBtn.textContent, 'Disable all voice');
+
+  viewerClickHandler();
   assert.deepEqual(
     JSON.parse(settingsStore.getItem('sound_keyword_enabled_map')),
     {
@@ -555,7 +615,17 @@ test('sound alerts: bulk keyword toggle enables and disables all eligible sounds
       '/sounds/beep.wav': false
     }
   );
-  assert.equal(soundLibraryKeywordToggleBtn.textContent, 'Enable all');
+  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Enable all viewer chat');
+
+  voiceClickHandler();
+  assert.deepEqual(
+    JSON.parse(settingsStore.getItem('sound_voice_keyword_enabled_map')),
+    {
+      '/sounds/horn.wav': false,
+      '/sounds/beep.wav': false
+    }
+  );
+  assert.equal(soundLibraryVoiceKeywordToggleBtn.textContent, 'Enable all voice');
 });
 
 test('sound alerts: lifecycle rules support recurring users and minimum stay', async () => {

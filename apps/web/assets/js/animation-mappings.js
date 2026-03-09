@@ -29,7 +29,8 @@
         position: 'bottom-left',
         scale: 1.0,
         keywords: [],
-        keywordTriggerEnabled: false
+        keywordTriggerEnabled: false,
+        voiceKeywordTriggerEnabled: false
       };
     }
 
@@ -59,7 +60,14 @@
           keywords: normalizedKeywords,
           keywordTriggerEnabled: typeof data.keywordTriggerEnabled === 'boolean'
             ? data.keywordTriggerEnabled
-            : normalizedKeywords.length > 0
+            : normalizedKeywords.length > 0,
+          voiceKeywordTriggerEnabled: typeof data.voiceKeywordTriggerEnabled === 'boolean'
+            ? data.voiceKeywordTriggerEnabled
+            : (
+              typeof data.keywordTriggerEnabled === 'boolean'
+                ? data.keywordTriggerEnabled
+                : normalizedKeywords.length > 0
+            )
         };
       }
 
@@ -152,7 +160,8 @@
           position: normalized.position,
           scale: normalized.scale,
           keywords: normalizeKeywordList(normalized.keywords),
-          keywordTriggerEnabled: normalized.keywordTriggerEnabled === true
+          keywordTriggerEnabled: normalized.keywordTriggerEnabled === true,
+          voiceKeywordTriggerEnabled: normalized.voiceKeywordTriggerEnabled === true
         };
         usedFiles.add(file);
       });
