@@ -31,7 +31,9 @@ test('keyword triggers: parses keyword lists, respects enable flags, and round-r
         dance: { keywords: ['dance party', 'boogie'], keywordTriggerEnabled: true, voiceKeywordTriggerEnabled: true },
         zebra: { keywords: ['dance party'], keywordTriggerEnabled: true, voiceKeywordTriggerEnabled: true },
         hidden: { keywords: ['secret phrase'], keywordTriggerEnabled: false, voiceKeywordTriggerEnabled: true },
-        legacy: { keywords: ['very very low'], keywordTriggerEnabled: true }
+        legacy: { keywords: ['very very low'], keywordTriggerEnabled: true },
+        shortFragment: { keywords: ['these people'], keywordTriggerEnabled: true, voiceKeywordTriggerEnabled: true },
+        betterPhrase: { keywords: ['whoa are these people'], keywordTriggerEnabled: true, voiceKeywordTriggerEnabled: true }
       }),
       normalizeAnimationMapping: (data) => ({
         keywords: Array.isArray(data?.keywords) ? data.keywords : [],
@@ -164,6 +166,13 @@ test('keyword triggers: parses keyword lists, respects enable flags, and round-r
     source: 'mic'
   });
   assert.equal(legacyMic.animationMatch?.trigger, 'legacy');
+  const prioritizeLongerMic = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'who are these people',
+    source: 'mic'
+  });
+  assert.equal(prioritizeLongerMic.animationMatch?.trigger, 'betterPhrase');
   assert.equal(controller.hasExactMicKeywordMatch('we flew very very low tonight'), true);
   assert.equal(controller.hasExactMicKeywordMatch('say secert phraze now'), false);
 });

@@ -210,6 +210,18 @@
       return String(entry.id || entry.trigger || entry.soundPath || '').trim();
     }
 
+    function getTokenCount(value = '') {
+      const normalized = normalizeText(value);
+      return normalized ? normalized.split(' ').filter(Boolean).length : 0;
+    }
+
+    function getMicCoverageScore(entry, transcriptText = '') {
+      const transcriptTokenCount = getTokenCount(transcriptText);
+      const keywordTokenCount = getTokenCount(entry?.keyword);
+      if (!transcriptTokenCount || !keywordTokenCount) return 0;
+      return Math.min(keywordTokenCount, transcriptTokenCount) / Math.max(keywordTokenCount, transcriptTokenCount);
+    }
+
     function sortMatches(matches = []) {
       return matches.slice().sort((left, right) => {
         if (right.score !== left.score) return right.score - left.score;
@@ -265,8 +277,39 @@
       return selected;
     }
 
-    function pickBestMatch(matches = [], kind = '') {
+    function pickBestMicMatch(matches = [], kind = '', transcriptText = '') {
       if (!Array.isArray(matches) || matches.length === 0) return null;
+      const sorted = matches.slice().sort((left, right) => {
+        const leftCoverage = getMicCoverageScore(left, transcriptText);
+        const rightCoverage = getMicCoverageScore(right, transcriptText);
+        if (rightCoverage !== leftCoverage) return rightCoverage - leftCoverage;
+        const rightTokens = getTokenCount(right.keyword);
+        const leftTokens = getTokenCount(left.keyword);
+        if (rightTokens !== leftTokens) return rightTokens - leftTokens;
+        if (right.score !== left.score) return right.score - left.score;
+        if (right.keyword.length !== left.keyword.length) return right.keyword.length - left.keyword.length;
+        return toEntryId(left).localeCompare(toEntryId(right));
+      });
+
+      const [best] = sorted;
+      if (!best) return null;
+
+      const bestCoverage = getMicCoverageScore(best, transcriptText);
+      const bestTokens = getTokenCount(best.keyword);
+      const topCandidates = sorted.filter((entry) => (
+        getMicCoverageScore(entry, transcriptText) === bestCoverage
+        && getTokenCount(entry.keyword) === bestTokens
+        && entry.score === best.score
+      ));
+
+      return pickRoundRobinMatch(topCandidates, kind);
+    }
+
+    function pickBestMatch(matches = [], kind = '', options = {}) {
+      if (!Array.isArray(matches) || matches.length === 0) return null;
+      if (options.strict === true) {
+        return pickBestMicMatch(matches, kind, options.transcriptText || '');
+      }
       const [best] = matches;
       if (!best) return null;
 
@@ -369,8 +412,14 @@
       );
       const animationMatches = filterSuppressedMatches(rawAnimationMatches);
       const soundMatches = filterSuppressedMatches(rawSoundMatches);
-      const animationMatch = pickBestMatch(animationMatches, 'animation');
-      const soundMatch = pickBestMatch(soundMatches, 'sound');
+      const animationMatch = pickBestMatch(animationMatches, 'animation', {
+        strict: strictMicMatching,
+        transcriptText: normalizedText
+      });
+      const soundMatch = pickBestMatch(soundMatches, 'sound', {
+        strict: strictMicMatching,
+        transcriptText: normalizedText
+      });
       const normalizedPlatform = String(platform || '').trim().toLowerCase();
       const normalizedAuthor = String(author || '').trim();
       const animationAlreadyPlaying = callbacks.hasActiveAnimations?.() === true;
