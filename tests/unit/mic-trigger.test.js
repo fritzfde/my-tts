@@ -382,3 +382,169 @@ test('mic trigger: loads ASR URL, starts listening, and forwards final transcrip
   assert.equal(stoppedTracks, 1);
   assert.equal(meterFill.style.width, '0%');
 });
+
+test('mic trigger: ignored transcripts do not trigger when no exact bypass exists', async () => {
+  const { factory } = loadControllerFactory('mic-trigger.js', 'createMicTriggerController');
+  const settingsStore = createSettingsStore({
+    mic_asr_base_url: 'http://127.0.0.1:9001/',
+    mic_asr_language: 'en'
+  });
+
+  const button = createButton();
+  const buttonLabel = { textContent: '' };
+  const input = createInput();
+  const languageSelect = createInput();
+  const status = createStatusElement();
+  const meterFill = { style: { width: '0%' } };
+  const meterValue = { textContent: '' };
+  const transcriptNode = createHtmlElement();
+  const matchesNode = createHtmlElement();
+  const transcriptCalls = [];
+  const previewCalls = [];
+
+  class WebSocketMock {
+    static OPEN = 1;
+    static CLOSED = 3;
+
+    constructor(url) {
+      this.url = url;
+      this.readyState = 0;
+      WebSocketMock.instances.push(this);
+    }
+
+    send() {}
+
+    close() {
+      this.readyState = WebSocketMock.CLOSED;
+      if (typeof this.onclose === 'function') {
+        this.onclose();
+      }
+    }
+
+    triggerOpen() {
+      this.readyState = WebSocketMock.OPEN;
+      if (typeof this.onopen === 'function') {
+        this.onopen();
+      }
+    }
+
+    triggerMessage(payload) {
+      if (typeof this.onmessage === 'function') {
+        this.onmessage({ data: JSON.stringify(payload) });
+      }
+    }
+  }
+  WebSocketMock.instances = [];
+
+  class AudioContextMock {
+    constructor() {
+      this.sampleRate = 16000;
+      this.destination = {};
+      this.audioWorklet = null;
+    }
+
+    async resume() {}
+
+    createMediaStreamSource() {
+      return {
+        connect() {},
+        disconnect() {}
+      };
+    }
+
+    createGain() {
+      return {
+        gain: { value: 1 },
+        connect() {},
+        disconnect() {}
+      };
+    }
+
+    createScriptProcessor() {
+      return {
+        connect() {},
+        disconnect() {},
+        onaudioprocess: null
+      };
+    }
+
+    async close() {}
+  }
+
+  const controller = factory({
+    settingsStore,
+    elements: {
+      micTriggerToggleBtn: button,
+      micTriggerToggleLabel: buttonLabel,
+      micTriggerStatus: status,
+      micAsrBaseUrlInput: input,
+      micAsrLanguageSelect: languageSelect,
+      micTriggerMeterFill: meterFill,
+      micTriggerMeterValue: meterValue,
+      micTriggerTranscript: transcriptNode,
+      micTriggerMatches: matchesNode
+    },
+    callbacks: {
+      onTranscript: (payload) => {
+        transcriptCalls.push(payload);
+        return {
+          animationMatch: { trigger: 'should-not-run' },
+          soundMatch: null,
+          animationMatches: [],
+          soundMatches: []
+        };
+      },
+      previewTranscript: (payload) => {
+        previewCalls.push(payload);
+        return {
+          animationMatch: null,
+          soundMatch: null,
+          animationMatches: [],
+          soundMatches: []
+        };
+      },
+      hasExactMicKeywordMatch: () => false
+    },
+    fetchFn: async () => ({
+      ok: true,
+      json: async () => ({ whisper_model: 'base' })
+    }),
+    navigatorRef: {
+      mediaDevices: {
+        async getUserMedia() {
+          return {
+            getTracks() {
+              return [{ stop() {} }];
+            }
+          };
+        }
+      }
+    },
+    WebSocketRef: WebSocketMock,
+    AudioContextRef: AudioContextMock
+  });
+
+  controller.init();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await controller.startListening();
+  WebSocketMock.instances[0].triggerOpen();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  controller.state.listeningStartedAtMs = Date.now() - 4000;
+
+  WebSocketMock.instances[0].triggerMessage({
+    type: 'ignored',
+    transcript_text: 'we flew very very low',
+    language: 'en',
+    ignored_reason: 'low-confidence',
+    asr_confidence: 0.51,
+    segment_duration_ms: 2100,
+    asr_latency_ms: 240
+  });
+
+  assert.equal(transcriptCalls.length, 0);
+  assert.equal(previewCalls.length, 1);
+  assert.equal(transcriptNode.classList.contains('mic-trigger-transcript-ignored'), true);
+  assert.match(transcriptNode.innerHTML, /we flew very very low/i);
+  assert.match(matchesNode.innerHTML, /Ignored: Low Confidence/);
+  assert.doesNotMatch(matchesNode.innerHTML, /Animation:/);
+});

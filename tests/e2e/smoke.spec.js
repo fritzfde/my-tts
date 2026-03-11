@@ -74,6 +74,50 @@ async function mockAnimationsApi(page, files = [{ name: 'smoke', filename: 'smok
   });
 }
 
+async function mockSoundsApi(page, files = [{ name: 'horn.wav', path: '/sounds/horn.wav' }]) {
+  const mutableFiles = files.map((file) => ({
+    name: String(file.name || '').trim(),
+    path: String(file.path || '').trim()
+  }));
+  const deleted = [];
+
+  await page.route('**/api/sounds/**', async (route) => {
+    const url = new URL(route.request().url());
+    const pathname = url.pathname;
+    const method = route.request().method();
+
+    if (pathname.endsWith('/api/sounds/list') && method === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ custom: mutableFiles })
+      });
+      return;
+    }
+
+    if (pathname.includes('/api/sounds/') && method === 'DELETE') {
+      const filename = decodeURIComponent(pathname.split('/').pop() || '');
+      const index = mutableFiles.findIndex((entry) => entry.path.endsWith(`/${filename}`));
+      if (index >= 0) {
+        mutableFiles.splice(index, 1);
+      }
+      deleted.push(filename);
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ success: true })
+      });
+      return;
+    }
+
+    await route.fallback();
+  });
+
+  return {
+    getDeleted: () => [...deleted]
+  };
+}
+
 test.describe('Dashboard smoke suite', () => {
   test.afterAll(async ({ request }) => {
     for (const scope of e2eScopesToCleanup) {
@@ -463,5 +507,144 @@ test.describe('Dashboard smoke suite', () => {
 
     expect(triggerCalls).toBeGreaterThanOrEqual(2);
     expect(stopCalls).toBe(1);
+  });
+
+  test('@smoke persists sound settings popup edits after reload', async ({ page, request }) => {
+    const scope = uniqueScope('sound-settings');
+    await seedScopeSettings(request, scope, {
+      sound_keyword_map: JSON.stringify({}),
+      sound_keyword_enabled_map: JSON.stringify({}),
+      sound_voice_keyword_enabled_map: JSON.stringify({})
+    });
+
+    await mockSoundsApi(page, [
+      { name: 'horn.wav', path: '/sounds/horn.wav' }
+    ]);
+
+    await page.addInitScript(() => {
+      window.__playedSounds = [];
+      window.Audio = class AudioMock {
+        constructor(src) {
+          this.src = src;
+          this.currentTime = 0;
+          this.volume = 1;
+        }
+        play() {
+          window.__playedSounds.push(this.src);
+          return Promise.resolve();
+        }
+        pause() {}
+        addEventListener() {}
+      };
+    });
+
+    await openDashboard(page, scope);
+
+    const firstCard = page.locator('.sound-library-card').first();
+    await expect(firstCard).toBeVisible();
+
+    await firstCard.locator('.sound-library-card-settings').click();
+    await expect(page.locator('#soundSettingsPopup')).toBeVisible();
+
+    await page.click('#soundSettingsPlayBtn');
+    await expect.poll(async () => page.evaluate(() => window.__playedSounds.slice())).toContain('/sounds/horn.wav');
+
+    await page.fill('#soundSettingsKeywords', 'horn blast\nretro horn');
+    await page.check('#soundSettingsViewerKeywordEnabled');
+    await page.check('#soundSettingsVoiceKeywordEnabled');
+    await page.click('#soundSettingsSaveBtn');
+
+    await expect(page.locator('#soundSettingsPopup')).toBeHidden();
+    await expect(firstCard.locator('.sound-library-card-summary')).toHaveText('2 keywords • Viewer chat • Voice');
+
+    await page.waitForTimeout(SETTINGS_SYNC_WAIT_MS);
+    await page.reload();
+
+    const reloadedFirstCard = page.locator('.sound-library-card').first();
+    await reloadedFirstCard.locator('.sound-library-card-settings').click();
+    await expect(page.locator('#soundSettingsPopup')).toBeVisible();
+    await expect(page.locator('#soundSettingsKeywords')).toHaveValue('horn blast\nretro horn');
+    await expect(page.locator('#soundSettingsViewerKeywordEnabled')).toBeChecked();
+    await expect(page.locator('#soundSettingsVoiceKeywordEnabled')).toBeChecked();
+  });
+
+  test('@smoke plays and deletes a sound card from the library', async ({ page, request }) => {
+    const scope = uniqueScope('sound-library-actions');
+    await seedScopeSettings(request, scope);
+
+    const soundsApi = await mockSoundsApi(page, [
+      { name: 'horn.wav', path: '/sounds/horn.wav' }
+    ]);
+
+    await page.addInitScript(() => {
+      window.__playedSounds = [];
+      window.Audio = class AudioMock {
+        constructor(src) {
+          this.src = src;
+          this.currentTime = 0;
+          this.volume = 1;
+        }
+        play() {
+          window.__playedSounds.push(this.src);
+          return Promise.resolve();
+        }
+        pause() {}
+        addEventListener() {}
+      };
+    });
+
+    await openDashboard(page, scope);
+
+    const firstCard = page.locator('.sound-library-card').first();
+    await expect(firstCard).toBeVisible();
+
+    await firstCard.locator('.sound-library-card-main').click();
+    await expect.poll(async () => page.evaluate(() => window.__playedSounds.slice())).toContain('/sounds/horn.wav');
+
+    const deleteBtn = firstCard.locator('.sound-library-card-delete');
+    await deleteBtn.click();
+    await deleteBtn.click();
+
+    await expect(page.locator('.sound-library-card')).toHaveCount(0);
+    expect(soundsApi.getDeleted()).toEqual(['horn.wav']);
+  });
+
+  test('@smoke persists alert rule sound and animation assignments after reload', async ({ page, request }) => {
+    const scope = uniqueScope('alert-rules');
+    await seedScopeSettings(request, scope, {
+      animation_mappings: JSON.stringify({
+        'anim-alpha': { file: 'alpha.mov', position: 'bottom-left', scale: 1 }
+      })
+    });
+
+    await mockAnimationsApi(page, [
+      { name: 'Alpha', filename: 'alpha.mov' }
+    ]);
+    await mockSoundsApi(page, [
+      { name: 'horn.wav', path: '/sounds/horn.wav' }
+    ]);
+
+    await openDashboard(page, scope);
+
+    await page.click('#addSoundAlertRuleBtn');
+    const row = page.locator('#soundAlertRulesBody tr').first();
+    await expect(row).toBeVisible();
+
+    await row.locator('select[data-field="eventType"]').selectOption('gift_value');
+    await row.locator('input[data-field="eventValue"]').fill('7');
+
+    await row.locator('.sound-alert-sound-trigger').click();
+    await row.locator('.sound-alert-sound-option[data-sound-path="/sounds/horn.wav"]').click();
+
+    await row.locator('select[data-field="animationTrigger"]').selectOption('anim-alpha');
+
+    await page.waitForTimeout(SETTINGS_SYNC_WAIT_MS);
+    await page.reload();
+
+    const reloadedRow = page.locator('#soundAlertRulesBody tr').first();
+    await expect(reloadedRow.locator('select[data-field="eventType"]')).toHaveValue('gift_value');
+    await expect(reloadedRow.locator('input[data-field="eventValue"]')).toHaveValue('7');
+    await expect(reloadedRow.locator('.sound-alert-sound-trigger-label')).toHaveText('horn.wav');
+    await expect(reloadedRow.locator('select[data-field="animationTrigger"]')).toHaveValue('anim-alpha');
   });
 });
