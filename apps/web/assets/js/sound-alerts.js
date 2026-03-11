@@ -39,6 +39,7 @@
       pendingDeleteSoundPath: '',
       pendingDeleteButton: null,
       pendingDeleteResetTimer: null,
+      openSoundSettingsPath: '',
       visitorHistory: {},
       activePresenceSessions: {},
       pendingLifecycleTimers: {}
@@ -386,6 +387,78 @@
           ? `${allEnabled ? 'Disable' : 'Enable'} ${label} keyword triggers for all ${total} sound file(s) that already have keywords`
           : `Generate or enter keywords first, then you can enable all ${label} triggers here`;
       });
+    }
+
+    function getSoundLabel(rawSoundPath = '') {
+      const normalizedPath = normalizeSoundPath(rawSoundPath);
+      if (!normalizedPath) return '';
+      const match = state.customSounds.find((sound) => normalizeSoundPath(sound.path) === normalizedPath);
+      if (match && String(match.name || '').trim()) {
+        return String(match.name || '').trim();
+      }
+      return normalizedPath.split('/').pop() || normalizedPath;
+    }
+
+    function closeSoundSettings() {
+      state.openSoundSettingsPath = '';
+      const popup = elements.soundSettingsPopup || null;
+      if (popup && popup.style) {
+        popup.style.display = 'none';
+      }
+    }
+
+    function syncSoundSettingsPopup() {
+      const popup = elements.soundSettingsPopup || null;
+      const soundPath = normalizeSoundPath(state.openSoundSettingsPath);
+      if (!popup) return;
+
+      if (!soundPath) {
+        if (popup.style) popup.style.display = 'none';
+        return;
+      }
+
+      if (popup.style) {
+        popup.style.display = 'flex';
+      }
+      if (elements.soundSettingsName) {
+        elements.soundSettingsName.textContent = getSoundLabel(soundPath);
+      }
+      if (elements.soundSettingsKeywords) {
+        elements.soundSettingsKeywords.value = getSoundKeywords(soundPath).join('\n');
+      }
+      if (elements.soundSettingsViewerKeywordEnabled) {
+        elements.soundSettingsViewerKeywordEnabled.checked = isSoundKeywordTriggerEnabled(soundPath);
+      }
+      if (elements.soundSettingsVoiceKeywordEnabled) {
+        elements.soundSettingsVoiceKeywordEnabled.checked = isSoundVoiceKeywordTriggerEnabled(soundPath);
+      }
+      if (elements.soundSettingsPlayBtn) {
+        elements.soundSettingsPlayBtn.disabled = false;
+      }
+    }
+
+    function openSoundSettings(soundPath = '') {
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) {
+        closeSoundSettings();
+        return;
+      }
+      clearPendingDeleteSoundConfirm();
+      state.openSoundSettingsPath = normalizedPath;
+      syncSoundSettingsPopup();
+    }
+
+    function saveSoundSettingsFromPopup() {
+      const soundPath = normalizeSoundPath(state.openSoundSettingsPath);
+      if (!soundPath) return false;
+
+      setSoundKeywords(soundPath, parseKeywordList(elements.soundSettingsKeywords?.value || ''));
+      setSoundKeywordTriggerEnabled(soundPath, Boolean(elements.soundSettingsViewerKeywordEnabled?.checked));
+      setSoundVoiceKeywordTriggerEnabled(soundPath, Boolean(elements.soundSettingsVoiceKeywordEnabled?.checked));
+      renderSoundCards();
+      updateSoundKeywordToggleButtons();
+      closeSoundSettings();
+      return true;
     }
 
     function migrateLegacySoundKeywordEnabled() {
@@ -1085,16 +1158,32 @@
       cardsEl.innerHTML = state.customSounds.map((sound) => {
         const path = normalizeSoundPath(sound.path);
         const label = String(sound.name || '').trim() || path;
-        const keywordsText = getSoundKeywords(path).join('\n');
+        const keywords = getSoundKeywords(path);
         const keywordEnabled = isSoundKeywordTriggerEnabled(path);
         const voiceKeywordEnabled = isSoundVoiceKeywordTriggerEnabled(path);
+        const summaryParts = [];
+        if (keywords.length > 0) {
+          summaryParts.push(`${keywords.length} keyword${keywords.length === 1 ? '' : 's'}`);
+          if (keywordEnabled) summaryParts.push('Viewer chat');
+          if (voiceKeywordEnabled) summaryParts.push('Voice');
+        }
+        const summaryText = summaryParts.length > 0 ? summaryParts.join(' • ') : 'No keywords';
 
         return `
           <div class="sound-library-card" title="${escapeAttribute(label)}">
             <div class="sound-library-card-top">
               <button type="button" class="sound-library-card-main" data-action="play-card-sound" data-sound-path="${escapeAttribute(path)}">
                 <span class="sound-library-card-name">${escapeHtml(label)}</span>
+                <span class="sound-library-card-summary">${escapeHtml(summaryText)}</span>
               </button>
+              <button
+                type="button"
+                class="secondary sound-library-card-settings"
+                data-action="open-card-sound-settings"
+                data-sound-path="${escapeAttribute(path)}"
+                title="Sound settings"
+                aria-label="Sound settings"
+              >⚙</button>
               <button
                 type="button"
                 class="sound-library-card-delete"
@@ -1109,39 +1198,10 @@
                 </span>
               </button>
             </div>
-            <div class="sound-library-card-meta">
-              <div class="sound-library-trigger-toggles">
-                <label class="sound-library-trigger-toggle" title="Enable viewer chat keyword-triggered playback for this sound.">
-                  <input
-                    type="checkbox"
-                    data-action="toggle-sound-keyword-enabled"
-                    data-sound-path="${escapeAttribute(path)}"
-                    ${keywordEnabled ? 'checked' : ''}
-                  >
-                  <span>Viewer chat</span>
-                </label>
-                <label class="sound-library-trigger-toggle" title="Enable microphone voice keyword-triggered playback for this sound.">
-                  <input
-                    type="checkbox"
-                    data-action="toggle-sound-voice-keyword-enabled"
-                    data-sound-path="${escapeAttribute(path)}"
-                    ${voiceKeywordEnabled ? 'checked' : ''}
-                  >
-                  <span>Voice</span>
-                </label>
-              </div>
-              <textarea
-                class="sound-library-card-keywords"
-                data-action="edit-sound-keywords"
-                data-sound-path="${escapeAttribute(path)}"
-                rows="2"
-                placeholder="Keywords"
-                title="Keywords"
-              >${escapeHtml(keywordsText)}</textarea>
-            </div>
           </div>
         `;
       }).join('');
+      syncSoundSettingsPopup();
       updateSoundKeywordToggleButtons();
     }
 
@@ -1161,6 +1221,12 @@
         pruneSoundKeywords();
 
         renderSoundCards();
+        const validPaths = new Set(state.customSounds.map((sound) => normalizeSoundPath(sound.path)));
+        if (state.openSoundSettingsPath && !validPaths.has(state.openSoundSettingsPath)) {
+          closeSoundSettings();
+        } else {
+          syncSoundSettingsPopup();
+        }
         renderRules();
       } catch (err) {
         console.error('Failed to load custom sounds:', err);
@@ -1424,6 +1490,9 @@
 
       const filename = selectedPath.split('/').pop() || '';
       clearPendingDeleteSoundConfirm();
+      if (state.openSoundSettingsPath === selectedPath) {
+        closeSoundSettings();
+      }
 
       try {
         const response = await callFetch(`/api/sounds/${encodeURIComponent(filename)}`, {
@@ -1581,6 +1650,10 @@
       const viewerKeywordToggleBtn = elements.soundLibraryViewerKeywordToggleBtn || null;
       const voiceKeywordToggleBtn = elements.soundLibraryVoiceKeywordToggleBtn || null;
       const soundCards = elements.soundLibraryCards || null;
+      const soundSettingsBackdrop = elements.soundSettingsPopupBackdrop || null;
+      const soundSettingsSaveBtn = elements.soundSettingsSaveBtn || null;
+      const soundSettingsCancelBtn = elements.soundSettingsCancelBtn || null;
+      const soundSettingsPlayBtn = elements.soundSettingsPlayBtn || null;
 
       if (addRuleBtn) {
         addRuleBtn.addEventListener('click', () => {
@@ -1655,17 +1728,6 @@
       }
 
       if (soundCards) {
-        soundCards.addEventListener('input', (event) => {
-          const target = event.target instanceof Element ? event.target : null;
-          if (!target) return;
-          const input = target.closest('textarea[data-action="edit-sound-keywords"]');
-          if (!input) return;
-          const soundPath = normalizeSoundPath(input.getAttribute('data-sound-path') || '');
-          if (!soundPath) return;
-          setSoundKeywords(soundPath, parseKeywordList(input.value));
-          updateSoundKeywordToggleButtons();
-        });
-
         soundCards.addEventListener('click', (event) => {
           const target = event.target instanceof Element ? event.target : null;
           if (!target) return;
@@ -1683,6 +1745,11 @@
             return;
           }
 
+          if (action === 'open-card-sound-settings') {
+            openSoundSettings(soundPath);
+            return;
+          }
+
           if (action === 'delete-card-sound') {
             if (state.pendingDeleteSoundPath === soundPath) {
               void handleDeleteSound(soundPath);
@@ -1690,6 +1757,31 @@
             }
             armDeleteSoundConfirm(actionButton, soundPath);
           }
+        });
+      }
+
+      if (soundSettingsBackdrop) {
+        soundSettingsBackdrop.addEventListener('click', () => {
+          closeSoundSettings();
+        });
+      }
+
+      if (soundSettingsCancelBtn) {
+        soundSettingsCancelBtn.addEventListener('click', () => {
+          closeSoundSettings();
+        });
+      }
+
+      if (soundSettingsSaveBtn) {
+        soundSettingsSaveBtn.addEventListener('click', () => {
+          saveSoundSettingsFromPopup();
+        });
+      }
+
+      if (soundSettingsPlayBtn) {
+        soundSettingsPlayBtn.addEventListener('click', () => {
+          if (!state.openSoundSettingsPath) return;
+          playSound(state.openSoundSettingsPath);
         });
       }
 
@@ -1862,27 +1954,6 @@
         });
       }
 
-      if (soundCards) {
-        soundCards.addEventListener('change', (event) => {
-          const target = event.target instanceof Element ? event.target : null;
-          if (!target) return;
-
-          const checkbox = target.closest('input[data-action="toggle-sound-keyword-enabled"]');
-          if (checkbox) {
-            const soundPath = normalizeSoundPath(checkbox.getAttribute('data-sound-path') || '');
-            if (!soundPath) return;
-            setSoundKeywordTriggerEnabled(soundPath, Boolean(checkbox.checked));
-            updateSoundKeywordToggleButtons();
-            return;
-          }
-
-          const voiceCheckbox = target.closest('input[data-action="toggle-sound-voice-keyword-enabled"]');
-          if (!voiceCheckbox) return;
-          const soundPath = normalizeSoundPath(voiceCheckbox.getAttribute('data-sound-path') || '');
-          if (!soundPath) return;
-          setSoundVoiceKeywordTriggerEnabled(soundPath, Boolean(voiceCheckbox.checked));
-        });
-      }
     }
 
     function init() {
@@ -1917,6 +1988,9 @@
       getAllSoundKeywordEntries,
       getSoundKeywords,
       getActiveSoundPath: () => state.activeSoundPath,
+      openSoundSettings,
+      closeSoundSettings,
+      saveSoundSettings: saveSoundSettingsFromPopup,
       resolveSoundForEvent,
       handleLifecycleEvent,
       clearPresenceState,

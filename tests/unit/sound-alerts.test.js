@@ -370,7 +370,6 @@ test('sound alerts: sound card delete uses inline two-step confirmation', async 
 
 test('sound alerts: persists keyword edits and requires enable toggle before exposing entries', async () => {
   const ElementMock = class {};
-  const listeners = new Map();
   const { factory } = loadControllerFactory(
     'sound-alerts.js',
     'createSoundAlertsController',
@@ -379,16 +378,24 @@ test('sound alerts: persists keyword edits and requires enable toggle before exp
 
   const soundLibraryCards = {
     innerHTML: '',
-    addEventListener(type, cb) {
-      listeners.set(type, cb);
-    }
+    addEventListener() {}
   };
+  const soundSettingsPopup = { style: { display: 'none' } };
+  const soundSettingsName = { textContent: '' };
+  const soundSettingsKeywords = { value: '' };
+  const soundSettingsViewerKeywordEnabled = { checked: false };
+  const soundSettingsVoiceKeywordEnabled = { checked: false };
 
   const settingsStore = createSettingsStore();
   const controller = factory({
     settingsStore,
     elements: {
-      soundLibraryCards
+      soundLibraryCards,
+      soundSettingsPopup,
+      soundSettingsName,
+      soundSettingsKeywords,
+      soundSettingsViewerKeywordEnabled,
+      soundSettingsVoiceKeywordEnabled
     },
     fetchFn: async (url) => {
       if (url === '/api/sounds/list') {
@@ -408,57 +415,20 @@ test('sound alerts: persists keyword edits and requires enable toggle before exp
   controller.init();
   await controller.loadCustomSounds();
 
-  const inputHandler = listeners.get('input');
-  const changeHandler = listeners.get('change');
-  assert.equal(typeof inputHandler, 'function');
-  assert.equal(typeof changeHandler, 'function');
+  controller.openSoundSettings('/sounds/horn.wav');
+  assert.equal(soundSettingsPopup.style.display, 'flex');
+  assert.equal(soundSettingsName.textContent, 'horn.wav');
 
-  const textarea = Object.assign(new ElementMock(), {
-    attributes: {
-      'data-action': 'edit-sound-keywords',
-      'data-sound-path': '/sounds/horn.wav'
-    },
-    value: 'horn, beep\nHorn',
-    getAttribute(name) {
-      return this.attributes[name] || '';
-    },
-    closest(selector) {
-      if (selector === 'textarea[data-action="edit-sound-keywords"]') {
-        return this;
-      }
-      return null;
-    }
-  });
-
-  inputHandler({ target: textarea });
+  soundSettingsKeywords.value = 'horn, beep\nHorn';
 
   assert.equal(
     JSON.stringify(controller.getSoundKeywordEntries()),
     JSON.stringify([])
   );
-  assert.equal(
-    JSON.stringify(JSON.parse(settingsStore.getItem('sound_keyword_map'))),
-    JSON.stringify({ '/sounds/horn.wav': ['horn', 'beep'] })
-  );
 
-  const checkbox = Object.assign(new ElementMock(), {
-    checked: true,
-    attributes: {
-      'data-action': 'toggle-sound-keyword-enabled',
-      'data-sound-path': '/sounds/horn.wav'
-    },
-    getAttribute(name) {
-      return this.attributes[name] || '';
-    },
-    closest(selector) {
-      if (selector === 'input[data-action="toggle-sound-keyword-enabled"]') {
-        return this;
-      }
-      return null;
-    }
-  });
-
-  changeHandler({ target: checkbox });
+  soundSettingsViewerKeywordEnabled.checked = true;
+  soundSettingsVoiceKeywordEnabled.checked = true;
+  controller.saveSoundSettings();
 
   assert.equal(
     JSON.stringify(controller.getSoundKeywordEntries()),
@@ -466,40 +436,23 @@ test('sound alerts: persists keyword edits and requires enable toggle before exp
       soundPath: '/sounds/horn.wav',
       keywords: ['horn', 'beep'],
       viewerEnabled: true,
-      voiceEnabled: false
+      voiceEnabled: true
     }])
   );
   assert.equal(
     JSON.stringify(JSON.parse(settingsStore.getItem('sound_keyword_enabled_map'))),
     JSON.stringify({ '/sounds/horn.wav': true })
   );
-
-  const voiceCheckbox = Object.assign(new ElementMock(), {
-    checked: true,
-    attributes: {
-      'data-action': 'toggle-sound-voice-keyword-enabled',
-      'data-sound-path': '/sounds/horn.wav'
-    },
-    getAttribute(name) {
-      return this.attributes[name] || '';
-    },
-    closest(selector) {
-      if (selector === 'input[data-action="toggle-sound-keyword-enabled"]') {
-        return null;
-      }
-      if (selector === 'input[data-action="toggle-sound-voice-keyword-enabled"]') {
-        return this;
-      }
-      return null;
-    }
-  });
-
-  changeHandler({ target: voiceCheckbox });
+  assert.equal(
+    JSON.stringify(JSON.parse(settingsStore.getItem('sound_keyword_map'))),
+    JSON.stringify({ '/sounds/horn.wav': ['horn', 'beep'] })
+  );
 
   assert.equal(
     JSON.stringify(JSON.parse(settingsStore.getItem('sound_voice_keyword_enabled_map'))),
     JSON.stringify({ '/sounds/horn.wav': true })
   );
+  assert.equal(soundSettingsPopup.style.display, 'none');
 });
 
 test('sound alerts: bulk keyword toggles manage viewer chat and voice separately', async () => {

@@ -183,55 +183,6 @@
                 </div>
             </div>
 
-            <div class="input-group mic-trigger-card" style="margin-bottom: 12px;">
-                <div class="mic-trigger-header">
-                    <label style="margin: 0;">Mic Trigger</label>
-                    <button id="micTriggerToggleBtn" class="secondary mic-trigger-toggle-btn" type="button">
-                        <span class="mic-trigger-toggle-icon" aria-hidden="true">🎙️</span>
-                        <span id="micTriggerToggleLabel">Start Mic Listening</span>
-                    </button>
-                </div>
-                <div class="mic-trigger-row">
-                    <div class="input-group" style="margin-bottom: 0;">
-                        <label for="micAsrBaseUrlInput">Mic ASR URL</label>
-                        <input type="text" id="micAsrBaseUrlInput" placeholder="http://127.0.0.1:8001" spellcheck="false">
-                    </div>
-                    <div class="input-group mic-trigger-language-group" style="margin-bottom: 0;">
-                        <label for="micAsrLanguageSelect">Mic Language</label>
-                        <select id="micAsrLanguageSelect">
-                            <option value="auto">Auto detect</option>
-                            <option value="en">English</option>
-                            <option value="de">German</option>
-                            <option value="pl">Polish</option>
-                            <option value="es">Spanish</option>
-                            <option value="fr">French</option>
-                            <option value="it">Italian</option>
-                        </select>
-                    </div>
-                </div>
-                <div id="micTriggerStatus" class="mic-trigger-status">Mic: inactive. Start the local ASR service, then enable the mic.</div>
-                <div class="mic-trigger-monitor">
-                    <div class="mic-trigger-monitor-label">
-                        <span>Mic level</span>
-                        <span id="micTriggerMeterValue" class="mic-trigger-meter-value">0%</span>
-                    </div>
-                    <div class="mic-trigger-meter" title="Live microphone level">
-                        <div id="micTriggerMeterFill" class="mic-trigger-meter-fill"></div>
-                    </div>
-                </div>
-                <div class="mic-trigger-transcript-panel">
-                    <div class="mic-trigger-transcript-label">Live transcript</div>
-                    <div id="micTriggerTranscript" class="mic-trigger-transcript mic-trigger-transcript-empty">
-                        Transcript appears here after each spoken phrase.
-                    </div>
-                    <div id="micTriggerMatches" class="mic-trigger-matches"></div>
-                </div>
-                <div class="mic-trigger-hint">
-                    Your microphone uses local speech-to-text and can trigger sounds and animations from spoken keywords.
-                    Viewer chat keyword triggers below do not affect microphone triggering.
-                </div>
-            </div>
-
             <!-- AI Gender Detection -->
             <div class="input-group" style="margin-bottom: 12px;">
                 <label>
@@ -333,6 +284,38 @@
                 <div id="soundLibraryCards" class="sound-library-cards">
                     <div class="sound-library-empty">No sounds uploaded yet.</div>
                 </div>
+                <div id="soundSettingsPopup" class="animation-card-popup" style="display: none;">
+                    <div id="soundSettingsPopupBackdrop" class="animation-card-popup-backdrop"></div>
+                    <div class="animation-card-popup-panel sound-settings-popup-panel">
+                        <div class="sound-settings-popup-header">
+                            <div class="sound-settings-popup-title-wrap">
+                                <h4>Sound Settings</h4>
+                                <div id="soundSettingsName" class="sound-settings-popup-name"></div>
+                            </div>
+                            <button id="soundSettingsPlayBtn" class="secondary sound-settings-play-btn" type="button">▶ Play</button>
+                        </div>
+                        <div class="input-group sound-settings-keywords-group" style="margin-bottom: 0;">
+                            <div class="sound-settings-keywords-header">
+                                <label for="soundSettingsKeywords">Keywords</label>
+                                <div class="sound-settings-trigger-toggles">
+                                    <label class="sound-settings-trigger-toggle" title="Enable viewer chat keyword-triggered playback for this sound.">
+                                        <input type="checkbox" id="soundSettingsViewerKeywordEnabled" style="width: auto; margin-right: 8px;">
+                                        Viewer chat
+                                    </label>
+                                    <label class="sound-settings-trigger-toggle" title="Enable microphone voice keyword-triggered playback for this sound.">
+                                        <input type="checkbox" id="soundSettingsVoiceKeywordEnabled" style="width: auto; margin-right: 8px;">
+                                        Voice
+                                    </label>
+                                </div>
+                            </div>
+                            <textarea id="soundSettingsKeywords" class="sound-settings-keywords-textarea" rows="10" placeholder="Keywords" title="Keywords"></textarea>
+                        </div>
+                        <div class="animation-card-popup-actions sound-settings-popup-actions">
+                            <button id="soundSettingsSaveBtn" type="button">Save</button>
+                            <button id="soundSettingsCancelBtn" class="secondary" type="button">Cancel</button>
+                        </div>
+                    </div>
+                </div>
 
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; margin-bottom: 8px;">
                     <label style="margin: 0;">Alert Rules</label>
@@ -374,6 +357,55 @@
                     </div>
                 </div>
                 <datalist id="soundAlertGiftNamesDatalist"></datalist>
+            </div>
+
+            <div class="input-group mic-trigger-card" style="margin-bottom: 12px;">
+                <div class="mic-trigger-header">
+                    <label style="margin: 0;">Mic Trigger</label>
+                    <button id="micTriggerToggleBtn" class="secondary mic-trigger-toggle-btn" type="button">
+                        <span class="mic-trigger-toggle-icon" aria-hidden="true">🎙️</span>
+                        <span id="micTriggerToggleLabel">Start Mic Listening</span>
+                    </button>
+                </div>
+                <div class="mic-trigger-row">
+                    <div class="input-group" style="margin-bottom: 0;">
+                        <label for="micAsrBaseUrlInput">Mic ASR URL</label>
+                        <input type="text" id="micAsrBaseUrlInput" placeholder="http://127.0.0.1:8001" spellcheck="false">
+                    </div>
+                    <div class="input-group mic-trigger-language-group" style="margin-bottom: 0;">
+                        <label for="micAsrLanguageSelect">Mic Language</label>
+                        <select id="micAsrLanguageSelect">
+                            <option value="auto">Auto detect</option>
+                            <option value="en">English</option>
+                            <option value="de">German</option>
+                            <option value="pl">Polish</option>
+                            <option value="es">Spanish</option>
+                            <option value="fr">French</option>
+                            <option value="it">Italian</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="micTriggerStatus" class="mic-trigger-status">Mic: inactive. Start the local ASR service, then enable the mic.</div>
+                <div class="mic-trigger-monitor">
+                    <div class="mic-trigger-monitor-label">
+                        <span>Mic level</span>
+                        <span id="micTriggerMeterValue" class="mic-trigger-meter-value">0%</span>
+                    </div>
+                    <div class="mic-trigger-meter" title="Live microphone level">
+                        <div id="micTriggerMeterFill" class="mic-trigger-meter-fill"></div>
+                    </div>
+                </div>
+                <div class="mic-trigger-transcript-panel">
+                    <div class="mic-trigger-transcript-label">Live transcript</div>
+                    <div id="micTriggerTranscript" class="mic-trigger-transcript mic-trigger-transcript-empty">
+                        Transcript appears here after each spoken phrase.
+                    </div>
+                    <div id="micTriggerMatches" class="mic-trigger-matches"></div>
+                </div>
+                <div class="mic-trigger-hint">
+                    Your microphone uses local speech-to-text and can trigger sounds and animations from spoken keywords.
+                    Viewer chat keyword triggers below do not affect microphone triggering.
+                </div>
             </div>
         </div>
 
@@ -469,78 +501,99 @@
 
                 <div id="animationCardPopup" class="animation-card-popup" style="display: none;">
                     <div class="animation-card-popup-backdrop"></div>
-                    <div class="animation-card-popup-panel">
+                    <div class="animation-card-popup-panel animation-card-settings-panel">
                         <h4>Animation Card Settings</h4>
-                        <div class="input-group" style="margin-bottom: 10px;">
-                            <div class="animation-popup-top-row">
-                                <div>
-                                    <label>Name</label>
-                                    <input type="text" id="animationPopupName" placeholder="Animation name">
+                        <div class="animation-popup-layout">
+                            <div class="animation-popup-primary-column">
+                                <div class="animation-popup-preview-block">
+                                    <div class="animation-popup-preview-header">
+                                        <span>Preview</span>
+                                        <span class="animation-popup-preview-note">Local only</span>
+                                    </div>
+                                    <video id="animationPopupPreviewVideo" class="animation-popup-preview-video" controls playsinline preload="metadata"></video>
                                 </div>
-                                <div class="animation-popup-scale-wrap">
-                                    <label class="animation-popup-scale-label">Scale</label>
-                                    <div class="animation-popup-scale-controls">
-                                        <input type="number" id="animationPopupScale" class="animation-popup-scale-input" min="0.5" max="3" step="0.25">
-                                        <button type="button" id="animationPopupScaleDownBtn" class="secondary animation-scale-btn" title="Decrease scale">▼</button>
-                                        <button type="button" id="animationPopupScaleUpBtn" class="secondary animation-scale-btn" title="Increase scale">▲</button>
+                                <div class="input-group animation-popup-keywords-group" style="margin-bottom: 0;">
+                                    <div class="animation-popup-keywords-header">
+                                        <label>Keywords</label>
+                                        <div class="animation-popup-keyword-toggles">
+                                            <label class="animation-popup-keyword-toggle" title="Enable viewer chat keyword-triggered animation from chat messages.">
+                                                <input type="checkbox" id="animationPopupKeywordEnabled" style="width: auto; margin-right: 8px;">
+                                                Viewer chat
+                                            </label>
+                                            <label class="animation-popup-keyword-toggle" title="Enable voice-triggered animation from your microphone keywords.">
+                                                <input type="checkbox" id="animationPopupVoiceKeywordEnabled" style="width: auto; margin-right: 8px;">
+                                                Voice
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <textarea id="animationPopupKeywords" class="animation-popup-keywords-textarea" rows="10" placeholder="Keywords" title="Keywords"></textarea>
+                                </div>
+                            </div>
+                            <div class="animation-popup-settings-column">
+                                <div class="input-group animation-popup-name-group" style="margin-bottom: 12px;">
+                                    <div class="animation-popup-top-row">
+                                        <div>
+                                            <label>Name</label>
+                                            <input type="text" id="animationPopupName" placeholder="Animation name">
+                                        </div>
+                                        <div class="animation-popup-scale-wrap">
+                                            <label class="animation-popup-scale-label">Scale</label>
+                                            <div class="animation-popup-scale-controls">
+                                                <input type="number" id="animationPopupScale" class="animation-popup-scale-input" min="0.5" max="3" step="0.25">
+                                                <button type="button" id="animationPopupScaleDownBtn" class="secondary animation-scale-btn" title="Decrease scale">▼</button>
+                                                <button type="button" id="animationPopupScaleUpBtn" class="secondary animation-scale-btn" title="Increase scale">▲</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="input-group" style="margin-bottom: 12px;">
+                                    <label>Position</label>
+                                    <div id="animationPopupPositionGrid" class="animation-position-grid">
+                                        <button type="button" class="secondary animation-position-btn" data-position="top-left" title="Top Left">↖</button>
+                                        <button type="button" class="secondary animation-position-btn" data-position="top-center" title="Top Center">↑</button>
+                                        <button type="button" class="secondary animation-position-btn" data-position="top-right" title="Top Right">↗</button>
+                                        <button type="button" class="secondary animation-position-btn" data-position="center-left" title="Center Left">←</button>
+                                        <button type="button" class="secondary animation-position-btn" data-position="center" title="Center">•</button>
+                                        <button type="button" class="secondary animation-position-btn" data-position="center-right" title="Center Right">→</button>
+                                        <button type="button" class="secondary animation-position-btn" data-position="bottom-left" title="Bottom Left">↙</button>
+                                        <button type="button" class="secondary animation-position-btn" data-position="bottom-center" title="Bottom Center">↓</button>
+                                        <button type="button" class="secondary animation-position-btn" data-position="bottom-right" title="Bottom Right">↘</button>
+                                    </div>
+                                </div>
+                                <div class="input-group" style="margin-bottom: 12px;">
+                                    <label>Gift Mapping (Optional)</label>
+                                    <div class="animation-popup-gift-row">
+                                        <input type="text" id="animationPopupGiftName" placeholder="Gift name (e.g. Rose)">
+                                        <input type="number" id="animationPopupGiftValue" min="1" step="1" placeholder="Diamond value">
+                                    </div>
+                                </div>
+                                <div class="input-group animation-popup-events-group" style="margin-bottom: 12px;">
+                                    <label>Events</label>
+                                    <div class="animation-popup-event-row">
+                                        <label style="margin-top: 0; text-transform: none; letter-spacing: normal;">
+                                            <input type="checkbox" id="animationPopupMapFollow" style="width: auto; margin-right: 8px;">
+                                            Trigger on new follower/subscriber
+                                        </label>
+                                        <label style="margin-top: 0; text-transform: none; letter-spacing: normal;">
+                                            <input type="checkbox" id="animationPopupMapShare" style="width: auto; margin-right: 8px;">
+                                            Trigger on stream share
+                                        </label>
+                                    </div>
+                                    <label class="animation-popup-default-toggle" style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
+                                        <input type="checkbox" id="animationPopupMakeDefault" style="width: auto; margin-right: 8px;">
+                                        Make default gift animation (fallback round-robin)
+                                    </label>
+                                </div>
+                                <div class="input-group" style="margin-bottom: 0;">
+                                    <select id="animationPopupSticker" style="display: none;">
+                                        <option value="">No sticker assigned</option>
+                                    </select>
+                                    <label>Sticker Mapping</label>
+                                    <div id="animationPopupStickerPicker" class="animation-sticker-picker">
+                                        <!-- Sticker thumbnails added dynamically -->
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="input-group" style="margin-bottom: 14px;">
-                            <label>Position</label>
-                            <div id="animationPopupPositionGrid" class="animation-position-grid">
-                                <button type="button" class="secondary animation-position-btn" data-position="top-left" title="Top Left">↖</button>
-                                <button type="button" class="secondary animation-position-btn" data-position="top-center" title="Top Center">↑</button>
-                                <button type="button" class="secondary animation-position-btn" data-position="top-right" title="Top Right">↗</button>
-                                <button type="button" class="secondary animation-position-btn" data-position="center-left" title="Center Left">←</button>
-                                <button type="button" class="secondary animation-position-btn" data-position="center" title="Center">•</button>
-                                <button type="button" class="secondary animation-position-btn" data-position="center-right" title="Center Right">→</button>
-                                <button type="button" class="secondary animation-position-btn" data-position="bottom-left" title="Bottom Left">↙</button>
-                                <button type="button" class="secondary animation-position-btn" data-position="bottom-center" title="Bottom Center">↓</button>
-                                <button type="button" class="secondary animation-position-btn" data-position="bottom-right" title="Bottom Right">↘</button>
-                            </div>
-                        </div>
-                        <div class="input-group" style="margin-bottom: 14px;">
-                            <label>Gift Mapping (Optional)</label>
-                            <div class="animation-popup-gift-row">
-                                <input type="text" id="animationPopupGiftName" placeholder="Gift name (e.g. Rose)">
-                                <input type="number" id="animationPopupGiftValue" min="1" step="1" placeholder="Diamond value">
-                            </div>
-                            <select id="animationPopupSticker" style="display: none;">
-                                <option value="">No sticker assigned</option>
-                            </select>
-                            <label style="margin-top: 8px;">Sticker Mapping</label>
-                            <div id="animationPopupStickerPicker" class="animation-sticker-picker">
-                                <!-- Sticker thumbnails added dynamically -->
-                            </div>
-                            <div class="animation-popup-keyword-row">
-                                <textarea id="animationPopupKeywords" rows="3" placeholder="Keywords" title="Keywords"></textarea>
-                                <div class="animation-popup-keyword-toggles">
-                                    <label class="animation-popup-keyword-toggle" title="Enable viewer chat keyword-triggered animation from chat messages.">
-                                        <input type="checkbox" id="animationPopupKeywordEnabled" style="width: auto; margin-right: 8px;">
-                                        Viewer chat
-                                    </label>
-                                    <label class="animation-popup-keyword-toggle" title="Enable voice-triggered animation from your microphone keywords.">
-                                        <input type="checkbox" id="animationPopupVoiceKeywordEnabled" style="width: auto; margin-right: 8px;">
-                                        Voice
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="animation-popup-event-row">
-                                <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
-                                    <input type="checkbox" id="animationPopupMapFollow" style="width: auto; margin-right: 8px;">
-                                    Trigger on new follower/subscriber
-                                </label>
-                                <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
-                                    <input type="checkbox" id="animationPopupMapShare" style="width: auto; margin-right: 8px;">
-                                    Trigger on stream share
-                                </label>
-                            </div>
-                            <label style="margin-top: 8px; text-transform: none; letter-spacing: normal;">
-                                <input type="checkbox" id="animationPopupMakeDefault" style="width: auto; margin-right: 8px;">
-                                Make default gift animation (fallback round-robin)
-                            </label>
                         </div>
                         <div class="animation-card-popup-actions">
                             <button id="animationPopupSaveBtn">Save</button>

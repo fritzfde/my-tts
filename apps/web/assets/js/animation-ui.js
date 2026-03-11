@@ -102,10 +102,46 @@
       if (typeof callbacks.bindAnimationThumbnailDurationListener === 'function') {
         callbacks.bindAnimationThumbnailDurationListener(video);
       }
+      bindDurationBadgeListener(video);
       if (video.dataset.src && !video.getAttribute('src')) {
         video.setAttribute('src', video.dataset.src);
         video.load();
       }
+    }
+
+    function formatDurationBadgeLabel(durationSeconds) {
+      const numeric = Number(durationSeconds);
+      if (!Number.isFinite(numeric) || numeric <= 0) return '';
+      if (numeric >= 60) {
+        const minutes = Math.floor(numeric / 60);
+        const seconds = Math.round(numeric % 60);
+        return `${minutes}:${String(seconds).padStart(2, '0')}`;
+      }
+      return `${Math.round(numeric)}s`;
+    }
+
+    function updateDurationBadgeForVideo(video) {
+      if (!video) return;
+      const card = typeof video.closest === 'function'
+        ? video.closest('.animation-mapping-card')
+        : null;
+      if (!card) return;
+      const badge = card.querySelector('.animation-thumb-duration');
+      if (!badge) return;
+      const label = formatDurationBadgeLabel(video.duration);
+      badge.textContent = label;
+      badge.classList.toggle('is-visible', Boolean(label));
+    }
+
+    function bindDurationBadgeListener(video) {
+      if (!video) return;
+      if (video.dataset.durationBadgeBound !== '1') {
+        video.dataset.durationBadgeBound = '1';
+        video.addEventListener('loadedmetadata', () => {
+          updateDurationBadgeForVideo(video);
+        });
+      }
+      updateDurationBadgeForVideo(video);
     }
 
     function playAnimationThumbnail(video) {
@@ -339,6 +375,7 @@
         if (typeof callbacks.bindAnimationThumbnailDurationListener === 'function') {
           callbacks.bindAnimationThumbnailDurationListener(video);
         }
+        bindDurationBadgeListener(video);
 
         // If src is already set, skip observer-driven hydration to avoid visible flicker on rerender.
         if (video.getAttribute('src')) return;
@@ -586,6 +623,7 @@
         if (typeof callbacks.bindAnimationThumbnailDurationListener === 'function') {
           callbacks.bindAnimationThumbnailDurationListener(previousVideo);
         }
+        bindDurationBadgeListener(previousVideo);
 
         previousVideo.className = nextVideo.className;
         previousVideo.dataset.src = nextVideo.dataset.src || previousVideo.dataset.src || '';
@@ -601,6 +639,7 @@
         if (typeof nextVideo.replaceWith === 'function') {
           nextVideo.replaceWith(previousVideo);
         }
+        updateDurationBadgeForVideo(previousVideo);
       });
     }
 
@@ -626,7 +665,8 @@
 
       const previousVideosByFile = captureRenderedThumbnailVideos(list);
       const activePlayback = getActivePlaybackMap();
-      list.innerHTML = cards.map(({ anim, trigger }) => {
+      list.innerHTML = cards.map((card) => {
+        const { anim, trigger } = card;
         const safeTrigger = escapeAttribute(trigger);
         const safeFilename = escapeAttribute(anim.filename);
         const fileUrl = typeof helpers.getAnimationFileUrl === 'function'
@@ -654,17 +694,20 @@
 
         return `
     <div class="animation-mapping-card${isPlaying ? ' playing' : ''}" data-animation-trigger="${safeTrigger}" data-animation-file="${safeFilename}" style="--play-progress:${playProgress.toFixed(4)}" title="${safeTrigger}">
-      <button class="secondary animation-thumb-btn preview-mapping-btn" data-trigger="${safeTrigger}" title="${safeTrigger}">
-        <video class="animation-thumb-video" src="${fileUrl}" data-src="${fileUrl}" data-file="${safeFilename}" muted loop playsinline preload="metadata"></video>
-        ${visibilityBadges}
-        <span class="animation-thumb-overlay">▶ Play</span>
-        <span class="animation-playing-state" aria-hidden="true">
-          <span class="animation-playing-label">Playing</span>
-          <span class="animation-playing-countdown">${countdown}</span>
-          <span class="animation-playing-progress"><span class="animation-playing-progress-fill"></span></span>
-        </span>
-      </button>
-      <button class="animation-gear-btn open-animation-settings-btn" data-trigger="${safeTrigger}" data-file="${safeFilename}" title="Settings">⚙️</button>
+      <div class="animation-card-media">
+        <button class="secondary animation-thumb-btn preview-mapping-btn" data-trigger="${safeTrigger}" title="${safeTrigger}">
+          <video class="animation-thumb-video" src="${fileUrl}" data-src="${fileUrl}" data-file="${safeFilename}" muted loop playsinline preload="metadata"></video>
+          ${visibilityBadges}
+          <span class="animation-thumb-duration" aria-hidden="true"></span>
+          <span class="animation-thumb-overlay">▶ Play</span>
+          <span class="animation-playing-state" aria-hidden="true">
+            <span class="animation-playing-label">Playing</span>
+            <span class="animation-playing-countdown">${countdown}</span>
+            <span class="animation-playing-progress"><span class="animation-playing-progress-fill"></span></span>
+          </span>
+        </button>
+        <button class="animation-gear-btn open-animation-settings-btn" data-trigger="${safeTrigger}" data-file="${safeFilename}" title="Settings">⚙️</button>
+      </div>
     </div>
   `;
       }).join('');

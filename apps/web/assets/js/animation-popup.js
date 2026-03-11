@@ -75,8 +75,46 @@
       });
     }
 
+    function getAnimationFileUrl(filename) {
+      if (typeof helpers.getAnimationFileUrl === 'function') {
+        return helpers.getAnimationFileUrl(filename);
+      }
+      return `/animations/${encodeURIComponent(filename || '')}`;
+    }
+
+    function stopAnimationPopupPreview() {
+      const previewVideo = elements.animationPopupPreviewVideo || null;
+      if (!previewVideo) return;
+      try {
+        previewVideo.pause();
+      } catch {}
+      try {
+        previewVideo.currentTime = 0;
+      } catch {}
+    }
+
+    function setAnimationPopupPreview(filename) {
+      const previewVideo = elements.animationPopupPreviewVideo || null;
+      if (!previewVideo) return;
+      const safeFilename = String(filename || '').trim();
+      if (!safeFilename) {
+        previewVideo.removeAttribute('src');
+        previewVideo.load?.();
+        return;
+      }
+      const nextSrc = getAnimationFileUrl(safeFilename);
+      if (previewVideo.getAttribute('src') !== nextSrc) {
+        previewVideo.src = nextSrc;
+        previewVideo.load?.();
+      }
+      previewVideo.muted = false;
+      previewVideo.loop = true;
+      previewVideo.playsInline = true;
+    }
+
     function closeAnimationCardPopup() {
       if (!elements.animationCardPopup) return;
+      stopAnimationPopupPreview();
       elements.animationCardPopup.style.display = 'none';
       stateRef.activePopup = null;
     }
@@ -147,6 +185,7 @@
         elements.animationPopupMapShare.checked = shareTrigger === trigger;
       }
       if (elements.animationPopupMakeDefault) elements.animationPopupMakeDefault.checked = isDefaultGiftAnimation;
+      setAnimationPopupPreview(filename);
       elements.animationCardPopup.style.display = 'flex';
       elements.animationPopupName.focus();
     }

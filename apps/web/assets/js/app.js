@@ -1537,6 +1537,15 @@ soundAlertsController = window.createSoundAlertsController({
     soundLibraryViewerKeywordToggleBtn: document.getElementById('soundLibraryViewerKeywordToggleBtn'),
     soundLibraryVoiceKeywordToggleBtn: document.getElementById('soundLibraryVoiceKeywordToggleBtn'),
     soundLibraryCards: document.getElementById('soundLibraryCards'),
+    soundSettingsPopup: document.getElementById('soundSettingsPopup'),
+    soundSettingsPopupBackdrop: document.getElementById('soundSettingsPopupBackdrop'),
+    soundSettingsName: document.getElementById('soundSettingsName'),
+    soundSettingsKeywords: document.getElementById('soundSettingsKeywords'),
+    soundSettingsViewerKeywordEnabled: document.getElementById('soundSettingsViewerKeywordEnabled'),
+    soundSettingsVoiceKeywordEnabled: document.getElementById('soundSettingsVoiceKeywordEnabled'),
+    soundSettingsSaveBtn: document.getElementById('soundSettingsSaveBtn'),
+    soundSettingsCancelBtn: document.getElementById('soundSettingsCancelBtn'),
+    soundSettingsPlayBtn: document.getElementById('soundSettingsPlayBtn'),
     addSoundAlertRuleBtn: document.getElementById('addSoundAlertRuleBtn'),
     refreshTikTokGiftsBtn: document.getElementById('refreshTikTokGiftsBtn'),
     soundAlertRulesBody: document.getElementById('soundAlertRulesBody'),
@@ -1979,6 +1988,7 @@ const animationUiController = window.createAnimationUiController({
     escapeAttribute,
     getAnimationFileUrl,
     getAnimationFileFromMapping,
+    toAnimationMappingObject,
     normalizeTriggerFromFilename,
     findAnimationMappingEntryByFile,
     findGiftNamesForAnimationTrigger,
@@ -2723,6 +2733,7 @@ if (animationVoiceKeywordToggleBtn) {
 
 const animationCardPopup = document.getElementById('animationCardPopup');
 const animationPopupName = document.getElementById('animationPopupName');
+const animationPopupPreviewVideo = document.getElementById('animationPopupPreviewVideo');
 const animationPopupPositionGrid = document.getElementById('animationPopupPositionGrid');
 const animationPopupScale = document.getElementById('animationPopupScale');
 const animationPopupGiftName = document.getElementById('animationPopupGiftName');
@@ -2772,6 +2783,7 @@ const animationPopupController = window.createAnimationPopupController({
   elements: {
     animationCardPopup,
     animationPopupName,
+    animationPopupPreviewVideo,
     animationPopupPositionGrid,
     animationPopupScale,
     animationPopupGiftName,
@@ -2807,7 +2819,8 @@ const animationPopupController = window.createAnimationPopupController({
     findStickerKeyForAnimationTrigger,
     isDefaultGiftAnimationTrigger,
     getEventAnimationTrigger,
-    getAnimationFileFromMapping
+    getAnimationFileFromMapping,
+    getAnimationFileUrl
   },
   callbacks: {
     populateAnimationPopupStickerOptions,
