@@ -1,5 +1,6 @@
 (function initTikTokModule() {
   function createTikTokController(deps) {
+    const STARTUP_SYNC_WINDOW_MS = 8000;
     const {
       elements,
       settingsStore,
@@ -42,7 +43,9 @@
       pollTimer: null,
       lastPollTime: null,
       pollLoopToken: 0,
-      hasAudienceSnapshot: false
+      hasAudienceSnapshot: false,
+      startupSyncUntilMs: 0,
+      startupSyncAnnounced: false
     };
 
     function isConnected() {
@@ -183,14 +186,23 @@
         const response = await fetch('/api/tiktok/messages');
         const messages = await response.json();
         const isInitialPollCycle = state.isFirstPoll;
-        if (state.isFirstPoll) {
-          state.isFirstPoll = false;
-        }
 
         state.lastPollTime = Date.now();
         if (!messages || messages.length === 0) {
           if (isInitialPollCycle) {
-            addChatMessage('SYSTEM', 'TikTok chat synced. Waiting for new messages...', 'tiktok', false);
+            const startupWindowOpen = state.startupSyncUntilMs > 0 && Date.now() < state.startupSyncUntilMs;
+            if (startupWindowOpen) {
+              if (!state.startupSyncAnnounced) {
+                addChatMessage('SYSTEM', 'TikTok chat synced. Waiting for new messages...', 'tiktok', false);
+                state.startupSyncAnnounced = true;
+              }
+              return;
+            }
+            state.isFirstPoll = false;
+            if (!state.startupSyncAnnounced) {
+              addChatMessage('SYSTEM', 'TikTok chat synced. Waiting for new messages...', 'tiktok', false);
+              state.startupSyncAnnounced = true;
+            }
             setPlatformSpeechSuppressed?.('tiktok', false);
           }
           return;
@@ -227,7 +239,8 @@
           if (msg.type === 'gift') {
             const giftText = `🎁 sent ${msg.giftName}${msg.repeatCount > 1 ? ' x' + msg.repeatCount : ''} (${msg.diamondCount} diamonds)`;
             addChatMessage(msg.author, giftText, 'tiktok', false, 'gift', false, undefined, {
-              emitPresenceLifecycle: !isFirstPoll
+              emitPresenceLifecycle: !isFirstPoll,
+              broadcastOverlay: !isFirstPoll
             });
             if (typeof registerKnownGiftName === 'function') {
               registerKnownGiftName(msg.giftName);
@@ -260,7 +273,8 @@
 
           if (msg.type === 'follow') {
             addChatMessage(msg.author, '👤 followed your stream', 'tiktok', false, 'follow', false, undefined, {
-              emitPresenceLifecycle: !isFirstPoll
+              emitPresenceLifecycle: !isFirstPoll,
+              broadcastOverlay: !isFirstPoll
             });
 
             if (!isFirstPoll) {
@@ -283,7 +297,8 @@
 
           if (msg.type === 'share') {
             addChatMessage(msg.author, '📤 shared your stream', 'tiktok', false, 'share', false, undefined, {
-              emitPresenceLifecycle: !isFirstPoll
+              emitPresenceLifecycle: !isFirstPoll,
+              broadcastOverlay: !isFirstPoll
             });
 
             if (!isFirstPoll) {
@@ -309,7 +324,8 @@
             const stickersHTML = buildStickerChatListHtml(emotes);
             const combinedHTML = `${escapeHtml(msg.text)}${stickersHTML ? `<br>${stickersHTML}` : ''}`;
             addChatMessage(msg.author, combinedHTML, 'tiktok', false, 'combined', true, msg.text || '', {
-              emitPresenceLifecycle: !isFirstPoll
+              emitPresenceLifecycle: !isFirstPoll,
+              broadcastOverlay: !isFirstPoll
             });
 
             if (!isFirstPoll && msg.text && typeof handleKeywordTriggers === 'function') {
@@ -337,7 +353,8 @@
 
             const stickersHTML = buildStickerChatListHtml(emotes);
             addChatMessage(msg.author, stickersHTML, 'tiktok', false, 'sticker', true, null, {
-              emitPresenceLifecycle: !isFirstPoll
+              emitPresenceLifecycle: !isFirstPoll,
+              broadcastOverlay: !isFirstPoll
             });
 
             if (!isFirstPoll && typeof handleStickerAnimation === 'function') {
@@ -365,7 +382,8 @@
               speakText(msg.author, msg.text, 'tiktok', true);
             } else {
               addChatMessage(msg.author, msg.text, 'tiktok', false, '', false, undefined, {
-                emitPresenceLifecycle: !isFirstPoll
+                emitPresenceLifecycle: !isFirstPoll,
+                broadcastOverlay: !isFirstPoll
               });
             }
           }
@@ -387,6 +405,8 @@
             await processMessage(messages[i], false, true);
           }
 
+          state.isFirstPoll = false;
+
           let replayed = 0;
           if (startupBacklogCount > 0) {
             const replayCandidates = messages
@@ -407,9 +427,10 @@
 
           if (replayed > 0) {
             addChatMessage('SYSTEM', `TikTok chat synced. Replaying last ${replayed} message${replayed === 1 ? '' : 's'}...`, 'tiktok', false);
-          } else {
+          } else if (!state.startupSyncAnnounced) {
             addChatMessage('SYSTEM', 'TikTok chat synced. Waiting for new messages...', 'tiktok', false);
           }
+          state.startupSyncAnnounced = true;
           setPlatformSpeechSuppressed?.('tiktok', false);
           return;
         }
@@ -465,6 +486,8 @@
         state.isFirstPoll = true;
         state.seenMessages.clear();
         state.hasAudienceSnapshot = false;
+        state.startupSyncUntilMs = Date.now() + STARTUP_SYNC_WINDOW_MS;
+        state.startupSyncAnnounced = false;
         state.pollLoopToken += 1;
         elements.disconnectTikTokBtn.disabled = false;
         clearOnlineUsers('tiktok');
@@ -490,6 +513,8 @@
       state.lastPollTime = Date.now();
       state.pollLoopToken += 1;
       state.hasAudienceSnapshot = false;
+      state.startupSyncUntilMs = 0;
+      state.startupSyncAnnounced = false;
       clearOnlineUsers('tiktok');
       stopPolling();
 

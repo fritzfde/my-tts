@@ -29,6 +29,7 @@
       soundKeywords: {},
       soundKeywordEnabled: {},
       soundVoiceKeywordEnabled: {},
+      soundVolumes: {},
       soundKeywordJob: null,
       soundKeywordGenerationPromise: null,
       rules: [],
@@ -40,6 +41,7 @@
       pendingDeleteButton: null,
       pendingDeleteResetTimer: null,
       openSoundSettingsPath: '',
+      keywordFilter: '',
       visitorHistory: {},
       activePresenceSessions: {},
       pendingLifecycleTimers: {}
@@ -49,7 +51,9 @@
     const SOUND_KEYWORDS_KEY = 'sound_keyword_map';
     const SOUND_KEYWORDS_ENABLED_KEY = 'sound_keyword_enabled_map';
     const SOUND_VOICE_KEYWORDS_ENABLED_KEY = 'sound_voice_keyword_enabled_map';
+    const SOUND_VOLUMES_KEY = 'sound_volume_map';
     const SOUND_KEYWORD_JOB_KEY = 'sound_keyword_generation_job';
+    const SOUND_LIBRARY_KEYWORD_FILTER_KEY = 'sound_library_keyword_filter';
     const KNOWN_GIFT_NAMES_KEY = 'tiktok_known_gift_names';
     const VISITOR_HISTORY_KEY = 'presence_visitor_history';
     const LIFECYCLE_EVENT_TYPES = new Set(['join', 'leave']);
@@ -139,6 +143,10 @@
         keywords.push(normalized);
       });
       return keywords;
+    }
+
+    function normalizeKeywordFilter(value) {
+      return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
     }
 
     function isSupportedEventType(value) {
@@ -275,6 +283,44 @@
       settingsStore.setItem(SOUND_VOICE_KEYWORDS_ENABLED_KEY, JSON.stringify(state.soundVoiceKeywordEnabled));
     }
 
+    function loadSoundVolumes() {
+      const raw = settingsStore.getItem(SOUND_VOLUMES_KEY);
+      if (!raw) {
+        state.soundVolumes = {};
+        return;
+      }
+
+      try {
+        const parsed = JSON.parse(raw);
+        const next = {};
+        Object.entries(parsed && typeof parsed === 'object' ? parsed : {}).forEach(([soundPath, value]) => {
+          const normalizedPath = normalizeSoundPath(soundPath);
+          const numeric = Number(value);
+          if (!normalizedPath || !Number.isFinite(numeric)) return;
+          next[normalizedPath] = Math.max(0, Math.min(100, Math.round(numeric)));
+        });
+        state.soundVolumes = next;
+      } catch (err) {
+        console.error('Failed to parse sound volume map:', err);
+        state.soundVolumes = {};
+      }
+    }
+
+    function saveSoundVolumes() {
+      settingsStore.setItem(SOUND_VOLUMES_KEY, JSON.stringify(state.soundVolumes));
+    }
+
+    function loadSoundLibraryKeywordFilter() {
+      state.keywordFilter = normalizeKeywordFilter(settingsStore.getItem(SOUND_LIBRARY_KEYWORD_FILTER_KEY));
+      if (elements.soundLibraryKeywordFilterInput) {
+        elements.soundLibraryKeywordFilterInput.value = state.keywordFilter;
+      }
+    }
+
+    function saveSoundLibraryKeywordFilter() {
+      settingsStore.setItem(SOUND_LIBRARY_KEYWORD_FILTER_KEY, state.keywordFilter);
+    }
+
     function normalizeSoundKeywordJob(value) {
       const raw = value && typeof value === 'object' ? value : {};
       const pendingItems = Array.isArray(raw.pendingItems)
@@ -382,6 +428,13 @@
         if (!button) return;
         const { total, allEnabled } = getSoundKeywordToggleState(kind);
         button.disabled = Boolean(state.soundKeywordGenerationPromise) || total === 0;
+        if (kind === 'viewer') {
+          button.textContent = allEnabled ? 'Disable per-item viewer chat' : 'Enable per-item viewer chat';
+          button.title = total > 0
+            ? `${allEnabled ? 'Disable' : 'Enable'} per-sound viewer chat keyword triggers for all ${total} sound file(s) that already have keywords`
+            : 'Generate or enter keywords first, then you can enable per-sound viewer chat triggers here';
+          return;
+        }
         button.textContent = allEnabled ? `Disable all ${label}` : `Enable all ${label}`;
         button.title = total > 0
           ? `${allEnabled ? 'Disable' : 'Enable'} ${label} keyword triggers for all ${total} sound file(s) that already have keywords`
@@ -397,6 +450,88 @@
         return String(match.name || '').trim();
       }
       return normalizedPath.split('/').pop() || normalizedPath;
+    }
+
+    function formatSoundCountdown(remainingSeconds = 0) {
+      const numeric = Math.max(0, Number(remainingSeconds) || 0);
+      if (numeric >= 60) {
+        const minutes = Math.floor(numeric / 60);
+        const seconds = Math.ceil(numeric % 60);
+        return `${minutes}:${String(seconds).padStart(2, '0')}`;
+      }
+      if (numeric >= 10) {
+        return `${Math.ceil(numeric)}s`;
+      }
+      return `${numeric.toFixed(1)}s`;
+    }
+
+    function updateFloatingSoundUi() {
+      const container = elements.activeSoundFloating || null;
+      const button = elements.activeSoundFloatingBtn || null;
+      const settingsBtn = elements.activeSoundFloatingSettingsBtn || null;
+      const nameEl = elements.activeSoundFloatingName || null;
+      const countdownEl = elements.activeSoundFloatingCountdown || null;
+      const progressFill = elements.activeSoundFloatingProgressFill || null;
+      const audio = state.activeAudio;
+      const soundPath = normalizeSoundPath(state.activeSoundPath);
+
+      if (!container || !button || !nameEl || !countdownEl || !progressFill) return;
+
+      if (!audio || !soundPath) {
+        container.hidden = true;
+        container.classList?.remove?.('is-visible');
+        button.disabled = true;
+        if (settingsBtn) settingsBtn.disabled = true;
+        nameEl.textContent = '';
+        countdownEl.textContent = '';
+        progressFill.style.transform = 'scaleX(0)';
+        updateActiveSoundCardUi();
+        return;
+      }
+
+      const duration = Number(audio.duration);
+      const currentTime = Number(audio.currentTime);
+      const hasDuration = Number.isFinite(duration) && duration > 0;
+      const safeCurrentTime = Number.isFinite(currentTime) && currentTime >= 0 ? currentTime : 0;
+      const remaining = hasDuration ? Math.max(0, duration - safeCurrentTime) : 0;
+      const progress = hasDuration ? Math.max(0, Math.min(1, safeCurrentTime / duration)) : 0;
+
+      container.hidden = false;
+      container.classList?.add?.('is-visible');
+      button.disabled = false;
+      if (settingsBtn) settingsBtn.disabled = false;
+      button.title = 'Click to stop the current sound';
+      nameEl.textContent = getSoundLabel(soundPath);
+      countdownEl.textContent = hasDuration ? formatSoundCountdown(remaining) : 'Playing';
+      progressFill.style.transform = `scaleX(${progress.toFixed(4)})`;
+      updateActiveSoundCardUi();
+    }
+
+    function updateActiveSoundCardUi() {
+      const cardsEl = elements.soundLibraryCards || null;
+      if (!cardsEl || typeof cardsEl.querySelectorAll !== 'function') return;
+      const activeSoundPath = normalizeSoundPath(state.activeSoundPath);
+      cardsEl.querySelectorAll('.sound-library-card[data-sound-path]').forEach((card) => {
+        const cardPath = normalizeSoundPath(card.getAttribute('data-sound-path') || '');
+        const isPlaying = Boolean(activeSoundPath) && cardPath === activeSoundPath;
+        card.classList.toggle('playing', isPlaying);
+      });
+    }
+
+    function bindActiveSoundEvents(audio) {
+      if (!audio || audio.__soundFloatingBound === true) return;
+      audio.__soundFloatingBound = true;
+
+      const syncIfCurrent = () => {
+        if (state.activeAudio !== audio) return;
+        updateFloatingSoundUi();
+      };
+
+      if (typeof audio.addEventListener === 'function') {
+        ['loadedmetadata', 'durationchange', 'timeupdate', 'play', 'pause', 'ended', 'error'].forEach((eventName) => {
+          audio.addEventListener(eventName, syncIfCurrent);
+        });
+      }
     }
 
     function closeSoundSettings() {
@@ -426,6 +561,12 @@
       if (elements.soundSettingsKeywords) {
         elements.soundSettingsKeywords.value = getSoundKeywords(soundPath).join('\n');
       }
+      if (elements.soundSettingsVolume) {
+        elements.soundSettingsVolume.value = String(getSoundVolume(soundPath));
+      }
+      if (elements.soundSettingsVolumeValue) {
+        elements.soundSettingsVolumeValue.textContent = `${getSoundVolume(soundPath)}%`;
+      }
       if (elements.soundSettingsViewerKeywordEnabled) {
         elements.soundSettingsViewerKeywordEnabled.checked = isSoundKeywordTriggerEnabled(soundPath);
       }
@@ -434,6 +575,10 @@
       }
       if (elements.soundSettingsPlayBtn) {
         elements.soundSettingsPlayBtn.disabled = false;
+      }
+      if (elements.soundSettingsGenerateKeywordsBtn) {
+        elements.soundSettingsGenerateKeywordsBtn.disabled = false;
+        elements.soundSettingsGenerateKeywordsBtn.textContent = '✨ Generate';
       }
     }
 
@@ -453,12 +598,69 @@
       if (!soundPath) return false;
 
       setSoundKeywords(soundPath, parseKeywordList(elements.soundSettingsKeywords?.value || ''));
+      setSoundVolume(soundPath, elements.soundSettingsVolume?.value ?? 100);
       setSoundKeywordTriggerEnabled(soundPath, Boolean(elements.soundSettingsViewerKeywordEnabled?.checked));
       setSoundVoiceKeywordTriggerEnabled(soundPath, Boolean(elements.soundSettingsVoiceKeywordEnabled?.checked));
       renderSoundCards();
       updateSoundKeywordToggleButtons();
       closeSoundSettings();
       return true;
+    }
+
+    async function generateKeywordsForSound(soundPath = '', { persist = true, quiet = false } = {}) {
+      if (!callFetch) {
+        throw new Error('Fetch is not available');
+      }
+
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) return { soundPath: '', keywords: [], warning: '' };
+
+      const response = await callFetch('/api/media-keywords/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          items: [{ kind: 'sound', soundPath: normalizedPath }]
+        })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Keyword generation failed');
+      }
+
+      const entry = Array.isArray(data.results)
+        ? data.results.find((result) => normalizeSoundPath(result?.soundPath || '') === normalizedPath)
+        : null;
+      const keywords = parseKeywordList(entry?.keywords);
+
+      if (persist) {
+        if (keywords.length > 0) {
+          setSoundKeywords(normalizedPath, keywords);
+          if (!Object.prototype.hasOwnProperty.call(state.soundKeywordEnabled, normalizedPath)) {
+            setSoundKeywordTriggerEnabled(normalizedPath, false);
+          }
+          if (!Object.prototype.hasOwnProperty.call(state.soundVoiceKeywordEnabled, normalizedPath)) {
+            setSoundVoiceKeywordTriggerEnabled(normalizedPath, false);
+          }
+        }
+        renderSoundCards();
+        updateSoundKeywordToggleButtons();
+      }
+
+      if (!quiet) {
+        callbacks.updateStatus?.(
+          keywords.length > 0
+            ? `✓ Generated keywords for ${getSoundLabel(normalizedPath)}`
+            : `No keyword suggestions were generated for ${getSoundLabel(normalizedPath)}.`,
+          false,
+          keywords.length === 0
+        );
+      }
+
+      return {
+        soundPath: normalizedPath,
+        keywords,
+        warning: String(entry?.warning || '')
+      };
     }
 
     function migrateLegacySoundKeywordEnabled() {
@@ -631,6 +833,24 @@
       saveSoundVoiceKeywordEnabled();
     }
 
+    function getSoundVolume(soundPath = '') {
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) return 100;
+      const numeric = Number(state.soundVolumes[normalizedPath]);
+      if (!Number.isFinite(numeric)) return 100;
+      return Math.max(0, Math.min(100, Math.round(numeric)));
+    }
+
+    function setSoundVolume(soundPath = '', value = 100) {
+      const normalizedPath = normalizeSoundPath(soundPath);
+      if (!normalizedPath) return;
+      const numeric = Number(value);
+      state.soundVolumes[normalizedPath] = Number.isFinite(numeric)
+        ? Math.max(0, Math.min(100, Math.round(numeric)))
+        : 100;
+      saveSoundVolumes();
+    }
+
     function pruneSoundKeywords() {
       const validPaths = new Set(state.customSounds.map((sound) => normalizeSoundPath(sound.path)));
       let changed = false;
@@ -656,6 +876,14 @@
         voiceEnabledChanged = true;
       });
       if (voiceEnabledChanged) saveSoundVoiceKeywordEnabled();
+
+      let volumeChanged = false;
+      Object.keys(state.soundVolumes).forEach((soundPath) => {
+        if (validPaths.has(soundPath)) return;
+        delete state.soundVolumes[soundPath];
+        volumeChanged = true;
+      });
+      if (volumeChanged) saveSoundVolumes();
     }
 
     function getSoundKeywordEntries() {
@@ -678,6 +906,20 @@
           voiceEnabled: isSoundVoiceKeywordTriggerEnabled(sound.path)
         }))
         .filter((entry) => entry.soundPath && entry.keywords.length > 0);
+    }
+
+    function getFilteredSoundCards() {
+      const keywordFilter = normalizeKeywordFilter(
+        elements.soundLibraryKeywordFilterInput?.value || state.keywordFilter
+      );
+      return state.customSounds.filter((sound) => {
+        if (!keywordFilter) return true;
+        const path = normalizeSoundPath(sound.path);
+        const keywords = getSoundKeywords(path);
+        const label = String(sound.name || '').trim() || path;
+        const haystack = [label, path, ...keywords].join(' ').toLowerCase();
+        return haystack.includes(keywordFilter);
+      });
     }
 
     function getActiveLifecycleRules(eventType) {
@@ -1155,7 +1397,14 @@
         return;
       }
 
-      cardsEl.innerHTML = state.customSounds.map((sound) => {
+      const filteredSounds = getFilteredSoundCards();
+      if (filteredSounds.length === 0) {
+        cardsEl.innerHTML = '<div class="sound-library-empty">No sounds match the current keyword filter.</div>';
+        updateSoundKeywordToggleButtons();
+        return;
+      }
+
+      cardsEl.innerHTML = filteredSounds.map((sound) => {
         const path = normalizeSoundPath(sound.path);
         const label = String(sound.name || '').trim() || path;
         const keywords = getSoundKeywords(path);
@@ -1170,11 +1419,12 @@
         const summaryText = summaryParts.length > 0 ? summaryParts.join(' • ') : 'No keywords';
 
         return `
-          <div class="sound-library-card" title="${escapeAttribute(label)}">
+          <div class="sound-library-card${normalizeSoundPath(state.activeSoundPath) === path ? ' playing' : ''}" data-sound-path="${escapeAttribute(path)}" title="${escapeAttribute(label)}">
             <div class="sound-library-card-top">
               <button type="button" class="sound-library-card-main" data-action="play-card-sound" data-sound-path="${escapeAttribute(path)}">
                 <span class="sound-library-card-name">${escapeHtml(label)}</span>
                 <span class="sound-library-card-summary">${escapeHtml(summaryText)}</span>
+                <span class="sound-library-card-stop-hint" aria-hidden="true">⏹ Stop</span>
               </button>
               <button
                 type="button"
@@ -1203,6 +1453,7 @@
       }).join('');
       syncSoundSettingsPopup();
       updateSoundKeywordToggleButtons();
+      updateActiveSoundCardUi();
     }
 
     async function loadCustomSounds() {
@@ -1228,6 +1479,7 @@
           syncSoundSettingsPopup();
         }
         renderRules();
+        updateFloatingSoundUi();
       } catch (err) {
         console.error('Failed to load custom sounds:', err);
       }
@@ -1268,6 +1520,11 @@
         saveSoundVoiceKeywordEnabled();
         changed = true;
       }
+      if (Object.prototype.hasOwnProperty.call(state.soundVolumes, normalized)) {
+        delete state.soundVolumes[normalized];
+        saveSoundVolumes();
+        changed = true;
+      }
       return changed;
     }
 
@@ -1277,6 +1534,10 @@
         if (Number.isFinite(value)) return Math.min(1, Math.max(0, value));
       }
       return 1;
+    }
+
+    function getCombinedSoundVolume(soundPath = '') {
+      return getVolume() * (getSoundVolume(soundPath) / 100);
     }
 
     function stopActiveAudio() {
@@ -1296,6 +1557,7 @@
           state.activeAudio = null;
           state.activeSoundPath = '';
         }
+        updateFloatingSoundUi();
       }
     }
 
@@ -1339,15 +1601,18 @@
       try {
         stopActiveAudio();
         const audio = new win.Audio(soundPath);
-        audio.volume = getVolume();
+        audio.volume = getCombinedSoundVolume(soundPath);
         state.activeAudio = audio;
         state.activeSoundPath = soundPath;
+        bindActiveSoundEvents(audio);
+        updateFloatingSoundUi();
 
         if (typeof audio.addEventListener === 'function') {
           const clearActiveIfCurrent = () => {
             if (state.activeAudio === audio) {
               state.activeAudio = null;
               state.activeSoundPath = '';
+              updateFloatingSoundUi();
             }
           };
           audio.addEventListener('ended', clearActiveIfCurrent);
@@ -1359,6 +1624,7 @@
           if (state.activeAudio === audio) {
             state.activeAudio = null;
             state.activeSoundPath = '';
+            updateFloatingSoundUi();
           }
           console.error('Sound play error:', err);
         });
@@ -1368,6 +1634,7 @@
           state.activeAudio = null;
           state.activeSoundPath = '';
         }
+        updateFloatingSoundUi();
         console.error('Failed to play sound:', err);
         return false;
       }
@@ -1472,6 +1739,11 @@
         }
 
         await loadCustomSounds();
+        try {
+          await generateKeywordsForSound(data.path || `/sounds/${data.filename}`, { persist: true, quiet: true });
+        } catch (keywordErr) {
+          console.warn('Sound keyword generation skipped after upload:', keywordErr);
+        }
         callbacks.updateStatus?.(`✓ Sound uploaded: ${data.filename}`, false);
         uploadInput.value = '';
       } catch (err) {
@@ -1649,11 +1921,15 @@
       const generateBtn = elements.soundLibraryGenerateBtn || null;
       const viewerKeywordToggleBtn = elements.soundLibraryViewerKeywordToggleBtn || null;
       const voiceKeywordToggleBtn = elements.soundLibraryVoiceKeywordToggleBtn || null;
+      const keywordFilterInput = elements.soundLibraryKeywordFilterInput || null;
       const soundCards = elements.soundLibraryCards || null;
       const soundSettingsBackdrop = elements.soundSettingsPopupBackdrop || null;
       const soundSettingsSaveBtn = elements.soundSettingsSaveBtn || null;
       const soundSettingsCancelBtn = elements.soundSettingsCancelBtn || null;
       const soundSettingsPlayBtn = elements.soundSettingsPlayBtn || null;
+      const soundSettingsGenerateKeywordsBtn = elements.soundSettingsGenerateKeywordsBtn || null;
+      const soundSettingsVolume = elements.soundSettingsVolume || null;
+      const activeSoundFloatingBtn = elements.activeSoundFloatingBtn || null;
 
       if (addRuleBtn) {
         addRuleBtn.addEventListener('click', () => {
@@ -1687,7 +1963,13 @@
         viewerKeywordToggleBtn.addEventListener('click', () => {
           if (viewerKeywordToggleBtn.disabled) return;
           const { allEnabled } = getSoundKeywordToggleState('viewer');
-          setAllSoundKeywordTriggers('viewer', !allEnabled);
+          const nextEnabled = !allEnabled;
+          const total = getSoundKeywordToggleState('viewer').total;
+          const label = nextEnabled ? 'enable' : 'disable';
+          if (!callConfirm(`Do you want to ${label} per-item viewer chat for all ${total} sound file(s) with keywords?`)) {
+            return;
+          }
+          setAllSoundKeywordTriggers('viewer', nextEnabled);
         });
       }
 
@@ -1695,7 +1977,21 @@
         voiceKeywordToggleBtn.addEventListener('click', () => {
           if (voiceKeywordToggleBtn.disabled) return;
           const { allEnabled } = getSoundKeywordToggleState('voice');
-          setAllSoundKeywordTriggers('voice', !allEnabled);
+          const nextEnabled = !allEnabled;
+          const total = getSoundKeywordToggleState('voice').total;
+          const label = nextEnabled ? 'enable' : 'disable';
+          if (!callConfirm(`Do you want to ${label} per-item voice triggers for all ${total} sound file(s) with keywords?`)) {
+            return;
+          }
+          setAllSoundKeywordTriggers('voice', nextEnabled);
+        });
+      }
+
+      if (keywordFilterInput) {
+        keywordFilterInput.addEventListener('input', () => {
+          state.keywordFilter = normalizeKeywordFilter(keywordFilterInput.value);
+          saveSoundLibraryKeywordFilter();
+          renderSoundCards();
         });
       }
 
@@ -1741,6 +2037,10 @@
 
           if (action === 'play-card-sound') {
             clearPendingDeleteSoundConfirm();
+            if (normalizeSoundPath(state.activeSoundPath) === soundPath && state.activeAudio) {
+              stopActiveAudio();
+              return;
+            }
             playSound(soundPath);
             return;
           }
@@ -1782,6 +2082,57 @@
         soundSettingsPlayBtn.addEventListener('click', () => {
           if (!state.openSoundSettingsPath) return;
           playSound(state.openSoundSettingsPath);
+        });
+      }
+
+      if (soundSettingsGenerateKeywordsBtn) {
+        soundSettingsGenerateKeywordsBtn.addEventListener('click', async () => {
+          const soundPath = normalizeSoundPath(state.openSoundSettingsPath);
+          if (!soundPath) return;
+          soundSettingsGenerateKeywordsBtn.disabled = true;
+          soundSettingsGenerateKeywordsBtn.textContent = 'Generating...';
+          try {
+            const result = await generateKeywordsForSound(soundPath, { persist: false, quiet: true });
+            if (elements.soundSettingsKeywords) {
+              elements.soundSettingsKeywords.value = result.keywords.join('\n');
+            }
+            if (result.keywords.length === 0) {
+              callbacks.updateStatus?.(`No keyword suggestions were generated for ${getSoundLabel(soundPath)}.`, false, true);
+            }
+          } catch (err) {
+            console.error('Sound popup keyword generation failed:', err);
+            callbacks.updateStatus?.(`Keyword generation failed: ${err.message}`, false, true);
+          } finally {
+            if (elements.soundSettingsGenerateKeywordsBtn) {
+              elements.soundSettingsGenerateKeywordsBtn.disabled = false;
+              elements.soundSettingsGenerateKeywordsBtn.textContent = '✨ Generate';
+            }
+          }
+        });
+      }
+
+      if (soundSettingsVolume) {
+        soundSettingsVolume.addEventListener('input', () => {
+          if (elements.soundSettingsVolumeValue) {
+            elements.soundSettingsVolumeValue.textContent = `${Math.round(Number(soundSettingsVolume.value) || 0)}%`;
+          }
+        });
+      }
+
+      if (activeSoundFloatingBtn) {
+        activeSoundFloatingBtn.addEventListener('click', () => {
+          stopActiveAudio();
+        });
+      }
+
+      const activeSoundFloatingSettingsBtn = elements.activeSoundFloatingSettingsBtn || null;
+      if (activeSoundFloatingSettingsBtn) {
+        activeSoundFloatingSettingsBtn.addEventListener('click', (event) => {
+          event?.preventDefault?.();
+          event?.stopPropagation?.();
+          const soundPath = normalizeSoundPath(state.activeSoundPath);
+          if (!soundPath) return;
+          openSoundSettings(soundPath);
         });
       }
 
@@ -1963,6 +2314,8 @@
       loadSoundKeywords();
       loadSoundKeywordEnabled();
       loadSoundVoiceKeywordEnabled();
+      loadSoundVolumes();
+      loadSoundLibraryKeywordFilter();
       loadSoundKeywordJob();
       migrateLegacySoundKeywordEnabled();
       migrateLegacySoundVoiceKeywordEnabled();
@@ -1972,6 +2325,7 @@
       updateSoundKeywordGenerateButton();
       updateSoundKeywordToggleButtons();
       renderRules();
+      updateFloatingSoundUi();
       void loadCustomSounds().then(() => generateMissingSoundKeywords({ resumeOnly: true }));
       void refreshKnownGiftsFromTikTok();
     }
@@ -1986,11 +2340,15 @@
       getKnownGiftNames,
       getSoundKeywordEntries,
       getAllSoundKeywordEntries,
+      getFilteredSoundCards,
       getSoundKeywords,
+      getSoundLabel,
       getActiveSoundPath: () => state.activeSoundPath,
+      stopActiveAudio,
       openSoundSettings,
       closeSoundSettings,
       saveSoundSettings: saveSoundSettingsFromPopup,
+      generateKeywordsForSound,
       resolveSoundForEvent,
       handleLifecycleEvent,
       clearPresenceState,

@@ -37,10 +37,88 @@ function createFakeDocument(cards = []) {
   };
 }
 
+function createFloatingPreviewElements() {
+  const buttonListeners = new Map();
+  const settingsListeners = new Map();
+  return {
+    container: {
+      hidden: true,
+      classList: {
+        add() {},
+        remove() {}
+      }
+    },
+    button: {
+      disabled: true,
+      dataset: {},
+      title: '',
+      addEventListener(event, handler) {
+        buttonListeners.set(event, handler);
+      },
+      trigger(event) {
+        const handler = buttonListeners.get(event);
+        if (handler) {
+          return handler({
+            preventDefault() {}
+          });
+        }
+        return undefined;
+      }
+    },
+    settingsButton: {
+      disabled: true,
+      addEventListener(event, handler) {
+        settingsListeners.set(event, handler);
+      },
+      trigger(event) {
+        const handler = settingsListeners.get(event);
+        if (handler) {
+          return handler({
+            preventDefault() {},
+            stopPropagation() {}
+          });
+        }
+        return undefined;
+      }
+    },
+    video: {
+      dataset: {},
+      src: '',
+      paused: true,
+      setAttribute(name, value) {
+        if (name === 'src') {
+          this.src = value;
+        }
+      },
+      load() {},
+      play() {
+        this.paused = false;
+        return Promise.resolve();
+      },
+      pause() {
+        this.paused = true;
+      },
+      currentTime: 0
+    },
+    name: {
+      textContent: ''
+    },
+    countdown: {
+      textContent: ''
+    }
+  };
+}
+
 function loadControllerFactory(fileName, factoryName) {
   const source = fs.readFileSync(`${ROOT}/${fileName}`, 'utf8');
   const context = vm.createContext({
-    console,
+    console: {
+      log() {},
+      info() {},
+      warn() {},
+      error() {},
+      debug() {}
+    },
     window: {},
     setTimeout,
     clearTimeout,
@@ -108,4 +186,51 @@ test('animation playback: mark/clear updates active state and stop button', asyn
   controller.clearAnimationCardPlaybackIfMatches('alpha');
   assert.equal(controller.state.activePlayback.size, 0);
   assert.equal(stopButton.disabled, true);
+});
+
+test('animation playback: floating preview mirrors active playback and stops on click', async () => {
+  const { factory } = loadControllerFactory('animation-playback.js', 'createAnimationPlaybackController');
+  const stopButton = { disabled: true };
+  const floating = createFloatingPreviewElements();
+  const openedSettings = [];
+
+  const controller = factory({
+    documentRef: createFakeDocument([]),
+    fetchFn: async () => ({ ok: true, json: async () => ({ clients: 1, obsClients: 1 }) }),
+    getAnimationFileUrl: (name) => `/animations/${name}`,
+    getAnimationMappingByTrigger: (trigger) => (trigger === 'alpha' ? { file: 'a.mov' } : null),
+    getAnimationFileFromMapping: (mapping) => mapping.file,
+    isThumbnailInteractionActive: () => false,
+    playAnimationThumbnail: () => {},
+    stopAnimationThumbnail: () => {},
+    stopButton,
+    floatingPreviewContainer: floating.container,
+    floatingPreviewButton: floating.button,
+    floatingPreviewSettingsButton: floating.settingsButton,
+    floatingPreviewVideo: floating.video,
+    floatingPreviewName: floating.name,
+    floatingPreviewCountdown: floating.countdown,
+    onOpenFloatingSettings: (trigger, filename) => openedSettings.push({ trigger, filename }),
+    tickMs: 50
+  });
+
+  controller.cacheAnimationDuration('a.mov', 2);
+  controller.markAnimationCardPlaying('alpha');
+
+  assert.equal(floating.container.hidden, false);
+  assert.equal(floating.button.disabled, false);
+  assert.equal(floating.settingsButton.disabled, false);
+  assert.equal(floating.name.textContent, 'alpha');
+  assert.equal(floating.video.src, '/animations/a.mov');
+  assert.match(floating.countdown.textContent, /s$/);
+
+  floating.settingsButton.trigger('click');
+  assert.deepEqual(openedSettings, [{ trigger: 'alpha', filename: 'a.mov' }]);
+
+  await floating.button.trigger('click');
+
+  assert.equal(controller.state.activePlayback.size, 0);
+  assert.equal(floating.container.hidden, true);
+  assert.equal(stopButton.disabled, true);
+  assert.equal(floating.settingsButton.disabled, true);
 });

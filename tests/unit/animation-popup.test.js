@@ -76,10 +76,28 @@ test('animation popup: open populates fields and active state', async () => {
 
   const posBottomLeft = createElement({ dataset: { position: 'bottom-left' } });
   const posTopRight = createElement({ dataset: { position: 'top-right' } });
+  const previewVideo = createElement({
+    _src: '',
+    getAttribute(name) {
+      return name === 'src' ? this._src : null;
+    },
+    load() {},
+    pause() {},
+    removeAttribute(name) {
+      if (name === 'src') this._src = '';
+    },
+    set src(value) {
+      this._src = value;
+    },
+    get src() {
+      return this._src;
+    }
+  });
 
   const elements = {
     animationCardPopup: createElement(),
     animationPopupName: createElement(),
+    animationPopupPreviewVideo: previewVideo,
     animationPopupPositionGrid: {
       querySelectorAll() {
         return [posBottomLeft, posTopRight];
@@ -149,6 +167,8 @@ test('animation popup: open populates fields and active state', async () => {
   assert.equal(elements.animationPopupKeywordEnabled.checked, true);
   assert.equal(elements.animationPopupVoiceKeywordEnabled.checked, true);
   assert.equal(elements.animationPopupMakeDefault.checked, true);
+  assert.equal(elements.animationPopupPreviewVideo.loop, false);
+  assert.equal(elements.animationPopupPreviewVideo.src, '/animations/dance.mov');
   assert.equal(selectedStickerKey, 'sticker-1');
   assert.equal(controller.getActivePopup()?.trigger, 'dance');
   assert.equal(controller.getActivePopup()?.filename, 'dance.mov');
@@ -381,4 +401,70 @@ test('animation popup: unchecking default keeps value 1 mapping and removes defa
 
   assert.equal(state.giftMappings.byValue['1']?.value, 'dance');
   assert.equal(state.giftMappings.defaultAnimation?.value || '', '');
+});
+
+test('animation popup: generate button fills keyword textarea from callback', async () => {
+  const { factory } = loadControllerFactory('animation-popup.js', 'createAnimationPopupController');
+
+  const posBottomLeft = createElement({ dataset: { position: 'bottom-left' } });
+  const elements = {
+    animationCardPopup: createElement(),
+    animationPopupName: createElement(),
+    animationPopupPositionGrid: {
+      querySelectorAll() {
+        return [posBottomLeft];
+      }
+    },
+    animationPopupScale: createElement(),
+    animationPopupGiftName: createElement(),
+    animationPopupGiftValue: createElement(),
+    animationPopupKeywords: createElement(),
+    animationPopupGenerateKeywordsBtn: createElement(),
+    animationPopupKeywordEnabled: createElement(),
+    animationPopupVoiceKeywordEnabled: createElement(),
+    animationPopupSticker: createElement(),
+    animationPopupMakeDefault: createElement()
+  };
+
+  const controller = factory({
+    elements,
+    state: {
+      animationMappings: {
+        scene: { file: 'scene.mov', position: 'bottom-left', scale: 1 }
+      },
+      giftMappings: { byName: {}, byValue: {} }
+    },
+    helpers: {
+      toAnimationMappingObject: (data, fallbackFilename) => ({
+        file: data?.file || fallbackFilename,
+        position: data?.position || 'bottom-left',
+        scale: Number(data?.scale || 1),
+        keywords: Array.isArray(data?.keywords) ? data.keywords : [],
+        keywordTriggerEnabled: data?.keywordTriggerEnabled === true,
+        voiceKeywordTriggerEnabled: data?.voiceKeywordTriggerEnabled === true
+      }),
+      findFirstGiftNameForAnimationTrigger: () => '',
+      findFirstGiftValueForAnimationTrigger: () => '',
+      findStickerKeyForAnimationTrigger: () => '',
+      isDefaultGiftAnimationTrigger: () => false
+    },
+    callbacks: {
+      populateAnimationPopupStickerOptions: () => {},
+      generateAnimationKeywordsForFilename: async (filename, options) => {
+        assert.equal(filename, 'scene.mov');
+        assert.equal(options.persist, false);
+        assert.equal(options.quiet, true);
+        return { keywords: ['very very low', 'beautiful dog'] };
+      }
+    }
+  });
+
+  controller.openAnimationCardPopup('scene', 'scene.mov');
+  controller.attachEvents();
+  await elements.animationPopupGenerateKeywordsBtn.trigger('click');
+
+  assert.equal(elements.animationPopupKeywords.value, 'very very low\nbeautiful dog');
+  assert.equal(elements.animationPopupKeywordEnabled.checked, true);
+  assert.equal(elements.animationPopupVoiceKeywordEnabled.checked, true);
+  assert.equal(elements.animationPopupGenerateKeywordsBtn.textContent, '✨ Generate');
 });

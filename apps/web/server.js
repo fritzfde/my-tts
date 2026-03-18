@@ -54,6 +54,7 @@ const storage = createStorage({
 });
 
 const { WebcastPushConnection } = require('tiktok-live-connector');
+const TIKTOK_SIGN_API_KEY = String(process.env.TIKTOK_SIGN_API_KEY || '').trim();
 
 function normalizeTtsLanguage(language) {
   const normalized = String(language || '').trim().toLowerCase().replace('_', '-');
@@ -220,6 +221,7 @@ app.get('/api/voice-clone/voices', (req, res) => {
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running at http://localhost:${PORT}`);
   console.log(`📁 Voices folder: ${path.resolve(__dirname, 'voices')}\n`);
+  console.log(`🎵 TikTok connector sign mode: ${TIKTOK_SIGN_API_KEY ? 'API key configured' : 'anonymous (rate-limited by provider)'}`);
 });
 
 
@@ -381,9 +383,14 @@ app.post('/api/tiktok/connect', (req, res) => {
     likerLeaderboard.clear();
     resetTikTokAudienceState();
 
-    tiktokConnection = new WebcastPushConnection(username, {
+    const tiktokConnectOptions = {
         enableExtendedGiftInfo: false
-    });
+    };
+    if (TIKTOK_SIGN_API_KEY) {
+        tiktokConnectOptions.signApiKey = TIKTOK_SIGN_API_KEY;
+    }
+
+    tiktokConnection = new WebcastPushConnection(username, tiktokConnectOptions);
 
     tiktokConnection.connect().then(state => {
         const statsViewerCount = Number(state?.roomInfo?.stats?.userCount || state?.roomInfo?.stats?.viewerCount || 0);
@@ -408,6 +415,15 @@ app.post('/api/tiktok/connect', (req, res) => {
         }
         tiktokConnection = null;
         resetTikTokAudienceState();
+
+        if (failure.code === 'sign-rate-limited') {
+            return res.status(429).json({
+                success: false,
+                code: failure.code,
+                error: failure.message,
+                needsApiKey: !TIKTOK_SIGN_API_KEY
+            });
+        }
 
         if (failure.expected) {
             return res.json({ success: false, code: failure.code, error: failure.message });

@@ -25,7 +25,8 @@
     const stateRef = {
       activePopup: null,
       activePosition: 'bottom-left',
-      eventsAttached: false
+      eventsAttached: false,
+      keywordGenerationPromise: null
     };
 
     function getAnimationMappings() {
@@ -64,6 +65,20 @@
       const scaleInput = elements.animationPopupScale;
       if (!scaleInput) return;
       scaleInput.value = formatAnimationScale(clampAnimationScale(value));
+    }
+
+    function clampAnimationVolume(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return 100;
+      return Math.max(0, Math.min(100, Math.round(numeric)));
+    }
+
+    function setAnimationPopupVolumeValue(value) {
+      const slider = elements.animationPopupVolume || null;
+      const valueEl = elements.animationPopupVolumeValue || null;
+      const normalized = clampAnimationVolume(value);
+      if (slider) slider.value = String(normalized);
+      if (valueEl) valueEl.textContent = `${normalized}%`;
     }
 
     function setAnimationPopupPosition(position) {
@@ -108,8 +123,15 @@
         previewVideo.load?.();
       }
       previewVideo.muted = false;
-      previewVideo.loop = true;
+      previewVideo.loop = false;
       previewVideo.playsInline = true;
+    }
+
+    function setAnimationPopupGenerateButtonState(loading = false) {
+      const button = elements.animationPopupGenerateKeywordsBtn || null;
+      if (!button) return;
+      button.disabled = Boolean(loading) || !stateRef.activePopup;
+      button.textContent = loading ? 'Generating...' : '✨ Generate';
     }
 
     function closeAnimationCardPopup() {
@@ -117,6 +139,7 @@
       stopAnimationPopupPreview();
       elements.animationCardPopup.style.display = 'none';
       stateRef.activePopup = null;
+      setAnimationPopupGenerateButtonState(false);
     }
 
     function closeAnimationGeneralSettingsPopup() {
@@ -159,6 +182,7 @@
       elements.animationPopupName.value = trigger;
       setAnimationPopupPosition(currentData.position || 'bottom-left');
       setAnimationPopupScaleValue(currentData.scale ?? 1.0);
+      setAnimationPopupVolumeValue(currentData.volume ?? 100);
       if (elements.animationPopupGiftName) elements.animationPopupGiftName.value = currentGiftName;
       if (elements.animationPopupGiftValue) elements.animationPopupGiftValue.value = currentGiftValue;
       if (elements.animationPopupKeywords) {
@@ -187,6 +211,7 @@
       if (elements.animationPopupMakeDefault) elements.animationPopupMakeDefault.checked = isDefaultGiftAnimation;
       setAnimationPopupPreview(filename);
       elements.animationCardPopup.style.display = 'flex';
+      setAnimationPopupGenerateButtonState(false);
       elements.animationPopupName.focus();
     }
 
@@ -255,6 +280,7 @@
         file: filename,
         position: stateRef.activePosition || currentData.position || 'bottom-left',
         scale: Number.isFinite(scaleValue) ? scaleValue : currentData.scale,
+        volume: clampAnimationVolume(elements.animationPopupVolume?.value ?? currentData.volume ?? 100),
         keywords: elements.animationPopupKeywords
           ? parseKeywordList(elements.animationPopupKeywords.value)
           : (Array.isArray(currentData.keywords) ? currentData.keywords : []),
@@ -366,6 +392,44 @@
       }
     }
 
+    async function handleGenerateKeywords() {
+      if (!stateRef.activePopup || stateRef.keywordGenerationPromise) return;
+      const filename = String(stateRef.activePopup.filename || '').trim();
+      if (!filename || typeof callbacks.generateAnimationKeywordsForFilename !== 'function') return;
+
+      const runner = (async () => {
+        setAnimationPopupGenerateButtonState(true);
+        const result = await callbacks.generateAnimationKeywordsForFilename(filename, {
+          persist: false,
+          quiet: true
+        });
+        const keywords = Array.isArray(result?.keywords) ? result.keywords : [];
+        if (elements.animationPopupKeywords) {
+          elements.animationPopupKeywords.value = keywords.join('\n');
+        }
+        if (keywords.length > 0) {
+          if (elements.animationPopupKeywordEnabled) {
+            elements.animationPopupKeywordEnabled.checked = true;
+          }
+          if (elements.animationPopupVoiceKeywordEnabled) {
+            elements.animationPopupVoiceKeywordEnabled.checked = true;
+          }
+        }
+        if (keywords.length === 0) {
+          alertDialog('No keyword suggestions were generated for this animation.');
+        }
+      })().catch((err) => {
+        console.error('Animation popup keyword generation failed:', err);
+        alertDialog(`Failed to generate keywords: ${err.message}`);
+      }).finally(() => {
+        stateRef.keywordGenerationPromise = null;
+        setAnimationPopupGenerateButtonState(false);
+      });
+
+      stateRef.keywordGenerationPromise = runner;
+      return runner;
+    }
+
     function attachEvents() {
       if (stateRef.eventsAttached) return;
       stateRef.eventsAttached = true;
@@ -407,9 +471,19 @@
           setAnimationPopupScaleValue(nextValue);
         });
       }
+      if (elements.animationPopupVolume) {
+        elements.animationPopupVolume.addEventListener('input', () => {
+          setAnimationPopupVolumeValue(elements.animationPopupVolume.value);
+        });
+      }
       if (elements.animationPopupSaveBtn) {
         elements.animationPopupSaveBtn.addEventListener('click', async () => {
           await handlePopupSave();
+        });
+      }
+      if (elements.animationPopupGenerateKeywordsBtn) {
+        elements.animationPopupGenerateKeywordsBtn.addEventListener('click', async () => {
+          await handleGenerateKeywords();
         });
       }
       if (elements.animationPopupDeleteBtn) {

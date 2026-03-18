@@ -35,6 +35,35 @@ function createSelect(options, value = '') {
   };
 }
 
+function createInput(value = '') {
+  const listeners = new Map();
+  return {
+    value,
+    addEventListener(event, handler) {
+      listeners.set(event, handler);
+    },
+    trigger(event) {
+      const handler = listeners.get(event);
+      if (handler) handler();
+    }
+  };
+}
+
+function createClassList(seed = []) {
+  const values = new Set(seed);
+  return {
+    add(token) {
+      values.add(token);
+    },
+    remove(token) {
+      values.delete(token);
+    },
+    contains(token) {
+      return values.has(token);
+    }
+  };
+}
+
 function loadControllerFactory(fileName, factoryName) {
   const source = fs.readFileSync(`${ROOT}/${fileName}`, 'utf8');
   const context = vm.createContext({
@@ -142,11 +171,13 @@ test('animation ui: initAnimationListControls hydrates values and persists chang
   const animationSortSelect = createSelect(['name', 'newest', 'oldest', 'gift', 'value']);
   const animationMapFilterSelect = createSelect(['all', 'mapped', 'unmapped']);
   const animationStickerFilterSelect = createSelect(['all', 'with-sticker', 'without-sticker']);
+  const animationKeywordFilterInput = createInput();
 
   const settingsStore = createSettingsStore({
     animation_sort_mode: 'gift',
     animation_map_filter: 'mapped',
-    animation_sticker_filter: 'not-valid'
+    animation_sticker_filter: 'not-valid',
+    animation_keyword_filter: 'beautiful dog'
   });
 
   const controller = factory({
@@ -155,6 +186,7 @@ test('animation ui: initAnimationListControls hydrates values and persists chang
       animationSortSelect,
       animationMapFilterSelect,
       animationStickerFilterSelect,
+      animationKeywordFilterInput,
       animationMappingsList: { innerHTML: '', querySelectorAll: () => [] }
     },
     state: {
@@ -169,9 +201,149 @@ test('animation ui: initAnimationListControls hydrates values and persists chang
   assert.equal(animationSortSelect.value, 'gift');
   assert.equal(animationMapFilterSelect.value, 'mapped');
   assert.equal(animationStickerFilterSelect.value, 'all');
+  assert.equal(animationKeywordFilterInput.value, 'beautiful dog');
 
   animationMapFilterSelect.value = 'unmapped';
   animationMapFilterSelect.trigger('change');
 
   assert.equal(settingsStore.getItem('animation_map_filter'), 'unmapped');
+
+  animationKeywordFilterInput.value = 'very very low';
+  animationKeywordFilterInput.trigger('input');
+
+  assert.equal(settingsStore.getItem('animation_keyword_filter'), 'very very low');
+});
+
+test('animation ui: keyword filter narrows cards by trigger and keywords', async () => {
+  const { factory } = loadControllerFactory('animation-ui.js', 'createAnimationUiController');
+  const animationSortSelect = createSelect(['name', 'newest', 'oldest', 'gift', 'value'], 'name');
+  const animationMapFilterSelect = createSelect(['all', 'mapped', 'unmapped'], 'all');
+  const animationStickerFilterSelect = createSelect(['all', 'with-sticker', 'without-sticker'], 'all');
+  const animationKeywordFilterInput = createInput('beautiful dog');
+
+  const state = {
+    availableAnimations: [
+      { name: 'A', filename: 'abu.mov', mtimeMs: 100 },
+      { name: 'B', filename: 'flight.mov', mtimeMs: 200 }
+    ],
+    animationMappings: {
+      abu: { file: 'abu.mov', keywords: ['beautiful dog', 'died like'] },
+      flight: { file: 'flight.mov', keywords: ['very very low'] }
+    },
+    activeAnimationCardPlayback: new Map()
+  };
+
+  const controller = factory({
+    settingsStore: createSettingsStore(),
+    elements: {
+      animationSortSelect,
+      animationMapFilterSelect,
+      animationStickerFilterSelect,
+      animationKeywordFilterInput
+    },
+    state,
+    helpers: {
+      normalizeTriggerFromFilename: (filename) => String(filename || '').replace(/\.[^/.]+$/, ''),
+      findAnimationMappingEntryByFile: (filename) => {
+        const trigger = filename === 'abu.mov' ? 'abu' : 'flight';
+        return { trigger, data: state.animationMappings[trigger] };
+      }
+    }
+  });
+
+  let cards = controller.getFilteredSortedAnimationCards();
+  assert.deepEqual(cards.map((entry) => entry.trigger), ['abu']);
+
+  animationKeywordFilterInput.value = 'very very low';
+  cards = controller.getFilteredSortedAnimationCards();
+  assert.deepEqual(cards.map((entry) => entry.trigger), ['flight']);
+});
+
+test('animation ui: clicking an active card stops playback instead of retriggering', async () => {
+  const { factory } = loadControllerFactory('animation-ui.js', 'createAnimationUiController');
+  const previewListeners = new Map();
+  const card = {
+    classList: createClassList(['playing'])
+  };
+  const previewButton = {
+    dataset: { trigger: 'alpha' },
+    querySelector(selector) {
+      if (selector === '.animation-thumb-video') {
+        return {
+          paused: true,
+          className: 'animation-thumb-video',
+          getAttribute() {
+            return '';
+          },
+          setAttribute() {},
+          addEventListener() {},
+          play() { return Promise.resolve(); },
+          pause() {},
+          currentTime: 0,
+          dataset: {},
+          load() {}
+        };
+      }
+      return null;
+    },
+    closest(selector) {
+      return selector === '.animation-mapping-card' ? card : null;
+    },
+    matches() {
+      return false;
+    },
+    addEventListener(event, handler) {
+      previewListeners.set(event, handler);
+    }
+  };
+  const list = {
+    innerHTML: '',
+    querySelectorAll(selector) {
+      if (selector === '.preview-mapping-btn') return [previewButton];
+      return [];
+    }
+  };
+
+  let triggerCalls = 0;
+  let stopCalls = 0;
+  const controller = factory({
+    settingsStore: createSettingsStore(),
+    elements: {
+      animationMappingsList: list
+    },
+    state: {
+      availableAnimations: [{ filename: 'alpha.mov', mtimeMs: 100 }],
+      animationMappings: { alpha: { file: 'alpha.mov' } },
+      activeAnimationCardPlayback: new Map([
+        ['alpha', { trigger: 'alpha', filename: 'alpha.mov', endAtMs: Date.now() + 3000, durationSeconds: 3 }]
+      ])
+    },
+    helpers: {
+      normalizeTriggerFromFilename: () => 'alpha',
+      getAnimationFileUrl: () => '/animations/alpha.mov',
+      getAnimationFileFromMapping: (mapping) => mapping.file,
+      escapeAttribute: (value) => String(value),
+      findAnimationMappingEntryByFile: () => ({ trigger: 'alpha', data: { file: 'alpha.mov' } }),
+      renderAnimationVisibilityBadges: () => '',
+      formatAnimationPlaybackCountdown: () => '3.0s'
+    },
+    callbacks: {
+      stopAllActiveAnimations: async () => {
+        stopCalls += 1;
+      },
+      triggerAnimation: async () => {
+        triggerCalls += 1;
+        return true;
+      }
+    }
+  });
+
+  controller.renderAnimationMappings();
+  await previewListeners.get('click')({
+    preventDefault() {},
+    currentTarget: previewButton
+  });
+
+  assert.equal(stopCalls, 1);
+  assert.equal(triggerCalls, 0);
 });

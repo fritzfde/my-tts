@@ -159,14 +159,16 @@
         try { document.getElementById('debugMappings').textContent = mappings; } catch (e) {}
     }
 
-    function getAnimationGain() {
-        const percent = Number.isFinite(animationVolume) ? animationVolume : 100;
-        return Math.max(0, Math.min(1, percent / 100));
+    function getAnimationGain(itemPercentValue) {
+        const globalPercent = Number.isFinite(Number(animationVolume)) ? Number(animationVolume) : 100;
+        const itemPercent = Number.isFinite(Number(itemPercentValue)) ? Number(itemPercentValue) : 100;
+        const normalized = (Math.max(0, Math.min(100, globalPercent)) / 100) * (Math.max(0, Math.min(100, itemPercent)) / 100);
+        return Math.max(0, Math.min(1, normalized));
     }
 
     function applyTrackedVolume(tracked) {
         if (!tracked || !tracked.video) return;
-        const gain = getAnimationGain();
+        const gain = getAnimationGain(tracked.volumePercent);
         tracked.video.volume = gain;
         if (tracked.gainNode) {
             tracked.gainNode.gain.value = gain;
@@ -360,6 +362,7 @@
         const filename = mapping.file || mapping;
         const position = mapping.position || globalPosition;
         const scale = mapping.scale || globalScale;
+        const volume = Number.isFinite(Number(mapping.volume)) ? Number(mapping.volume) : 100;
         console.log(`📏 Scaling check: Trigger=${triggerName}, Scale=${scale}`);
 
         lastTrigger = `${triggerName} (${new Date().toLocaleTimeString()})`;
@@ -388,7 +391,7 @@
         container.appendChild(canvas);
         container.appendChild(video);
 
-        const tracked = { video, canvas, cancelChroma: null, audioSource: null };
+        const tracked = { video, canvas, cancelChroma: null, audioSource: null, volumePercent: volume };
         currentAnimations.push(tracked);
         applyTrackedVolume(tracked);
 
@@ -401,7 +404,7 @@
                     tracked.gainNode = ctx.createGain();
                     tracked.audioSource.connect(tracked.gainNode);
                     tracked.gainNode.connect(ctx.destination);
-                    tracked.gainNode.gain.value = getAnimationGain();
+                    tracked.gainNode.gain.value = getAnimationGain(tracked.volumePercent);
                     if (ctx.state === 'suspended') ctx.resume().catch(()=>{});
                     console.log('Connected audio for', filename);
                 } catch (e) { console.warn('createMediaElementSource failed', e); }

@@ -44,6 +44,19 @@ function classifyTikTokConnectError(error) {
   }
 
   if (
+    lower.includes('rate_limit_global_anonymous_hour')
+    || lower.includes('sign server')
+    || lower.includes('eulerstream')
+    || lower.includes('too many connections started')
+  ) {
+    return {
+      expected: true,
+      code: 'sign-rate-limited',
+      message: 'TikTok connector hit the anonymous sign-server rate limit. Add TIKTOK_SIGN_API_KEY to .env or wait for the limit to reset.'
+    };
+  }
+
+  if (
     lower.includes('rate limit')
     || lower.includes('temporarily blocked')
     || lower.includes('captcha')

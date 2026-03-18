@@ -176,3 +176,56 @@ test('keyword triggers: parses keyword lists, respects enable flags, and round-r
   assert.equal(controller.hasExactMicKeywordMatch('we flew very very low tonight'), true);
   assert.equal(controller.hasExactMicKeywordMatch('say secert phraze now'), false);
 });
+
+test('keyword triggers: global viewer chat gates block chat without affecting mic', async () => {
+  const { factory } = loadControllerFactory('keyword-triggers.js', 'createKeywordTriggersController');
+  const triggered = [];
+  const played = [];
+
+  const controller = factory({
+    callbacks: {
+      getAnimationMappings: () => ({
+        dance: { keywords: ['dance party'], keywordTriggerEnabled: true, voiceKeywordTriggerEnabled: true }
+      }),
+      normalizeAnimationMapping: (data) => ({
+        keywords: Array.isArray(data?.keywords) ? data.keywords : [],
+        keywordTriggerEnabled: data?.keywordTriggerEnabled === true,
+        voiceKeywordTriggerEnabled: data?.voiceKeywordTriggerEnabled === true
+      }),
+      getSoundKeywordEntries: () => ([
+        { soundPath: '/sounds/horn.wav', keywords: ['beep beep'], viewerEnabled: true, voiceEnabled: true }
+      ]),
+      getAllSoundKeywordEntries: () => ([
+        { soundPath: '/sounds/horn.wav', keywords: ['beep beep'], viewerEnabled: true, voiceEnabled: true }
+      ]),
+      isViewerChatAnimationsEnabled: () => false,
+      isViewerChatSoundsEnabled: () => false,
+      getSuppressedKeywords: () => [],
+      canTriggerAnimation: () => true,
+      hasActiveAnimations: () => false,
+      triggerAnimation: (...args) => triggered.push(args),
+      playSound: (path) => played.push(path)
+    }
+  });
+
+  const viewerChat = controller.handleMessage({
+    author: 'viewer',
+    platform: 'youtube',
+    text: 'dance party and beep beep'
+  });
+  assert.equal(viewerChat.animationMatch, null);
+  assert.equal(viewerChat.soundMatch, null);
+  assert.deepEqual(triggered, []);
+  assert.deepEqual(played, []);
+
+  const mic = controller.handleMessage({
+    author: 'host-mic',
+    platform: 'mic',
+    text: 'dance party and beep beep',
+    source: 'mic'
+  });
+  assert.equal(mic.animationMatch?.trigger, 'dance');
+  assert.equal(mic.soundMatch?.soundPath, '/sounds/horn.wav');
+  assert.deepEqual(triggered, [['dance', 'mic', 'host-mic', 'keyword']]);
+  assert.deepEqual(played, []);
+});

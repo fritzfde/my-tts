@@ -31,4 +31,13 @@ test('tiktok connect: classifies common expected connection failures', () => {
       message: 'TikTok account not found or not publicly accessible.'
     }
   );
+
+  assert.deepEqual(
+    classifyTikTokConnectError(new Error('[Rate Limited] (rate_limit_global_anonymous_hour) Too many connections started, try again later. Sign up for a free API key at https://www.eulerstream.com/pricing.')),
+    {
+      expected: true,
+      code: 'sign-rate-limited',
+      message: 'TikTok connector hit the anonymous sign-server rate limit. Add TIKTOK_SIGN_API_KEY to .env or wait for the limit to reset.'
+    }
+  );
 });

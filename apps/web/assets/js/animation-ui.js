@@ -38,6 +38,7 @@
       currentSortDirection: '',
       currentMapFilter: 'all',
       currentStickerFilter: 'all',
+      currentKeywordFilter: '',
       customOrder: []
     };
     const SORT_DIRECTION_UP = 'asc';
@@ -49,6 +50,7 @@
     };
     const MAP_FILTER_VALUES = ['all', 'mapped', 'unmapped'];
     const STICKER_FILTER_VALUES = ['all', 'with-sticker', 'without-sticker'];
+    const KEYWORD_FILTER_STORAGE_KEY = 'animation_keyword_filter';
 
     function getAvailableAnimations() {
       return Array.isArray(state.availableAnimations) ? state.availableAnimations : [];
@@ -200,6 +202,10 @@
       return allowed.includes(raw) ? raw : fallback;
     }
 
+    function normalizeKeywordFilter(value) {
+      return String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    }
+
     function parseCustomOrder(rawValue) {
       if (!rawValue) return [];
       try {
@@ -321,6 +327,9 @@
       if (elements.animationStickerFilterSelect) {
         elements.animationStickerFilterSelect.value = stateRef.currentStickerFilter;
       }
+      if (elements.animationKeywordFilterInput) {
+        elements.animationKeywordFilterInput.value = stateRef.currentKeywordFilter;
+      }
     }
 
     function persistListControlsState() {
@@ -331,6 +340,7 @@
       settingsStore?.setItem?.('animation_sort_direction', stateRef.currentSortDirection);
       settingsStore?.setItem?.('animation_map_filter', stateRef.currentMapFilter);
       settingsStore?.setItem?.('animation_sticker_filter', stateRef.currentStickerFilter);
+      settingsStore?.setItem?.(KEYWORD_FILTER_STORAGE_KEY, stateRef.currentKeywordFilter);
       settingsStore?.setItem?.('animation_custom_order', JSON.stringify(stateRef.customOrder || []));
     }
 
@@ -474,6 +484,9 @@
         const mapped = typeof helpers.findAnimationMappingEntryByFile === 'function'
           ? helpers.findAnimationMappingEntryByFile(anim.filename)
           : null;
+        const mappedData = mapped && typeof mapped.data === 'object' && mapped.data !== null
+          ? mapped.data
+          : {};
         const trigger = mapped ? mapped.trigger : normalizeTriggerFromFilename(anim.filename);
         const giftNames = typeof helpers.findGiftNamesForAnimationTrigger === 'function'
           ? helpers.findGiftNamesForAnimationTrigger(trigger)
@@ -528,7 +541,8 @@
           hasGiftNameMapping,
           timestampMs,
           hasStickerMapping,
-          mappedAny
+          mappedAny,
+          keywords: Array.isArray(mappedData.keywords) ? mappedData.keywords : []
         };
       });
     }
@@ -550,6 +564,9 @@
         STICKER_FILTER_VALUES,
         'all'
       );
+      const keywordFilter = normalizeKeywordFilter(
+        elements.animationKeywordFilterInput?.value || stateRef.currentKeywordFilter
+      );
 
       const cards = buildAnimationCardMetadata();
       const customOrder = getEffectiveCustomOrder(cards);
@@ -561,6 +578,16 @@
         if (mapFilter === 'unmapped' && card.mappedAny) return false;
         if (stickerFilter === 'with-sticker' && !card.hasStickerMapping) return false;
         if (stickerFilter === 'without-sticker' && card.hasStickerMapping) return false;
+        if (keywordFilter) {
+          const haystack = [
+            card.trigger,
+            card.anim?.filename || '',
+            ...(Array.isArray(card.keywords) ? card.keywords : [])
+          ]
+            .join(' ')
+            .toLowerCase();
+          if (!haystack.includes(keywordFilter)) return false;
+        }
         return true;
       });
 
@@ -659,7 +686,7 @@
 
       const cards = getFilteredSortedAnimationCards();
       if (cards.length === 0) {
-        list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem; grid-column: 1 / -1;">No animations match current sort/filter.</div>';
+        list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary); font-size: 0.875rem; grid-column: 1 / -1;">No animations match the current sort, filter, or keyword search.</div>';
         return;
       }
 
@@ -699,6 +726,7 @@
           <video class="animation-thumb-video" src="${fileUrl}" data-src="${fileUrl}" data-file="${safeFilename}" muted loop playsinline preload="metadata"></video>
           ${visibilityBadges}
           <span class="animation-thumb-duration" aria-hidden="true"></span>
+          <span class="animation-thumb-stop-icon" aria-hidden="true">■</span>
           <span class="animation-thumb-overlay">▶ Play</span>
           <span class="animation-playing-state" aria-hidden="true">
             <span class="animation-playing-label">Playing</span>
@@ -720,7 +748,18 @@
 
       list.querySelectorAll('.preview-mapping-btn').forEach((btn) => {
         btn.addEventListener('click', async (event) => {
+          event.preventDefault();
           const trigger = event.currentTarget.dataset.trigger;
+          const card = typeof event.currentTarget.closest === 'function'
+            ? event.currentTarget.closest('.animation-mapping-card')
+            : null;
+          if (card && card.classList?.contains?.('playing')) {
+            if (typeof callbacks.stopAllActiveAnimations === 'function') {
+              await callbacks.stopAllActiveAnimations();
+            }
+            return;
+          }
+
           const animationData = getAnimationMappings()[trigger];
           const filename = getAnimationFileFromMapping(animationData);
 
@@ -769,11 +808,15 @@
         STICKER_FILTER_VALUES,
         'all'
       );
+      const initialKeywordFilter = normalizeKeywordFilter(
+        settingsStore?.getItem?.(KEYWORD_FILTER_STORAGE_KEY)
+      );
 
       stateRef.currentSortMode = initialSortMode;
       stateRef.currentSortDirection = initialSortDirection;
       stateRef.currentMapFilter = initialMapFilter;
       stateRef.currentStickerFilter = initialStickerFilter;
+      stateRef.currentKeywordFilter = initialKeywordFilter;
       stateRef.customOrder = parseCustomOrder(settingsStore?.getItem?.('animation_custom_order'));
       applyListControlsState({ rerender: false });
 
@@ -812,6 +855,13 @@
             STICKER_FILTER_VALUES,
             'all'
           );
+          applyListControlsState();
+        });
+      }
+
+      if (elements.animationKeywordFilterInput) {
+        elements.animationKeywordFilterInput.addEventListener('input', () => {
+          stateRef.currentKeywordFilter = normalizeKeywordFilter(elements.animationKeywordFilterInput.value);
           applyListControlsState();
         });
       }
@@ -887,13 +937,21 @@
           body: formData
         });
 
+        const data = await response.json().catch(() => ({}));
+
         if (!response.ok) {
-          const err = await response.json().catch(() => ({}));
-          throw new Error(err.error || 'Upload failed');
+          throw new Error(data.error || 'Upload failed');
         }
 
         if (typeof callbacks.loadAvailableAnimations === 'function') {
           await callbacks.loadAvailableAnimations();
+        }
+        if (typeof callbacks.generateAnimationKeywordsForFilename === 'function' && data.filename) {
+          try {
+            await callbacks.generateAnimationKeywordsForFilename(data.filename, { persist: true, quiet: true });
+          } catch (keywordErr) {
+            console.warn('Animation keyword generation skipped after upload:', keywordErr);
+          }
         }
       } catch (err) {
         console.error('Animation upload error:', err);

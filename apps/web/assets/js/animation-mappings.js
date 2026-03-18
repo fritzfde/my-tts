@@ -28,6 +28,7 @@
         file: filename,
         position: 'bottom-left',
         scale: 1.0,
+        volume: 100,
         keywords: [],
         keywordTriggerEnabled: false,
         voiceKeywordTriggerEnabled: false
@@ -57,6 +58,7 @@
           file: data.file || fallbackFilename,
           position: data.position || 'bottom-left',
           scale: Number.isFinite(Number(data.scale)) ? Number(data.scale) : 1.0,
+          volume: Number.isFinite(Number(data.volume)) ? Math.max(0, Math.min(100, Number(data.volume))) : 100,
           keywords: normalizedKeywords,
           keywordTriggerEnabled: typeof data.keywordTriggerEnabled === 'boolean'
             ? data.keywordTriggerEnabled
@@ -159,6 +161,7 @@
           file,
           position: normalized.position,
           scale: normalized.scale,
+          volume: normalized.volume,
           keywords: normalizeKeywordList(normalized.keywords),
           keywordTriggerEnabled: normalized.keywordTriggerEnabled === true,
           voiceKeywordTriggerEnabled: normalized.voiceKeywordTriggerEnabled === true

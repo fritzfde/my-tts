@@ -13,7 +13,12 @@
     fetchFn,
     getCloneTtsUrl,
     getCloneVoiceLanguage,
-    watchdogMs = 30000
+    watchdogMs = 30000,
+    nowFn = () => Date.now(),
+    lowLatencyMaxQueue = 5,
+    lowLatencyBusyQueueThreshold = 2,
+    lowLatencyStaleMs = 7000,
+    lowLatencyBusyMaxChars = 140
   }) {
     const state = {
       currentUtterance: null,
@@ -54,6 +59,105 @@
         pitch: Number.isFinite(pitch) ? pitch : 1,
         volume: Number.isFinite(volume) ? volume : 1
       };
+    }
+
+    function getNowMs() {
+      if (typeof nowFn === 'function') {
+        const value = Number(nowFn());
+        if (Number.isFinite(value)) return value;
+      }
+      return Date.now();
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function normalizeQueuedMessage(message) {
+      const source = message && typeof message === 'object' ? message : {};
+      const queuedAtMs = Number(source.queuedAtMs);
+      return {
+        author: typeof source.author === 'string' ? source.author : '',
+        text: typeof source.text === 'string' ? source.text : '',
+        platform: typeof source.platform === 'string' ? source.platform : 'youtube',
+        display: source.display !== false,
+        voiceOverride: typeof source.voiceOverride === 'string' ? source.voiceOverride : '',
+        queuedAtMs: Number.isFinite(queuedAtMs) ? queuedAtMs : getNowMs()
+      };
+    }
+
+    function pruneQueuedMessages() {
+      const now = getNowMs();
+      let droppedStale = 0;
+      let droppedOverflow = 0;
+
+      if (Number.isFinite(lowLatencyStaleMs) && lowLatencyStaleMs > 0) {
+        state.messageQueue = state.messageQueue.filter((item) => {
+          const queuedAtMs = Number(item?.queuedAtMs);
+          if (!Number.isFinite(queuedAtMs)) return true;
+          const fresh = (now - queuedAtMs) <= lowLatencyStaleMs;
+          if (!fresh) droppedStale += 1;
+          return fresh;
+        });
+      }
+
+      if (Number.isFinite(lowLatencyMaxQueue) && lowLatencyMaxQueue > 0 && state.messageQueue.length > lowLatencyMaxQueue) {
+        droppedOverflow = state.messageQueue.length - lowLatencyMaxQueue;
+        state.messageQueue = state.messageQueue.slice(-lowLatencyMaxQueue);
+      }
+
+      if (droppedStale > 0 || droppedOverflow > 0) {
+        console.info(`⚡ TTS queue trimmed: stale=${droppedStale}, overflow=${droppedOverflow}, remaining=${state.messageQueue.length}`);
+      }
+    }
+
+    function isQueuedMessageStale(item) {
+      if (!item || !Number.isFinite(lowLatencyStaleMs) || lowLatencyStaleMs <= 0) return false;
+      const queuedAtMs = Number(item.queuedAtMs);
+      if (!Number.isFinite(queuedAtMs)) return false;
+      return (getNowMs() - queuedAtMs) > lowLatencyStaleMs;
+    }
+
+    function getQueuePressure(queuedAfterCurrent = state.messageQueue.length) {
+      return 1 + Math.max(0, Number(queuedAfterCurrent) || 0);
+    }
+
+    function buildLowLatencyPlan(queuePressure) {
+      const normalizedPressure = Math.max(0, Number(queuePressure) || 0);
+      const active = normalizedPressure >= lowLatencyBusyQueueThreshold;
+      if (!active) {
+        return {
+          active: false,
+          skipUsernames: false,
+          maxChars: 0,
+          systemRate: null,
+          clonedPlaybackRate: 1
+        };
+      }
+
+      const overload = Math.max(0, normalizedPressure - lowLatencyBusyQueueThreshold);
+      return {
+        active: true,
+        skipUsernames: true,
+        maxChars: Math.max(80, lowLatencyBusyMaxChars - (overload * 18)),
+        systemRateBoost: Math.min(0.38, 0.18 + (overload * 0.06)),
+        clonedPlaybackRate: clamp(1.08 + (overload * 0.08), 1.08, 1.28)
+      };
+    }
+
+    function compactSpeechText(text, maxChars = 0) {
+      const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+      if (!normalized) return '';
+      const limit = Number(maxChars);
+      if (!Number.isFinite(limit) || limit <= 0 || normalized.length <= limit) {
+        return normalized;
+      }
+      const trimmed = normalized
+        .slice(0, limit)
+        .replace(/[,:;.\-_!?]+$/g, '')
+        .replace(/\s+\S*$/g, '')
+        .trim();
+      return `${trimmed || normalized.slice(0, limit).trim()}...`;
     }
 
     function filterMessage(text) {
@@ -114,6 +218,7 @@
             const audioUrl = URL.createObjectURL(audioBlob);
             const audio = new Audio(audioUrl);
             audio.volume = getSpeechSettingsSafe().volume;
+            audio.preload = 'auto';
             return { audio, isCloned: true };
           }
 
@@ -150,6 +255,7 @@
     }
 
     function processQueue() {
+      pruneQueuedMessages();
       console.log(`🔊 processQueue called. isSpeaking: ${state.isSpeaking}, queue length: ${state.messageQueue.length}`);
 
       if (state.isSpeaking || state.messageQueue.length === 0) {
@@ -169,7 +275,7 @@
         ensureAudioContext();
       }
 
-      const item = state.messageQueue.shift() || {};
+      const item = normalizeQueuedMessage(state.messageQueue.shift() || {});
       const {
         author = '',
         text = '',
@@ -177,6 +283,14 @@
         display = false,
         voiceOverride = ''
       } = item;
+
+      if (isQueuedMessageStale(item)) {
+        console.info(`⚡ Skipping stale TTS message from ${author || 'unknown'} (${platform})`);
+        clearWatchdog();
+        state.isSpeaking = false;
+        processQueue();
+        return;
+      }
 
       console.log(`🔊 Processing: "${text}" from ${author} (${platform})`);
 
@@ -200,12 +314,20 @@
         : '';
       const userHasCustomVoice = voiceOverride && voiceOverride !== platformDefaultVoice;
       const { readUsernames } = getReadOptionsSafe();
-      const speechText = readUsernames && !userHasCustomVoice
+      const lowLatencyPlan = buildLowLatencyPlan(getQueuePressure(state.messageQueue.length));
+      const shouldReadUsernames = readUsernames && !userHasCustomVoice && !lowLatencyPlan.skipUsernames;
+      const baseSpeechText = shouldReadUsernames
         ? `${author} says: ${filteredText}`
         : filteredText;
+      const speechText = lowLatencyPlan.active
+        ? compactSpeechText(baseSpeechText, lowLatencyPlan.maxChars)
+        : baseSpeechText;
 
       const selectedVoice = voiceOverride;
       const speechSettings = getSpeechSettingsSafe();
+      const adaptiveRate = lowLatencyPlan.active
+        ? clamp(speechSettings.rate + lowLatencyPlan.systemRateBoost, 0.7, 1.75)
+        : speechSettings.rate;
 
       if (selectedVoice && selectedVoice.startsWith('cloned-')) {
         speakWithCustomVoice(selectedVoice, speechText).then((result) => {
@@ -214,6 +336,9 @@
           }
 
           if (result && result.isCloned && result.audio) {
+            result.audio.playbackRate = lowLatencyPlan.active
+              ? lowLatencyPlan.clonedPlaybackRate
+              : 1;
             result.audio.onended = () => {
               console.log('🔊 Cloned audio ended');
               if (state.currentAudio === result.audio) {
@@ -254,7 +379,7 @@
             const resolved = resolveSystemVoice(selectedVoice);
             if (resolved) utterance.voice = resolved;
           }
-          utterance.rate = speechSettings.rate;
+          utterance.rate = adaptiveRate;
           utterance.pitch = speechSettings.pitch;
           utterance.volume = speechSettings.volume;
           setupUtteranceHandlers(utterance);
@@ -274,7 +399,7 @@
         const resolved = resolveSystemVoice(selectedVoice);
         if (resolved) utterance.voice = resolved;
       }
-      utterance.rate = speechSettings.rate;
+      utterance.rate = adaptiveRate;
       utterance.pitch = speechSettings.pitch;
       utterance.volume = speechSettings.volume;
       setupUtteranceHandlers(utterance);
@@ -288,7 +413,8 @@
     }
 
     function enqueueMessage(message) {
-      state.messageQueue.push(message);
+      state.messageQueue.push(normalizeQueuedMessage(message));
+      pruneQueuedMessages();
     }
 
     function stopAllSpeech() {

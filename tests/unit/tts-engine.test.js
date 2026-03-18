@@ -21,6 +21,7 @@ class FakeAudio {
   constructor(src) {
     this.src = src;
     this.volume = 1;
+    this.playbackRate = 1;
     this.onended = null;
     this.onerror = null;
   }
@@ -235,4 +236,77 @@ test('tts engine: platform suppression blocks speech unless bypassed', async () 
 
   assert.equal(spoken.length, 1);
   assert.equal(spoken[0].text, 'alex says: hello again');
+  controller.stopAllSpeech();
+});
+
+test('tts engine: low-latency mode trims stale queue entries and keeps newest messages', async () => {
+  const { factory } = loadControllerFactory('tts-engine.js', 'createTtsEngineController');
+  const spoken = [];
+  let nowMs = 10000;
+
+  const controller = factory({
+    synth: {
+      speak(utterance) {
+        spoken.push(utterance);
+      }
+    },
+    ensureAudioContext: () => {},
+    unlockAudio: () => {},
+    getReadOptions: () => ({ readUsernames: true, readEmojis: true, readLinks: true }),
+    getPlatformDefaultVoice: () => 'system-1',
+    getUserVoice: () => '',
+    resolveSystemVoice: (voiceId) => ({ id: voiceId }),
+    getSpeechSettings: () => ({ rate: 1, pitch: 1, volume: 1 }),
+    addChatMessage: () => {},
+    nowFn: () => nowMs
+  });
+
+  controller.enqueueMessage({ author: 'old', text: 'stale message', platform: 'youtube', queuedAtMs: 1000 });
+  for (let index = 1; index <= 6; index += 1) {
+    controller.enqueueMessage({
+      author: `user${index}`,
+      text: `message ${index}`,
+      platform: 'youtube',
+      queuedAtMs: 9000 + index
+    });
+  }
+
+  assert.equal(controller.state.messageQueue.length, 5);
+  controller.processQueue();
+
+  assert.equal(spoken.length, 1);
+  assert.equal(spoken[0].text, 'message 2');
+  assert.equal(controller.state.messageQueue.length, 4);
+  controller.stopAllSpeech();
+});
+
+test('tts engine: low-latency mode skips usernames and boosts rate under backlog', async () => {
+  const { factory } = loadControllerFactory('tts-engine.js', 'createTtsEngineController');
+  const spoken = [];
+
+  const controller = factory({
+    synth: {
+      speak(utterance) {
+        spoken.push(utterance);
+      }
+    },
+    ensureAudioContext: () => {},
+    unlockAudio: () => {},
+    getReadOptions: () => ({ readUsernames: true, readEmojis: true, readLinks: true }),
+    getPlatformDefaultVoice: () => 'system-1',
+    getUserVoice: () => '',
+    resolveSystemVoice: (voiceId) => ({ id: voiceId }),
+    getSpeechSettings: () => ({ rate: 1, pitch: 1, volume: 1 }),
+    addChatMessage: () => {}
+  });
+
+  controller.enqueueMessage({ author: 'alex', text: 'first message in line', platform: 'youtube' });
+  controller.enqueueMessage({ author: 'bob', text: 'second message in line', platform: 'youtube' });
+  controller.enqueueMessage({ author: 'sam', text: 'third message in line', platform: 'youtube' });
+  controller.processQueue();
+
+  assert.equal(spoken.length, 1);
+  assert.equal(spoken[0].text, 'first message in line');
+  assert.ok(spoken[0].rate > 1);
+  controller.stopAllSpeech();
 });

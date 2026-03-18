@@ -323,6 +323,9 @@
 
     function buildAnimationEntries(options = {}) {
       const source = String(options.source || 'viewer-chat').trim().toLowerCase();
+      if (source === 'viewer-chat' && callbacks.isViewerChatAnimationsEnabled?.() === false) {
+        return [];
+      }
       const mappings = callbacks.getAnimationMappings?.() || {};
       return Object.entries(mappings)
         .map(([trigger, data]) => {
@@ -341,6 +344,9 @@
 
     function buildSoundEntries(options = {}) {
       const source = String(options.source || 'viewer-chat').trim().toLowerCase();
+      if (source === 'viewer-chat' && callbacks.isViewerChatSoundsEnabled?.() === false) {
+        return [];
+      }
       const entries = source === 'mic'
         ? (callbacks.getAllSoundKeywordEntries?.() || callbacks.getSoundKeywordEntries?.() || [])
         : (callbacks.getSoundKeywordEntries?.() || []);

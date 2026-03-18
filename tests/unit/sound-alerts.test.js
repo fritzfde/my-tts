@@ -86,6 +86,20 @@ function createDeferred() {
   return { promise, resolve, reject };
 }
 
+function createInput(value = '') {
+  const listeners = new Map();
+  return {
+    value,
+    addEventListener(event, handler) {
+      listeners.set(event, handler);
+    },
+    trigger(event) {
+      const handler = listeners.get(event);
+      if (handler) handler();
+    }
+  };
+}
+
 test('sound alerts: resolves event rules with gift-name priority over any-gift', async () => {
   const { factory } = loadControllerFactory('sound-alerts.js', 'createSoundAlertsController');
   const settingsStore = createSettingsStore();
@@ -264,6 +278,207 @@ test('sound alerts: playSound stops active preview before starting a new one', a
   assert.equal(played[0].pauseCalls, 1);
   assert.equal(played[0].currentTime, 0);
   assert.equal(played[1].src, '/sounds/two.wav');
+});
+
+test('sound alerts: floating preview mirrors active sound and stops on click', async () => {
+  const { factory } = loadControllerFactory('sound-alerts.js', 'createSoundAlertsController');
+  const settingsStore = createSettingsStore();
+  const listeners = new Map();
+  const settingsListeners = new Map();
+  const played = [];
+
+  class AudioMock {
+    constructor(src) {
+      this.src = src;
+      this.volume = 1;
+      this.currentTime = 4;
+      this.duration = 12;
+      this.pauseCalls = 0;
+      this._listeners = new Map();
+      played.push(this);
+    }
+
+    addEventListener(event, handler) {
+      this._listeners.set(event, handler);
+    }
+
+    play() {
+      const handler = this._listeners.get('play');
+      if (handler) handler();
+      return Promise.resolve();
+    }
+
+    pause() {
+      this.pauseCalls += 1;
+      const handler = this._listeners.get('pause');
+      if (handler) handler();
+    }
+  }
+
+  const activeSoundFloating = {
+    hidden: true,
+    classList: {
+      add() {},
+      remove() {}
+    }
+  };
+  const activeSoundFloatingBtn = {
+    disabled: true,
+    title: '',
+    addEventListener(event, handler) {
+      listeners.set(event, handler);
+    },
+    trigger(event) {
+      const handler = listeners.get(event);
+      if (handler) handler();
+    }
+  };
+  const activeSoundFloatingSettingsBtn = {
+    disabled: true,
+    addEventListener(event, handler) {
+      settingsListeners.set(event, handler);
+    },
+    trigger(event) {
+      const handler = settingsListeners.get(event);
+      if (handler) {
+        handler({
+          preventDefault() {},
+          stopPropagation() {}
+        });
+      }
+    }
+  };
+  const activeSoundFloatingName = { textContent: '' };
+  const activeSoundFloatingCountdown = { textContent: '' };
+  const activeSoundFloatingProgressFill = { style: { transform: 'scaleX(0)' } };
+
+  const controller = factory({
+    windowRef: { Audio: AudioMock },
+    settingsStore,
+    elements: {
+      soundLibraryCards: { innerHTML: '', addEventListener() {} },
+      activeSoundFloating,
+      activeSoundFloatingBtn,
+      activeSoundFloatingSettingsBtn,
+      activeSoundFloatingName,
+      activeSoundFloatingCountdown,
+      activeSoundFloatingProgressFill
+    },
+    callbacks: {
+      getVolume: () => 1
+    }
+  });
+
+  controller.state.customSounds = [{ name: 'horn.wav', path: '/sounds/horn.wav' }];
+  controller.init();
+  const ok = controller.playSound('/sounds/horn.wav');
+
+  assert.equal(ok, true);
+  assert.equal(activeSoundFloating.hidden, false);
+  assert.equal(activeSoundFloatingBtn.disabled, false);
+  assert.equal(activeSoundFloatingSettingsBtn.disabled, false);
+  assert.equal(activeSoundFloatingName.textContent, 'horn.wav');
+  assert.equal(activeSoundFloatingCountdown.textContent, '8.0s');
+  assert.equal(activeSoundFloatingProgressFill.style.transform, 'scaleX(0.3333)');
+
+  activeSoundFloatingSettingsBtn.trigger('click');
+  assert.equal(controller.state.openSoundSettingsPath, '/sounds/horn.wav');
+
+  activeSoundFloatingBtn.trigger('click');
+
+  assert.equal(played[0].pauseCalls, 1);
+  assert.equal(activeSoundFloating.hidden, true);
+  assert.equal(activeSoundFloatingBtn.disabled, true);
+  assert.equal(activeSoundFloatingSettingsBtn.disabled, true);
+});
+
+test('sound alerts: clicking an active sound card stops playback', async () => {
+  const ElementMock = class {};
+  const listeners = new Map();
+  const { factory } = loadControllerFactory(
+    'sound-alerts.js',
+    'createSoundAlertsController',
+    { Element: ElementMock }
+  );
+  const played = [];
+
+  class AudioMock {
+    constructor(src) {
+      this.src = src;
+      this.currentTime = 2;
+      this.duration = 10;
+      this.pauseCalls = 0;
+      this._listeners = new Map();
+      played.push(this);
+    }
+
+    addEventListener(event, handler) {
+      this._listeners.set(event, handler);
+    }
+
+    play() {
+      const handler = this._listeners.get('play');
+      if (handler) handler();
+      return Promise.resolve();
+    }
+
+    pause() {
+      this.pauseCalls += 1;
+      const handler = this._listeners.get('pause');
+      if (handler) handler();
+    }
+  }
+
+  const soundLibraryCards = {
+    innerHTML: '',
+    addEventListener(type, cb) {
+      listeners.set(type, cb);
+    }
+  };
+
+  const controller = factory({
+    windowRef: { Audio: AudioMock },
+    settingsStore: createSettingsStore(),
+    elements: {
+      soundLibraryCards
+    },
+    fetchFn: async (url) => {
+      if (url === '/api/sounds/list') {
+        return {
+          json: async () => ({
+            custom: [{ name: 'horn.wav', path: '/sounds/horn.wav' }]
+          })
+        };
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    }
+  });
+
+  await controller.loadCustomSounds();
+  controller.init();
+
+  const clickHandler = listeners.get('click');
+  assert.equal(typeof clickHandler, 'function');
+
+  const actionButton = Object.assign(new ElementMock(), {
+    getAttribute(name) {
+      if (name === 'data-action') return 'play-card-sound';
+      if (name === 'data-sound-path') return '/sounds/horn.wav';
+      return '';
+    },
+    closest(selector) {
+      if (selector === 'button[data-action]') return this;
+      return null;
+    }
+  });
+
+  clickHandler({ target: actionButton });
+  assert.equal(played.length, 1);
+  assert.equal(controller.getActiveSoundPath(), '/sounds/horn.wav');
+
+  clickHandler({ target: actionButton });
+  assert.equal(played[0].pauseCalls, 1);
+  assert.equal(controller.getActiveSoundPath(), '');
 });
 
 test('sound alerts: sound card delete uses inline two-step confirmation', async () => {
@@ -455,6 +670,63 @@ test('sound alerts: persists keyword edits and requires enable toggle before exp
   assert.equal(soundSettingsPopup.style.display, 'none');
 });
 
+test('sound alerts: generateKeywordsForSound persists generated keywords with triggers disabled by default', async () => {
+  const { factory } = loadControllerFactory('sound-alerts.js', 'createSoundAlertsController');
+  const settingsStore = createSettingsStore();
+
+  const controller = factory({
+    settingsStore,
+    elements: {
+      soundLibraryCards: { innerHTML: '', addEventListener() {} }
+    },
+    fetchFn: async (url, options = {}) => {
+      if (url === '/api/sounds/list') {
+        return {
+          json: async () => ({
+            custom: [{ name: 'horn.wav', path: '/sounds/horn.wav' }]
+          })
+        };
+      }
+      if (url === '/api/media-keywords/generate') {
+        const body = JSON.parse(options.body);
+        assert.equal(body.items[0].soundPath, '/sounds/horn.wav');
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            results: [{
+              soundPath: '/sounds/horn.wav',
+              keywords: ['horn', 'beep']
+            }]
+          })
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ success: true })
+      };
+    }
+  });
+
+  controller.init();
+  await controller.loadCustomSounds();
+  const result = await controller.generateKeywordsForSound('/sounds/horn.wav', { persist: true, quiet: true });
+
+  assert.equal(JSON.stringify(result.keywords), JSON.stringify(['horn', 'beep']));
+  assert.equal(
+    JSON.stringify(JSON.parse(settingsStore.getItem('sound_keyword_map'))),
+    JSON.stringify({ '/sounds/horn.wav': ['horn', 'beep'] })
+  );
+  assert.equal(
+    JSON.stringify(JSON.parse(settingsStore.getItem('sound_keyword_enabled_map'))),
+    JSON.stringify({ '/sounds/horn.wav': false })
+  );
+  assert.equal(
+    JSON.stringify(JSON.parse(settingsStore.getItem('sound_voice_keyword_enabled_map'))),
+    JSON.stringify({ '/sounds/horn.wav': false })
+  );
+});
+
 test('sound alerts: bulk keyword toggles manage viewer chat and voice separately', async () => {
   const ElementMock = class {};
   const viewerListeners = new Map();
@@ -530,7 +802,7 @@ test('sound alerts: bulk keyword toggles manage viewer chat and voice separately
   controller.init();
   await controller.loadCustomSounds();
 
-  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Enable all viewer chat');
+  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Enable per-item viewer chat');
   assert.equal(soundLibraryViewerKeywordToggleBtn.disabled, false);
   assert.equal(soundLibraryVoiceKeywordToggleBtn.textContent, 'Enable all voice');
   assert.equal(soundLibraryVoiceKeywordToggleBtn.disabled, false);
@@ -548,7 +820,7 @@ test('sound alerts: bulk keyword toggles manage viewer chat and voice separately
       '/sounds/beep.wav': true
     }
   );
-  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Disable all viewer chat');
+  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Disable per-item viewer chat');
 
   voiceClickHandler();
   assert.deepEqual(
@@ -568,7 +840,7 @@ test('sound alerts: bulk keyword toggles manage viewer chat and voice separately
       '/sounds/beep.wav': false
     }
   );
-  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Enable all viewer chat');
+  assert.equal(soundLibraryViewerKeywordToggleBtn.textContent, 'Enable per-item viewer chat');
 
   voiceClickHandler();
   assert.deepEqual(
@@ -579,6 +851,66 @@ test('sound alerts: bulk keyword toggles manage viewer chat and voice separately
     }
   );
   assert.equal(soundLibraryVoiceKeywordToggleBtn.textContent, 'Enable all voice');
+});
+
+test('sound alerts: keyword filter narrows sound cards and persists search', async () => {
+  const ElementMock = class {};
+  const soundLibraryKeywordFilterInput = createInput('');
+  const settingsStore = createSettingsStore({
+    sound_keyword_map: JSON.stringify({
+      '/sounds/horn.wav': ['beep beep'],
+      '/sounds/thanks.wav': ['thank you']
+    })
+  });
+
+  const soundLibraryCards = {
+    innerHTML: '',
+    addEventListener() {}
+  };
+
+  const { factory } = loadControllerFactory(
+    'sound-alerts.js',
+    'createSoundAlertsController',
+    { Element: ElementMock }
+  );
+
+  const controller = factory({
+    settingsStore,
+    elements: {
+      soundLibraryCards,
+      soundLibraryKeywordFilterInput
+    },
+    fetchFn: async (url) => {
+      if (url === '/api/sounds/list') {
+        return {
+          json: async () => ({
+            custom: [
+              { name: 'horn.wav', path: '/sounds/horn.wav' },
+              { name: 'thanks.wav', path: '/sounds/thanks.wav' }
+            ]
+          })
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ success: true })
+      };
+    }
+  });
+
+  controller.init();
+  await controller.loadCustomSounds();
+
+  soundLibraryKeywordFilterInput.value = 'thank you';
+  soundLibraryKeywordFilterInput.trigger('input');
+
+  assert.equal(settingsStore.getItem('sound_library_keyword_filter'), 'thank you');
+  assert.deepEqual(
+    controller.getFilteredSoundCards().map((sound) => sound.name),
+    ['thanks.wav']
+  );
+  assert.match(soundLibraryCards.innerHTML, /thanks\.wav/);
+  assert.doesNotMatch(soundLibraryCards.innerHTML, /horn\.wav/);
 });
 
 test('sound alerts: lifecycle rules support recurring users and minimum stay', async () => {

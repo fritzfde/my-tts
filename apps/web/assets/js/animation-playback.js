@@ -9,6 +9,13 @@
     playAnimationThumbnail,
     stopAnimationThumbnail,
     stopButton,
+    floatingPreviewContainer = null,
+    floatingPreviewButton = null,
+    floatingPreviewSettingsButton = null,
+    floatingPreviewVideo = null,
+    floatingPreviewName = null,
+    floatingPreviewCountdown = null,
+    onOpenFloatingSettings = null,
     fallbackSeconds = 4,
     tickMs = 120,
     stopEndpoint = '/api/animations/stop'
@@ -150,6 +157,94 @@
       stopButton.disabled = state.activePlayback.size === 0;
     }
 
+    function getCurrentPlayback() {
+      const iterator = state.activePlayback.values();
+      const next = iterator.next();
+      return next && !next.done ? next.value : null;
+    }
+
+    function pauseFloatingPreviewVideo() {
+      if (!floatingPreviewVideo) return;
+      try {
+        floatingPreviewVideo.pause();
+        if (typeof floatingPreviewVideo.currentTime === 'number') {
+          floatingPreviewVideo.currentTime = 0;
+        }
+      } catch (err) {
+        // Ignore preview reset issues.
+      }
+    }
+
+    function updateFloatingPreviewUi() {
+      if (!floatingPreviewContainer || !floatingPreviewButton || !floatingPreviewVideo) return;
+
+      const playback = getCurrentPlayback();
+      if (!playback) {
+        floatingPreviewContainer.hidden = true;
+        floatingPreviewContainer.classList?.remove?.('is-visible');
+        floatingPreviewButton.disabled = true;
+        if (floatingPreviewSettingsButton) {
+          floatingPreviewSettingsButton.disabled = true;
+        }
+        if (floatingPreviewName) {
+          floatingPreviewName.textContent = '';
+        }
+        if (floatingPreviewCountdown) {
+          floatingPreviewCountdown.textContent = '';
+        }
+        pauseFloatingPreviewVideo();
+        return;
+      }
+
+      const nextSrc = getAnimationFileUrl(playback.filename);
+      if (nextSrc && floatingPreviewVideo.dataset.src !== nextSrc) {
+        floatingPreviewVideo.dataset.src = nextSrc;
+        floatingPreviewVideo.setAttribute('src', nextSrc);
+        floatingPreviewVideo.load();
+      }
+
+      floatingPreviewContainer.hidden = false;
+      floatingPreviewContainer.classList?.add?.('is-visible');
+      floatingPreviewButton.disabled = false;
+      if (floatingPreviewSettingsButton) {
+        floatingPreviewSettingsButton.disabled = false;
+      }
+      floatingPreviewButton.title = 'Click to stop the current animation';
+
+      if (floatingPreviewName) {
+        floatingPreviewName.textContent = playback.trigger || '';
+      }
+      if (floatingPreviewCountdown) {
+        const remainingMs = Math.max(0, playback.endAtMs - Date.now());
+        floatingPreviewCountdown.textContent = formatAnimationPlaybackCountdown(remainingMs);
+      }
+
+      floatingPreviewVideo.play().catch(() => {});
+    }
+
+    function bindFloatingPreviewEvents() {
+      if (!floatingPreviewButton) return;
+      const dataset = floatingPreviewButton.dataset || (floatingPreviewButton.dataset = {});
+      if (dataset.bound === '1') return;
+      dataset.bound = '1';
+      floatingPreviewButton.addEventListener('click', async (event) => {
+        event?.preventDefault?.();
+        if (state.activePlayback.size === 0) return;
+        floatingPreviewButton.disabled = true;
+        await stopAllActiveAnimations();
+      });
+
+      if (floatingPreviewSettingsButton) {
+        floatingPreviewSettingsButton.addEventListener('click', (event) => {
+          event?.preventDefault?.();
+          event?.stopPropagation?.();
+          const playback = getCurrentPlayback();
+          if (!playback || typeof onOpenFloatingSettings !== 'function') return;
+          onOpenFloatingSettings(playback.trigger, playback.filename);
+        });
+      }
+    }
+
     function markAnimationCardPlaying(trigger) {
       if (!trigger) return;
       const data = getAnimationMappingByTrigger(trigger);
@@ -197,6 +292,7 @@
         : (typeof window !== 'undefined' && typeof window.fetch === 'function' ? window.fetch.bind(window) : null);
 
       if (!callFetch) {
+        updateAnimationPlaybackUi();
         return false;
       }
 
@@ -230,6 +326,7 @@
         if (hadActiveAnimations) {
           alert('Failed to stop animation overlay. Please check server/overlay connection.');
         }
+        updateAnimationPlaybackUi();
         return false;
       }
     }
@@ -280,7 +377,10 @@
       }
 
       updateStopAnimationButtonState();
+      updateFloatingPreviewUi();
     }
+
+    bindFloatingPreviewEvents();
 
     return {
       state,
@@ -295,7 +395,9 @@
       markAnimationCardPlaying,
       clearAnimationCardPlaybackIfMatches,
       stopAllActiveAnimations,
-      updateAnimationPlaybackUi
+      updateAnimationPlaybackUi,
+      updateFloatingPreviewUi,
+      getCurrentPlayback
     };
   }
 

@@ -1,5 +1,6 @@
 (function initYouTubeModule() {
   function createYouTubeController(deps) {
+    const STARTUP_SYNC_WINDOW_MS = 8000;
     const {
       elements,
       getNextApiKey,
@@ -30,6 +31,8 @@
       nextPageToken: null,
       seenMessages: new Set(),
       isFirstPoll: true,
+      startupSyncUntilMs: 0,
+      startupSyncAnnounced: false,
       lastPollTime: null,
       pollLoopToken: 0
     };
@@ -363,6 +366,17 @@
         const messages = data.items || [];
 
         if (state.isFirstPoll && !isReconnect) {
+          const startupWindowOpen = state.startupSyncUntilMs > 0 && Date.now() < state.startupSyncUntilMs;
+          if (messages.length === 0 && startupWindowOpen) {
+            if (!state.startupSyncAnnounced) {
+              addChatMessage('SYSTEM', 'YouTube chat synced. Waiting for new messages...', 'youtube', false);
+              state.startupSyncAnnounced = true;
+            }
+            const interval = data.pollingIntervalMillis || 5000;
+            setTimeout(() => pollYouTubeMessages(false, loopToken), interval);
+            return;
+          }
+
           const now = Date.now();
           const cutoff = now - youtubeOnlineUserTtlMs;
           const startupBacklogCount = resolveStartupBacklogCount();
@@ -413,7 +427,8 @@
           // while backlog count controls only what gets spoken.
           startupRenderableMessages.forEach(({ author, text }) => {
             addChatMessage(author, text, 'youtube', false, '', false, undefined, {
-              emitPresenceLifecycle: false
+              emitPresenceLifecycle: false,
+              broadcastOverlay: false
             });
           });
 
@@ -429,9 +444,10 @@
 
           if (replayed > 0) {
             addChatMessage('SYSTEM', `YouTube chat synced. Replaying last ${replayed} message${replayed === 1 ? '' : 's'}...`, 'youtube', false);
-          } else {
+          } else if (!state.startupSyncAnnounced) {
             addChatMessage('SYSTEM', 'YouTube chat synced. Waiting for new messages...', 'youtube', false);
           }
+          state.startupSyncAnnounced = true;
           setPlatformSpeechSuppressed?.('youtube', false);
         } else {
           for (const msg of messages) {
@@ -523,6 +539,8 @@
         if (!isReconnect) {
           state.seenMessages.clear();
           state.isFirstPoll = true;
+          state.startupSyncUntilMs = Date.now() + STARTUP_SYNC_WINDOW_MS;
+          state.startupSyncAnnounced = false;
         }
 
         state.nextPageToken = null;
@@ -552,6 +570,8 @@
       state.nextPageToken = null;
       state.lastPollTime = Date.now();
       state.pollLoopToken += 1;
+      state.startupSyncUntilMs = 0;
+      state.startupSyncAnnounced = false;
       clearOnlineUsers('youtube');
 
       releaseWakeLockIfIdle();

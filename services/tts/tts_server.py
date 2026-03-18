@@ -11,10 +11,11 @@ from TTS.api import TTS
 import os
 import tempfile
 import argparse
+import time
 
 app = Flask(__name__)
 
-# Load model once at startup (this takes ~5-10 seconds)
+# Load model once at startup.
 print("🔄 Loading XTTS v2 model (one-time setup)...", file=sys.stderr)
 tts = TTS(
     model_name="tts_models/multilingual/multi-dataset/xtts_v2",
@@ -57,9 +58,10 @@ def generate_speech():
         output_path = temp_file.name
         temp_file.close()
 
+        started_at = time.perf_counter()
         print(f"🎙️ Generating ({language}): '{text[:50]}...'", file=sys.stderr)
 
-        # Generate speech (model already loaded - FAST!)
+        # Generate speech with the already-loaded model.
         tts.tts_to_file(
             text=text,
             speaker_wav=voice_file,
@@ -67,7 +69,8 @@ def generate_speech():
             file_path=output_path
         )
 
-        print(f"✅ Generated in <1 second!", file=sys.stderr)
+        elapsed = time.perf_counter() - started_at
+        print(f"✅ Generated in {elapsed:.2f}s", file=sys.stderr)
 
         # Send the file
         response = send_file(

@@ -19,6 +19,10 @@ const VOICE_GROUP_ORDER = voicesController.constants.VOICE_GROUP_ORDER;
 const VOICE_GROUP_LABELS = voicesController.constants.VOICE_GROUP_LABELS;
 const CLONED_VOICE_LANGUAGE_OPTIONS = voicesController.constants.CLONED_VOICE_LANGUAGE_OPTIONS;
 let ollamaGenderController = null;
+const VIEWER_CHAT_ANIMATION_GATE_KEY = 'viewer_chat_animation_keyword_triggers_enabled';
+const VIEWER_CHAT_SOUND_GATE_KEY = 'viewer_chat_sound_keyword_triggers_enabled';
+let viewerChatAnimationKeywordTriggersEnabled = true;
+let viewerChatSoundKeywordTriggersEnabled = true;
 
 function getVoiceLanguageCode(lang) {
   return voicesController.getVoiceLanguageCode(lang);
@@ -96,6 +100,21 @@ function canUserTriggerAnimations(username, platform = 'tiktok') {
 // Initialize
 loadAnimationPermissions();
 
+function loadViewerChatKeywordGates() {
+  viewerChatAnimationKeywordTriggersEnabled = settingsStore.getItem(VIEWER_CHAT_ANIMATION_GATE_KEY) !== 'false';
+  viewerChatSoundKeywordTriggersEnabled = settingsStore.getItem(VIEWER_CHAT_SOUND_GATE_KEY) !== 'false';
+}
+
+function saveViewerChatKeywordGate(kind = 'animation', enabled = true) {
+  const normalizedEnabled = enabled !== false;
+  const key = kind === 'sound'
+    ? VIEWER_CHAT_SOUND_GATE_KEY
+    : VIEWER_CHAT_ANIMATION_GATE_KEY;
+  settingsStore.setItem(key, normalizedEnabled ? 'true' : 'false');
+}
+
+loadViewerChatKeywordGates();
+
 // User avatar cache
 if (!window.userAvatars) {
   window.userAvatars = new Map();
@@ -110,6 +129,8 @@ let dashboardSettingsController = null;
 let chatUiController = null;
 let voiceTestControlsController = null;
 let startupOrchestratorController = null;
+let syncMicAnimationVolumeMirror = () => {};
+let syncMicSoundAlertsVolumeMirror = () => {};
 
 function requestWakeLock() {
   return audioRuntimeController?.requestWakeLock();
@@ -218,6 +239,7 @@ const volumeSlider = document.getElementById('volumeSlider');
 const volumeValue = document.getElementById('volumeValue');
 const soundAlertsVolumeSlider = document.getElementById('soundAlertsVolumeSlider');
 const soundAlertsVolumeValue = document.getElementById('soundAlertsVolumeValue');
+const soundLibraryViewerChatGateBtn = document.getElementById('soundLibraryViewerChatGateBtn');
 const readUsernamesCheckbox = document.getElementById('readUsernames');
 const readEmojisCheckbox = document.getElementById('readEmojis');
 const readLinksCheckbox = document.getElementById('readLinks');
@@ -235,8 +257,15 @@ const micAsrBaseUrlInput = document.getElementById('micAsrBaseUrlInput');
 const micAsrLanguageSelect = document.getElementById('micAsrLanguageSelect');
 const micTriggerMeterFill = document.getElementById('micTriggerMeterFill');
 const micTriggerMeterValue = document.getElementById('micTriggerMeterValue');
+const micTranscriptDock = document.getElementById('micTranscriptDock');
+const micTriggerModeBtn = document.getElementById('micTriggerModeBtn');
 const micTriggerTranscript = document.getElementById('micTriggerTranscript');
 const micTriggerMatches = document.getElementById('micTriggerMatches');
+const micTriggerSuggestions = document.getElementById('micTriggerSuggestions');
+const micAnimationVolumeSlider = document.getElementById('micAnimationVolumeSlider');
+const micAnimationVolumeValue = document.getElementById('micAnimationVolumeValue');
+const micSoundAlertsVolumeSlider = document.getElementById('micSoundAlertsVolumeSlider');
+const micSoundAlertsVolumeValue = document.getElementById('micSoundAlertsVolumeValue');
 const ollamaStatusEl = document.getElementById('ollamaStatus');
 const ollamaBaseUrlInput = document.getElementById('ollamaBaseUrlInput');
 const onlineUsersPanel = document.getElementById('onlineUsersPanel');
@@ -383,11 +412,49 @@ function updateAnimationKeywordToggleButtons() {
     if (!button) return;
     const { total, allEnabled } = getAnimationKeywordToggleState(kind);
     button.disabled = Boolean(animationKeywordGenerationPromise) || total === 0;
+    if (kind === 'viewer') {
+      button.textContent = allEnabled ? 'Disable per-item viewer chat' : 'Enable per-item viewer chat';
+      button.title = total > 0
+        ? `${allEnabled ? 'Disable' : 'Enable'} per-animation viewer chat keyword triggers for all ${total} animation(s) that already have keywords`
+        : 'Generate or enter keywords first, then you can enable per-animation viewer chat triggers here';
+      return;
+    }
     button.textContent = allEnabled ? `Disable all ${label}` : `Enable all ${label}`;
     button.title = total > 0
       ? `${allEnabled ? 'Disable' : 'Enable'} ${label} keyword triggers for all ${total} animation(s) that already have keywords`
       : `Generate or enter keywords first, then you can enable all ${label} triggers here`;
   });
+}
+
+function updateViewerChatKeywordGateButtons() {
+  if (soundLibraryViewerChatGateBtn) {
+    soundLibraryViewerChatGateBtn.textContent = viewerChatSoundKeywordTriggersEnabled ? 'Block user chat' : 'Allow user chat';
+    soundLibraryViewerChatGateBtn.title = viewerChatSoundKeywordTriggersEnabled
+      ? 'Viewer chat can currently trigger sound keywords globally. Click to block all viewer-chat-triggered sounds without changing per-sound settings.'
+      : 'Viewer chat is currently blocked from triggering sound keywords globally. Click to allow viewer-chat-triggered sounds again.';
+  }
+
+  if (animationViewerChatGateBtn) {
+    animationViewerChatGateBtn.textContent = viewerChatAnimationKeywordTriggersEnabled ? 'Block user chat' : 'Allow user chat';
+    animationViewerChatGateBtn.title = viewerChatAnimationKeywordTriggersEnabled
+      ? 'Viewer chat can currently trigger animation keywords globally. Click to block all viewer-chat-triggered animations without changing per-animation settings.'
+      : 'Viewer chat is currently blocked from triggering animation keywords globally. Click to allow viewer-chat-triggered animations again.';
+  }
+}
+
+function setViewerChatKeywordGate(kind = 'animation', enabled = true) {
+  const normalizedEnabled = enabled !== false;
+  if (kind === 'sound') {
+    viewerChatSoundKeywordTriggersEnabled = normalizedEnabled;
+  } else {
+    viewerChatAnimationKeywordTriggersEnabled = normalizedEnabled;
+  }
+  saveViewerChatKeywordGate(kind, normalizedEnabled);
+  updateViewerChatKeywordGateButtons();
+  updateStatus(
+    `✓ Viewer chat ${normalizedEnabled ? 'can now' : 'can no longer'} trigger ${kind === 'sound' ? 'sound alerts' : 'animations'} globally.`,
+    false
+  );
 }
 
 async function setAllAnimationKeywordTriggers(kind = 'viewer', enabled = false) {
@@ -408,6 +475,7 @@ async function setAllAnimationKeywordTriggers(kind = 'viewer', enabled = false) 
       file: normalized.file || file,
       position: normalized.position || 'bottom-left',
       scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1,
+      volume: Number.isFinite(Number(normalized.volume)) ? Number(normalized.volume) : 100,
       keywords,
       keywordTriggerEnabled: kind === 'voice'
         ? normalized.keywordTriggerEnabled === true
@@ -849,6 +917,8 @@ function addRecentUser(userKey) {
 // Load saved settings
 function loadSettings() {
   dashboardSettingsController?.loadSettings();
+  syncMicSoundAlertsVolumeMirror();
+  syncMicAnimationVolumeMirror();
 }
 
 // Save settings
@@ -951,9 +1021,9 @@ function broadcastChatMessageToOverlay(author, text, platform, {
   });
 }
 
-function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, extraClass = '', allowHtml = false, replayText = undefined) {
-  chatUiController?.addChatMessage(author, text, platform, isSpeaking, extraClass, allowHtml, replayText);
-  if (author !== 'SYSTEM') {
+function addChatMessage(author, text, platform = 'SYSTEM', isSpeaking = false, extraClass = '', allowHtml = false, replayText = undefined, options = {}) {
+  chatUiController?.addChatMessage(author, text, platform, isSpeaking, extraClass, allowHtml, replayText, options);
+  if (author !== 'SYSTEM' && options?.broadcastOverlay !== false) {
     broadcastChatMessageToOverlay(author, text, platform, { allowHtml, replayText, extraClass });
   }
 }
@@ -1534,6 +1604,7 @@ soundAlertsController = window.createSoundAlertsController({
     soundLibraryUploadInput: document.getElementById('soundLibraryUploadInput'),
     soundLibraryUploadBtn: document.getElementById('soundLibraryUploadBtn'),
     soundLibraryGenerateBtn: document.getElementById('soundLibraryGenerateBtn'),
+    soundLibraryKeywordFilterInput: document.getElementById('soundLibraryKeywordFilterInput'),
     soundLibraryViewerKeywordToggleBtn: document.getElementById('soundLibraryViewerKeywordToggleBtn'),
     soundLibraryVoiceKeywordToggleBtn: document.getElementById('soundLibraryVoiceKeywordToggleBtn'),
     soundLibraryCards: document.getElementById('soundLibraryCards'),
@@ -1541,11 +1612,20 @@ soundAlertsController = window.createSoundAlertsController({
     soundSettingsPopupBackdrop: document.getElementById('soundSettingsPopupBackdrop'),
     soundSettingsName: document.getElementById('soundSettingsName'),
     soundSettingsKeywords: document.getElementById('soundSettingsKeywords'),
+    soundSettingsVolume: document.getElementById('soundSettingsVolume'),
+    soundSettingsVolumeValue: document.getElementById('soundSettingsVolumeValue'),
     soundSettingsViewerKeywordEnabled: document.getElementById('soundSettingsViewerKeywordEnabled'),
     soundSettingsVoiceKeywordEnabled: document.getElementById('soundSettingsVoiceKeywordEnabled'),
+    soundSettingsGenerateKeywordsBtn: document.getElementById('soundSettingsGenerateKeywordsBtn'),
     soundSettingsSaveBtn: document.getElementById('soundSettingsSaveBtn'),
     soundSettingsCancelBtn: document.getElementById('soundSettingsCancelBtn'),
     soundSettingsPlayBtn: document.getElementById('soundSettingsPlayBtn'),
+    activeSoundFloating: document.getElementById('activeSoundFloating'),
+    activeSoundFloatingBtn: document.getElementById('activeSoundFloatingBtn'),
+    activeSoundFloatingSettingsBtn: document.getElementById('activeSoundFloatingSettingsBtn'),
+    activeSoundFloatingName: document.getElementById('activeSoundFloatingName'),
+    activeSoundFloatingCountdown: document.getElementById('activeSoundFloatingCountdown'),
+    activeSoundFloatingProgressFill: document.getElementById('activeSoundFloatingProgressFill'),
     addSoundAlertRuleBtn: document.getElementById('addSoundAlertRuleBtn'),
     refreshTikTokGiftsBtn: document.getElementById('refreshTikTokGiftsBtn'),
     soundAlertRulesBody: document.getElementById('soundAlertRulesBody'),
@@ -1590,6 +1670,8 @@ keywordTriggersController = window.createKeywordTriggersController({
     normalizeAnimationMapping: (data) => toAnimationMappingObject(data, getAnimationFileFromMapping(data)),
     getSoundKeywordEntries: () => soundAlertsController?.getSoundKeywordEntries?.() || [],
     getAllSoundKeywordEntries: () => soundAlertsController?.getAllSoundKeywordEntries?.() || [],
+    isViewerChatAnimationsEnabled: () => viewerChatAnimationKeywordTriggersEnabled,
+    isViewerChatSoundsEnabled: () => viewerChatSoundKeywordTriggersEnabled,
     getSuppressedKeywords: () => getActiveKeywordSuppressionList(),
     canTriggerAnimation: (username, platform) => canUserTriggerAnimations(username, platform),
     hasActiveAnimations: () => hasActiveAnimations(),
@@ -1608,10 +1690,20 @@ micTriggerController = window.createMicTriggerController({
     micTriggerStatus,
     micAsrBaseUrlInput,
     micAsrLanguageSelect,
+    micTranscriptDock,
+    micTriggerModeBtn,
+    micVoiceGateEnabled: document.getElementById('micVoiceGateEnabled'),
+    micVoiceEnrollBtn: document.getElementById('micVoiceEnrollBtn'),
+    micVoicePreviewBtn: document.getElementById('micVoicePreviewBtn'),
+    micVoiceClearBtn: document.getElementById('micVoiceClearBtn'),
+    micVoiceProfileStatus: document.getElementById('micVoiceProfileStatus'),
+    micVoiceMatchThreshold: document.getElementById('micVoiceMatchThreshold'),
+    micVoiceMatchThresholdValue: document.getElementById('micVoiceMatchThresholdValue'),
     micTriggerMeterFill,
     micTriggerMeterValue,
     micTriggerTranscript,
-    micTriggerMatches
+    micTriggerMatches,
+    micTriggerSuggestions
   },
   callbacks: {
     onTranscript: ({ text }) => {
@@ -1622,6 +1714,47 @@ micTriggerController = window.createMicTriggerController({
     },
     hasExactMicKeywordMatch: ({ text }) => {
       return keywordTriggersController?.hasExactMicKeywordMatch?.(text) === true;
+    },
+    getAnimationSuggestion: ({ trigger }) => {
+      const normalizedTrigger = String(trigger || '').trim();
+      if (!normalizedTrigger) return null;
+      const mapping = animationMappings[normalizedTrigger];
+      const filename = getAnimationFileFromMapping(mapping);
+      if (!filename) return null;
+      return {
+        trigger: normalizedTrigger,
+        label: normalizedTrigger,
+        fileUrl: getAnimationFileUrl(filename),
+        filename
+      };
+    },
+    getSoundSuggestion: ({ soundPath }) => {
+      const normalizedPath = String(soundPath || '').trim();
+      if (!normalizedPath) return null;
+      return {
+        soundPath: normalizedPath,
+        label: soundAlertsController?.getSoundLabel?.(normalizedPath)
+          || normalizedPath.split('/').pop()
+          || normalizedPath
+      };
+    },
+    triggerSuggestedAnimation: ({ trigger }) => {
+      if (!trigger) return false;
+      return triggerAnimation(trigger, 'mic', 'host-mic', 'keyword') === true;
+    },
+    triggerSuggestedSound: ({ soundPath }) => {
+      if (!soundPath) return false;
+      return playAlertSound(soundPath) === true;
+    },
+    openSuggestedAnimationSettings: ({ trigger, filename }) => {
+      if (!trigger) return false;
+      openAnimationCardPopup(trigger, filename || getAnimationFileFromMapping(animationMappings[trigger]));
+      return true;
+    },
+    openSuggestedSoundSettings: ({ soundPath }) => {
+      if (!soundPath) return false;
+      soundAlertsController?.openSoundSettings?.(soundPath);
+      return true;
     }
   },
   fetchFn: (...args) => fetch(...args),
@@ -1856,9 +1989,16 @@ const uploadAnimationBtn = document.getElementById('uploadAnimationBtn');
 const generateAnimationKeywordsBtn = document.getElementById('generateAnimationKeywordsBtn');
 const animationViewerKeywordToggleBtn = document.getElementById('animationViewerKeywordToggleBtn');
 const animationVoiceKeywordToggleBtn = document.getElementById('animationVoiceKeywordToggleBtn');
+const animationViewerChatGateBtn = document.getElementById('animationViewerChatGateBtn');
 const uploadAnimationInput = document.getElementById('uploadAnimationInput');
 const resetAnimationsBtn = document.getElementById('resetAnimationsBtn');
 const stopAnimationBtn = document.getElementById('stopAnimationBtn');
+const activeAnimationFloating = document.getElementById('activeAnimationFloating');
+const activeAnimationFloatingBtn = document.getElementById('activeAnimationFloatingBtn');
+const activeAnimationFloatingSettingsBtn = document.getElementById('activeAnimationFloatingSettingsBtn');
+const activeAnimationFloatingVideo = document.getElementById('activeAnimationFloatingVideo');
+const activeAnimationFloatingName = document.getElementById('activeAnimationFloatingName');
+const activeAnimationFloatingCountdown = document.getElementById('activeAnimationFloatingCountdown');
 const animationResetPopup = document.getElementById('animationResetPopup');
 const animationResetSorting = document.getElementById('animationResetSorting');
 const animationResetNames = document.getElementById('animationResetNames');
@@ -1879,6 +2019,13 @@ const animationPlaybackController = window.createAnimationPlaybackController({
   playAnimationThumbnail: (video) => playAnimationThumbnail(video),
   stopAnimationThumbnail: (video) => stopAnimationThumbnail(video),
   stopButton: stopAnimationBtn,
+  floatingPreviewContainer: activeAnimationFloating,
+  floatingPreviewButton: activeAnimationFloatingBtn,
+  floatingPreviewSettingsButton: activeAnimationFloatingSettingsBtn,
+  floatingPreviewVideo: activeAnimationFloatingVideo,
+  floatingPreviewName: activeAnimationFloatingName,
+  floatingPreviewCountdown: activeAnimationFloatingCountdown,
+  onOpenFloatingSettings: (trigger, filename) => openAnimationCardPopup(trigger, filename),
   fallbackSeconds: 4,
   tickMs: 120
 });
@@ -1947,6 +2094,7 @@ function getActiveKeywordSuppressionList() {
 loadAnimationKeywordJob();
 updateAnimationKeywordGenerateButton();
 updateAnimationKeywordToggleButtons();
+updateViewerChatKeywordGateButtons();
 const animationUiController = window.createAnimationUiController({
   windowRef: window,
   documentRef: document,
@@ -1963,6 +2111,7 @@ const animationUiController = window.createAnimationUiController({
     animationSortChipButtons,
     animationMapFilterBtn,
     animationStickerFilterBtn,
+    animationKeywordFilterInput: document.getElementById('animationKeywordFilterInput'),
     uploadAnimationBtn,
     generateAnimationKeywordsBtn,
     uploadAnimationInput,
@@ -2006,6 +2155,7 @@ const animationUiController = window.createAnimationUiController({
     openAnimationCardPopup,
     loadAvailableAnimations,
     generateMissingAnimationKeywords,
+    generateAnimationKeywordsForFilename,
     applyAnimationReset,
     stopAllActiveAnimations
   }
@@ -2027,6 +2177,39 @@ function updateAnimationVolumeLabel() {
     return;
   }
   animationSettingsController.updateAnimationVolumeLabel();
+}
+
+function bindMirroredRangeControl({
+  sourceInput,
+  sourceValue,
+  mirrorInput,
+  mirrorValue
+}) {
+  if (!sourceInput || !mirrorInput) return () => {};
+
+  const syncFromSource = () => {
+    mirrorInput.value = sourceInput.value;
+    if (mirrorValue) {
+      mirrorValue.textContent = sourceValue?.textContent || `${sourceInput.value}%`;
+    }
+  };
+
+  const syncToSource = () => {
+    if (sourceInput.value !== mirrorInput.value) {
+      sourceInput.value = mirrorInput.value;
+    }
+    sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    if (mirrorValue) {
+      mirrorValue.textContent = sourceValue?.textContent || `${mirrorInput.value}%`;
+    }
+  };
+
+  syncFromSource();
+  sourceInput.addEventListener('input', syncFromSource);
+  sourceInput.addEventListener('change', syncFromSource);
+  mirrorInput.addEventListener('input', syncToSource);
+  mirrorInput.addEventListener('change', syncToSource);
+  return syncFromSource;
 }
 
 function normalizeTriggerFromFilename(filename) {
@@ -2390,6 +2573,7 @@ function resetAnimationMappingNamesByFilename() {
       file: normalized.file || file,
       position: normalized.position || 'bottom-left',
       scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1,
+      volume: Number.isFinite(Number(normalized.volume)) ? Number(normalized.volume) : 100,
       keywords: Array.isArray(normalized.keywords) ? normalized.keywords : [],
       keywordTriggerEnabled: normalized.keywordTriggerEnabled === true,
       voiceKeywordTriggerEnabled: normalized.voiceKeywordTriggerEnabled === true
@@ -2416,6 +2600,7 @@ function resetAnimationScaleForAll() {
       file: normalized.file || file,
       position: normalized.position || 'bottom-left',
       scale: 1,
+      volume: Number.isFinite(Number(normalized.volume)) ? Number(normalized.volume) : 100,
       keywords: Array.isArray(normalized.keywords) ? normalized.keywords : [],
       keywordTriggerEnabled: normalized.keywordTriggerEnabled === true,
       voiceKeywordTriggerEnabled: normalized.voiceKeywordTriggerEnabled === true
@@ -2431,6 +2616,7 @@ function resetAnimationPositionForAll() {
       file: normalized.file || file,
       position: 'bottom-left',
       scale: Number.isFinite(Number(normalized.scale)) ? Number(normalized.scale) : 1,
+      volume: Number.isFinite(Number(normalized.volume)) ? Number(normalized.volume) : 100,
       keywords: Array.isArray(normalized.keywords) ? normalized.keywords : [],
       keywordTriggerEnabled: normalized.keywordTriggerEnabled === true,
       voiceKeywordTriggerEnabled: normalized.voiceKeywordTriggerEnabled === true
@@ -2637,13 +2823,10 @@ async function generateMissingAnimationKeywords({ resumeOnly = false } = {}) {
           file: current.file,
           position: current.position,
           scale: current.scale,
+          volume: Number.isFinite(Number(current.volume)) ? Number(current.volume) : 100,
           keywords,
-          keywordTriggerEnabled: typeof current.keywordTriggerEnabled === 'boolean'
-            ? current.keywordTriggerEnabled
-            : false,
-          voiceKeywordTriggerEnabled: typeof current.voiceKeywordTriggerEnabled === 'boolean'
-            ? current.voiceKeywordTriggerEnabled
-            : false
+          keywordTriggerEnabled: true,
+          voiceKeywordTriggerEnabled: true
         };
         updatedCount += 1;
         if (entry?.warning) warningCount += 1;
@@ -2673,6 +2856,69 @@ async function generateMissingAnimationKeywords({ resumeOnly = false } = {}) {
   animationKeywordGenerationPromise = runner;
   updateAnimationKeywordGenerateButton();
   return runner;
+}
+
+async function generateAnimationKeywordsForFilename(filename, { persist = true, quiet = false } = {}) {
+  const normalizedFilename = String(filename || '').trim();
+  if (!normalizedFilename) {
+    return { filename: '', keywords: [], warning: '' };
+  }
+
+  await syncAnimationMappingsFromFiles();
+  const mappingEntry = findAnimationMappingEntryByFile(normalizedFilename);
+  if (!mappingEntry) {
+    throw new Error('Animation mapping not found');
+  }
+
+  const response = await fetch('/api/media-keywords/generate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      items: [{ kind: 'animation', filename: normalizedFilename }]
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || 'Keyword generation failed');
+  }
+
+  const entry = Array.isArray(data.results)
+    ? data.results.find((result) => String(result?.filename || '').trim() === normalizedFilename)
+    : null;
+  const current = animationMappingsController.toAnimationMappingObject(mappingEntry.data, normalizedFilename);
+  const keywords = keywordTriggersController?.parseKeywordList
+    ? keywordTriggersController.parseKeywordList(entry?.keywords)
+    : (Array.isArray(entry?.keywords) ? entry.keywords : []);
+
+  if (persist && keywords.length > 0) {
+    animationMappings[mappingEntry.trigger] = {
+      file: current.file,
+      position: current.position,
+      scale: current.scale,
+      volume: Number.isFinite(Number(current.volume)) ? Number(current.volume) : 100,
+      keywords,
+      keywordTriggerEnabled: true,
+      voiceKeywordTriggerEnabled: true
+    };
+    await saveAnimationMappings();
+    renderAnimationMappings();
+  }
+
+  if (!quiet) {
+    updateStatus(
+      keywords.length > 0
+        ? `✓ Generated keywords for ${mappingEntry.trigger}`
+        : `No keyword suggestions were generated for ${mappingEntry.trigger}.`,
+      false,
+      keywords.length === 0
+    );
+  }
+
+  return {
+    filename: normalizedFilename,
+    keywords,
+    warning: String(entry?.warning || '')
+  };
 }
 
 function ensureAnimationVideoSource(video) {
@@ -2719,7 +2965,13 @@ if (animationViewerKeywordToggleBtn) {
   animationViewerKeywordToggleBtn.addEventListener('click', async () => {
     if (animationViewerKeywordToggleBtn.disabled) return;
     const { allEnabled } = getAnimationKeywordToggleState('viewer');
-    await setAllAnimationKeywordTriggers('viewer', !allEnabled);
+    const nextEnabled = !allEnabled;
+    const total = getAnimationKeywordToggleState('viewer').total;
+    const label = nextEnabled ? 'enable' : 'disable';
+    if (!window.confirm(`Do you want to ${label} per-item viewer chat for all ${total} animation(s) with keywords?`)) {
+      return;
+    }
+    await setAllAnimationKeywordTriggers('viewer', nextEnabled);
   });
 }
 
@@ -2727,7 +2979,25 @@ if (animationVoiceKeywordToggleBtn) {
   animationVoiceKeywordToggleBtn.addEventListener('click', async () => {
     if (animationVoiceKeywordToggleBtn.disabled) return;
     const { allEnabled } = getAnimationKeywordToggleState('voice');
-    await setAllAnimationKeywordTriggers('voice', !allEnabled);
+    const nextEnabled = !allEnabled;
+    const total = getAnimationKeywordToggleState('voice').total;
+    const label = nextEnabled ? 'enable' : 'disable';
+    if (!window.confirm(`Do you want to ${label} per-item voice triggers for all ${total} animation(s) with keywords?`)) {
+      return;
+    }
+    await setAllAnimationKeywordTriggers('voice', nextEnabled);
+  });
+}
+
+if (animationViewerChatGateBtn) {
+  animationViewerChatGateBtn.addEventListener('click', () => {
+    setViewerChatKeywordGate('animation', !viewerChatAnimationKeywordTriggersEnabled);
+  });
+}
+
+if (soundLibraryViewerChatGateBtn) {
+  soundLibraryViewerChatGateBtn.addEventListener('click', () => {
+    setViewerChatKeywordGate('sound', !viewerChatSoundKeywordTriggersEnabled);
   });
 }
 
@@ -2736,11 +3006,14 @@ const animationPopupName = document.getElementById('animationPopupName');
 const animationPopupPreviewVideo = document.getElementById('animationPopupPreviewVideo');
 const animationPopupPositionGrid = document.getElementById('animationPopupPositionGrid');
 const animationPopupScale = document.getElementById('animationPopupScale');
+const animationPopupVolume = document.getElementById('animationPopupVolume');
+const animationPopupVolumeValue = document.getElementById('animationPopupVolumeValue');
 const animationPopupGiftName = document.getElementById('animationPopupGiftName');
 const animationPopupGiftValue = document.getElementById('animationPopupGiftValue');
 const animationPopupKeywords = document.getElementById('animationPopupKeywords');
 const animationPopupKeywordEnabled = document.getElementById('animationPopupKeywordEnabled');
 const animationPopupVoiceKeywordEnabled = document.getElementById('animationPopupVoiceKeywordEnabled');
+const animationPopupGenerateKeywordsBtn = document.getElementById('animationPopupGenerateKeywordsBtn');
 const animationPopupSticker = document.getElementById('animationPopupSticker');
 const animationPopupStickerPicker = document.getElementById('animationPopupStickerPicker');
 const animationPopupMapFollow = document.getElementById('animationPopupMapFollow');
@@ -2786,11 +3059,14 @@ const animationPopupController = window.createAnimationPopupController({
     animationPopupPreviewVideo,
     animationPopupPositionGrid,
     animationPopupScale,
+    animationPopupVolume,
+    animationPopupVolumeValue,
     animationPopupGiftName,
     animationPopupGiftValue,
     animationPopupKeywords,
     animationPopupKeywordEnabled,
     animationPopupVoiceKeywordEnabled,
+    animationPopupGenerateKeywordsBtn,
     animationPopupSticker,
     animationPopupMapFollow,
     animationPopupMapShare,
@@ -2842,7 +3118,8 @@ const animationPopupController = window.createAnimationPopupController({
     removeGiftAnimationReferences,
     removeEventAnimationReferences,
     removeStickerAnimationReferences,
-    loadAvailableAnimations
+    loadAvailableAnimations,
+    generateAnimationKeywordsForFilename
   }
 });
 
@@ -2906,6 +3183,18 @@ const animationSettingsController = window.createAnimationSettingsController({
 });
 
 animationSettingsController.init();
+syncMicAnimationVolumeMirror = bindMirroredRangeControl({
+  sourceInput: animationVolumeSlider,
+  sourceValue: animationVolumeValue,
+  mirrorInput: micAnimationVolumeSlider,
+  mirrorValue: micAnimationVolumeValue
+});
+syncMicSoundAlertsVolumeMirror = bindMirroredRangeControl({
+  sourceInput: soundAlertsVolumeSlider,
+  sourceValue: soundAlertsVolumeValue,
+  mirrorInput: micSoundAlertsVolumeSlider,
+  mirrorValue: micSoundAlertsVolumeValue
+});
 
 async function triggerAnimation(trigger, platform, author, type = 'gift') {
   console.log(`🎯 triggerAnimation called: trigger="${trigger}", platform="${platform}", author="${author}"`);
