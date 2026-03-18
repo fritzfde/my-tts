@@ -39,14 +39,23 @@
       currentMapFilter: 'all',
       currentStickerFilter: 'all',
       currentKeywordFilter: '',
-      customOrder: []
+      customOrder: [],
+      durationSortProbeInFlight: new Set(),
+      durationSortProbeAttempted: new Set(),
+      durationSortProbeQueue: [],
+      durationSortProbeQueued: new Set(),
+      durationSortRerenderTimer: null
     };
     const SORT_DIRECTION_UP = 'asc';
     const SORT_DIRECTION_DOWN = 'desc';
+    const DURATION_SORT_PROBE_CONCURRENCY = 2;
+    const DURATION_SORT_RERENDER_DEBOUNCE_MS = 120;
+    const DURATION_BADGE_WARM_LIMIT = 36;
     const SORT_MODE_DEFAULT_DIRECTION = {
       name: SORT_DIRECTION_UP,
       gift: SORT_DIRECTION_UP,
-      value: SORT_DIRECTION_UP
+      value: SORT_DIRECTION_UP,
+      length: SORT_DIRECTION_DOWN
     };
     const MAP_FILTER_VALUES = ['all', 'mapped', 'unmapped'];
     const STICKER_FILTER_VALUES = ['all', 'with-sticker', 'without-sticker'];
@@ -114,12 +123,7 @@
     function formatDurationBadgeLabel(durationSeconds) {
       const numeric = Number(durationSeconds);
       if (!Number.isFinite(numeric) || numeric <= 0) return '';
-      if (numeric >= 60) {
-        const minutes = Math.floor(numeric / 60);
-        const seconds = Math.round(numeric % 60);
-        return `${minutes}:${String(seconds).padStart(2, '0')}`;
-      }
-      return `${Math.round(numeric)}s`;
+      return `${Math.ceil(numeric)}s`;
     }
 
     function updateDurationBadgeForVideo(video) {
@@ -176,7 +180,7 @@
     function normalizeSortMode(value) {
       const raw = String(value || '').trim().toLowerCase();
       if (raw === 'oldest' || raw === 'newest') return 'name';
-      if (raw === 'gift' || raw === 'value' || raw === 'name') return raw;
+      if (raw === 'gift' || raw === 'value' || raw === 'length' || raw === 'name') return raw;
       return 'name';
     }
 
@@ -249,7 +253,83 @@
         }
       }
 
+      if (sortMode === 'length') {
+        const byDuration = a.durationSortKey - b.durationSortKey;
+        if (byDuration !== 0) return byDuration;
+      }
+
       return a.trigger.localeCompare(b.trigger);
+    }
+
+    function getKnownDurationSecondsForAnimation(anim) {
+      const directDuration = Number(anim?.durationSeconds ?? anim?.duration ?? anim?.lengthSeconds ?? 0);
+      if (Number.isFinite(directDuration) && directDuration > 0) {
+        return directDuration;
+      }
+
+      if (typeof helpers.getCachedAnimationDurationSeconds === 'function') {
+        const cachedDuration = Number(helpers.getCachedAnimationDurationSeconds(anim?.filename || ''));
+        if (Number.isFinite(cachedDuration) && cachedDuration > 0) {
+          return cachedDuration;
+        }
+      }
+
+      return null;
+    }
+
+    function scheduleDurationMetadataRerender() {
+      if (stateRef.durationSortRerenderTimer) return;
+      stateRef.durationSortRerenderTimer = setTimeout(() => {
+        stateRef.durationSortRerenderTimer = null;
+        if (elements.animationMappingsList) {
+          renderAnimationMappings();
+        }
+      }, DURATION_SORT_RERENDER_DEBOUNCE_MS);
+    }
+
+    function drainDurationSortProbeQueue() {
+      while (
+        stateRef.durationSortProbeInFlight.size < DURATION_SORT_PROBE_CONCURRENCY
+        && stateRef.durationSortProbeQueue.length > 0
+      ) {
+        const filename = stateRef.durationSortProbeQueue.shift();
+        if (!filename) continue;
+        stateRef.durationSortProbeQueued.delete(filename);
+        stateRef.durationSortProbeInFlight.add(filename);
+
+        Promise.resolve(helpers.probeAnimationDurationSeconds(filename))
+          .catch((err) => {
+            console.debug('Animation duration sort probe failed:', err);
+            return null;
+          })
+          .finally(() => {
+            stateRef.durationSortProbeInFlight.delete(filename);
+            scheduleDurationMetadataRerender();
+            drainDurationSortProbeQueue();
+          });
+      }
+    }
+
+    function scheduleDurationSortProbe(filename) {
+      if (!filename) return;
+      if (stateRef.durationSortProbeInFlight.has(filename)) return;
+      if (stateRef.durationSortProbeAttempted.has(filename)) return;
+      if (stateRef.durationSortProbeQueued.has(filename)) return;
+      if (typeof helpers.probeAnimationDurationSeconds !== 'function') return;
+
+      stateRef.durationSortProbeAttempted.add(filename);
+      stateRef.durationSortProbeQueued.add(filename);
+      stateRef.durationSortProbeQueue.push(filename);
+      drainDurationSortProbeQueue();
+    }
+
+    function warmDurationMetadata(cards = []) {
+      const eagerAll = stateRef.currentSortMode === 'length';
+      const cardsToWarm = eagerAll ? cards : cards.slice(0, DURATION_BADGE_WARM_LIMIT);
+      cardsToWarm.forEach((card) => {
+        if (card.hasKnownDuration) return;
+        scheduleDurationSortProbe(card.anim?.filename || '');
+      });
     }
 
     function getEffectiveCustomOrder(cards) {
@@ -513,6 +593,7 @@
           anim?.mtimeMs ?? anim?.modifiedAtMs ?? anim?.birthtimeMs ?? anim?.createdAtMs ?? 0
         );
         const timestampMs = Number.isFinite(timestampMsRaw) ? timestampMsRaw : 0;
+        const knownDurationSeconds = getKnownDurationSecondsForAnimation(anim);
 
         const hasDefaultOnly = hasDefaultGift && !hasNumericGiftValue && !hasGiftNameMapping;
         let valueSortBucket = 5; // fallback: unmapped/other
@@ -540,6 +621,11 @@
           hasNumericGiftValue,
           hasGiftNameMapping,
           timestampMs,
+          durationSeconds: knownDurationSeconds,
+          hasKnownDuration: Number.isFinite(knownDurationSeconds) && knownDurationSeconds > 0,
+          durationSortKey: Number.isFinite(knownDurationSeconds) && knownDurationSeconds > 0
+            ? knownDurationSeconds
+            : Number.POSITIVE_INFINITY,
           hasStickerMapping,
           mappedAny,
           keywords: Array.isArray(mappedData.keywords) ? mappedData.keywords : []
@@ -591,7 +677,16 @@
         return true;
       });
 
+      warmDurationMetadata(filtered);
+
       filtered.sort((a, b) => {
+        if (sortMode === 'length') {
+          const durationKnownA = a.hasKnownDuration ? 0 : 1;
+          const durationKnownB = b.hasKnownDuration ? 0 : 1;
+          const byKnownDuration = durationKnownA - durationKnownB;
+          if (byKnownDuration !== 0) return byKnownDuration;
+        }
+
         if (sortMode === 'name' && hasManualCustomOrder) {
           const orderA = customOrderIndex.has(a.trigger)
             ? customOrderIndex.get(a.trigger)
@@ -658,7 +753,7 @@
         previousVideo.muted = true;
         previousVideo.loop = true;
         previousVideo.playsInline = true;
-        previousVideo.preload = 'metadata';
+        previousVideo.preload = 'none';
         if (!previousVideo.getAttribute('src') && previousVideo.dataset.src) {
           previousVideo.setAttribute('src', previousVideo.dataset.src);
         }
@@ -690,15 +785,18 @@
         return;
       }
 
-      const previousVideosByFile = captureRenderedThumbnailVideos(list);
       const activePlayback = getActivePlaybackMap();
+      const previewPlayback = typeof helpers.getCurrentAnimationPreviewPlayback === 'function'
+        ? helpers.getCurrentAnimationPreviewPlayback()
+        : null;
       list.innerHTML = cards.map((card) => {
         const { anim, trigger } = card;
         const safeTrigger = escapeAttribute(trigger);
         const safeFilename = escapeAttribute(anim.filename);
-        const fileUrl = typeof helpers.getAnimationFileUrl === 'function'
-          ? helpers.getAnimationFileUrl(anim.filename)
-          : `/animations/${encodeURIComponent(anim.filename)}`;
+        const thumbnailUrl = anim.thumbnailPath
+          || (typeof helpers.getAnimationThumbnailUrl === 'function'
+            ? helpers.getAnimationThumbnailUrl(anim.filename, anim?.mtimeMs ?? '')
+            : '');
         const visibilityBadges = typeof helpers.renderAnimationVisibilityBadges === 'function'
           ? helpers.renderAnimationVisibilityBadges(trigger)
           : '';
@@ -706,6 +804,12 @@
         const playbackState = activePlayback.get(trigger);
         const now = Date.now();
         const isPlaying = Boolean(playbackState && playbackState.endAtMs > now);
+        const isPreviewing = Boolean(
+          !isPlaying
+          && previewPlayback
+          && previewPlayback.trigger === trigger
+          && previewPlayback.endAtMs > now
+        );
         let playProgress = 0;
         let countdown = '';
 
@@ -717,19 +821,28 @@
           countdown = typeof helpers.formatAnimationPlaybackCountdown === 'function'
             ? helpers.formatAnimationPlaybackCountdown(remainingMs)
             : '';
+        } else if (isPreviewing) {
+          const remainingMs = Math.max(0, previewPlayback.endAtMs - now);
+          countdown = typeof helpers.formatAnimationPlaybackCountdown === 'function'
+            ? helpers.formatAnimationPlaybackCountdown(remainingMs)
+            : '';
         }
 
         return `
-    <div class="animation-mapping-card${isPlaying ? ' playing' : ''}" data-animation-trigger="${safeTrigger}" data-animation-file="${safeFilename}" style="--play-progress:${playProgress.toFixed(4)}" title="${safeTrigger}">
+    <div class="animation-mapping-card${isPlaying ? ' playing' : ''}${isPreviewing ? ' previewing' : ''}" data-animation-trigger="${safeTrigger}" data-animation-file="${safeFilename}" style="--play-progress:${playProgress.toFixed(4)}" title="${safeTrigger}">
       <div class="animation-card-media">
         <button class="secondary animation-thumb-btn preview-mapping-btn" data-trigger="${safeTrigger}" title="${safeTrigger}">
-          <video class="animation-thumb-video" src="${fileUrl}" data-src="${fileUrl}" data-file="${safeFilename}" muted loop playsinline preload="metadata"></video>
+          <div class="animation-thumb-poster" aria-hidden="true">
+            ${thumbnailUrl ? `<img class="animation-thumb-image" src="${escapeAttribute(thumbnailUrl)}" alt="${safeTrigger}" loading="lazy" decoding="async">` : ''}
+            <span class="animation-thumb-poster-filename">${safeFilename}</span>
+          </div>
           ${visibilityBadges}
-          <span class="animation-thumb-duration" aria-hidden="true"></span>
+          <span class="animation-thumb-duration${card.hasKnownDuration ? ' is-visible' : ''}" aria-hidden="true">${card.hasKnownDuration ? formatDurationBadgeLabel(card.durationSeconds) : ''}</span>
+          <span class="animation-thumb-play-icon" aria-hidden="true">▶</span>
           <span class="animation-thumb-stop-icon" aria-hidden="true">■</span>
-          <span class="animation-thumb-overlay">▶ Play</span>
+          <span class="animation-thumb-overlay">${isPreviewing ? '■ Stop preview' : '▶ Preview'}</span>
           <span class="animation-playing-state" aria-hidden="true">
-            <span class="animation-playing-label">Playing</span>
+            <span class="animation-playing-label">${isPreviewing ? 'Preview' : 'Playing'}</span>
             <span class="animation-playing-countdown">${countdown}</span>
             <span class="animation-playing-progress"><span class="animation-playing-progress-fill"></span></span>
           </span>
@@ -740,10 +853,6 @@
   `;
       }).join('');
 
-      restoreRenderedThumbnailVideos(list, previousVideosByFile);
-
-      wireThumbnailLazyLoading(list);
-      wireThumbnailHoverPlayback(list);
       wireCardDragSorting(list);
 
       list.querySelectorAll('.preview-mapping-btn').forEach((btn) => {
@@ -762,13 +871,8 @@
 
           const animationData = getAnimationMappings()[trigger];
           const filename = getAnimationFileFromMapping(animationData);
-
-          console.log(`🎬 Testing: ${trigger} → ${filename}`);
-          if (typeof callbacks.triggerAnimation === 'function') {
-            const success = await callbacks.triggerAnimation(trigger, 'manual', 'Test', 'test');
-            if (success) {
-              console.log(`✅ Triggered: ${trigger}`);
-            }
+          if (typeof callbacks.startAnimationFloatingPreview === 'function') {
+            callbacks.startAnimationFloatingPreview(trigger, filename);
           }
         });
       });

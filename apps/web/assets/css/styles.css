@@ -2842,12 +2842,45 @@ input[type="range"] {
   box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.6);
 }
 
-.animation-thumb-video {
+.animation-thumb-poster {
   width: 100%;
   height: 100%;
-  display: block;
-  object-fit: cover;
+  display: grid;
+  align-content: end;
+  padding: 10px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.22), transparent 42%),
+    radial-gradient(circle at 78% 28%, rgba(34, 197, 94, 0.14), transparent 36%),
+    linear-gradient(145deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.96));
   pointer-events: none;
+  position: relative;
+}
+
+.animation-thumb-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.animation-thumb-poster-filename {
+  display: inline-flex;
+  align-self: end;
+  position: relative;
+  z-index: 1;
+  max-width: 100%;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.82);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: rgba(226, 232, 240, 0.9);
+  font-size: 0.68rem;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .animation-thumb-duration {
@@ -2877,6 +2910,7 @@ input[type="range"] {
   opacity: 1;
 }
 
+.animation-thumb-play-icon,
 .animation-thumb-stop-icon {
   position: absolute;
   left: 50%;
@@ -2898,6 +2932,18 @@ input[type="range"] {
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.88);
   transition: opacity 180ms ease, transform 180ms ease, background 180ms ease, border-color 180ms ease;
+}
+
+.animation-thumb-play-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.84);
+  border: 1px solid rgba(96, 165, 250, 0.42);
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 800;
+  padding-left: 3px;
 }
 
 .animation-card-badges {
@@ -2976,9 +3022,30 @@ input[type="range"] {
   opacity: 0.08;
 }
 
+.animation-mapping-card.previewing .animation-thumb-overlay {
+  opacity: 0.1;
+}
+
 .animation-mapping-card.playing .animation-thumb-duration {
   opacity: 0;
   transform: translate(-50%, -50%) scale(0.9);
+}
+
+.animation-mapping-card:not(.playing):not(.previewing):hover .animation-thumb-duration,
+.animation-mapping-card:not(.playing):not(.previewing):focus-within .animation-thumb-duration {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.9);
+}
+
+.animation-mapping-card.previewing .animation-thumb-duration {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.9);
+}
+
+.animation-mapping-card:not(.playing):not(.previewing):hover .animation-thumb-play-icon,
+.animation-mapping-card:not(.playing):not(.previewing):focus-within .animation-thumb-play-icon {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 .animation-playing-state {
@@ -3037,10 +3104,25 @@ input[type="range"] {
   transform: translateY(0);
 }
 
-.animation-mapping-card.playing:hover .animation-thumb-stop-icon,
-.animation-mapping-card.playing:focus-within .animation-thumb-stop-icon {
+.animation-mapping-card.previewing .animation-playing-state {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.animation-mapping-card.playing .animation-thumb-stop-icon,
+.animation-mapping-card.playing:focus-within .animation-thumb-stop-icon,
+.animation-mapping-card.previewing .animation-thumb-stop-icon,
+.animation-mapping-card.previewing:focus-within .animation-thumb-stop-icon {
   opacity: 1;
   transform: translate(-50%, -50%) scale(1);
+}
+
+.animation-mapping-card.playing:hover .animation-thumb-stop-icon,
+.animation-mapping-card.playing:focus-within .animation-thumb-stop-icon,
+.animation-mapping-card.previewing:hover .animation-thumb-stop-icon,
+.animation-mapping-card.previewing:focus-within .animation-thumb-stop-icon {
+  background: rgba(15, 23, 42, 0.92);
+  border-color: rgba(248, 113, 113, 0.62);
 }
 
 .active-playback-floating-stack {

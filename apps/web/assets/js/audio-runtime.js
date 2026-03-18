@@ -18,7 +18,8 @@
       wakeLock: null,
       audioContext: null,
       audioUnlocked: false,
-      initialized: false
+      initialized: false,
+      unlockNotice: null
     };
 
     async function requestWakeLock() {
@@ -77,6 +78,7 @@
       const playPromise = silentAudio.play()
         .then(() => {
           state.audioUnlocked = true;
+          removeUnlockNotice();
           console.log('✓ Audio autoplay unlocked');
           return true;
         })
@@ -87,6 +89,43 @@
 
       ensureAudioContext();
       return playPromise;
+    }
+
+    function removeUnlockNotice() {
+      if (!state.unlockNotice) return;
+      try {
+        state.unlockNotice.remove();
+      } catch (err) {
+        console.debug('Audio unlock notice removal failed:', err);
+      }
+      state.unlockNotice = null;
+    }
+
+    function showUnlockNotice(message = '🔊 Click anywhere to enable TTS audio') {
+      if (!doc || !doc.body) return;
+
+      const notice = state.unlockNotice || doc.createElement('div');
+      notice.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #ff4444;
+        color: white;
+        padding: 15px 30px;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: bold;
+        z-index: 999999;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        cursor: pointer;
+      `;
+      notice.textContent = message;
+
+      if (!state.unlockNotice) {
+        state.unlockNotice = notice;
+        doc.body.appendChild(notice);
+      }
     }
 
     function initVisibilityHandler() {
@@ -106,46 +145,23 @@
 
     function initUnlockListeners() {
       if (!doc) return;
-      doc.addEventListener('click', unlockAudio);
-      doc.addEventListener('keydown', unlockAudio);
+      const handleUserUnlock = () => {
+        unlockAudio().then((unlocked) => {
+          if (unlocked) {
+            removeUnlockNotice();
+          }
+        }).catch(() => {});
+      };
+      doc.addEventListener('click', handleUserUnlock);
+      doc.addEventListener('keydown', handleUserUnlock);
     }
 
-    function initLoadUnlockNotice() {
+    function initInitialUnlockAttempt() {
       if (!win || !doc) return;
 
       win.addEventListener('load', () => {
         callSetTimeout(() => {
           unlockAudio();
-
-          if (state.audioUnlocked) return;
-
-          const notice = doc.createElement('div');
-          notice.style.cssText = `
-            position: fixed;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #ff4444;
-            color: white;
-            padding: 15px 30px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            z-index: 999999;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            cursor: pointer;
-          `;
-          notice.textContent = '🔊 Click anywhere to enable TTS audio';
-          doc.body.appendChild(notice);
-
-          const removeNotice = () => {
-            notice.remove();
-            doc.removeEventListener('click', removeNotice);
-            doc.removeEventListener('keydown', removeNotice);
-          };
-
-          doc.addEventListener('click', removeNotice);
-          doc.addEventListener('keydown', removeNotice);
         }, unlockNoticeDelayMs);
       });
     }
@@ -155,7 +171,7 @@
       state.initialized = true;
       initVisibilityHandler();
       initUnlockListeners();
-      initLoadUnlockNotice();
+      initInitialUnlockAttempt();
     }
 
     return {
@@ -164,6 +180,8 @@
       releaseWakeLock,
       ensureAudioContext,
       unlockAudio,
+      showUnlockNotice,
+      removeUnlockNotice,
       isAudioUnlocked: () => state.audioUnlocked,
       hasWakeLock: () => Boolean(state.wakeLock),
       init

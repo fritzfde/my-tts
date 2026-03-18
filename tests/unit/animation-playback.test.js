@@ -40,9 +40,11 @@ function createFakeDocument(cards = []) {
 function createFloatingPreviewElements() {
   const buttonListeners = new Map();
   const settingsListeners = new Map();
+  const videoListeners = new Map();
   return {
     container: {
       hidden: true,
+      dataset: {},
       classList: {
         add() {},
         remove() {}
@@ -85,6 +87,15 @@ function createFloatingPreviewElements() {
       dataset: {},
       src: '',
       paused: true,
+      muted: true,
+      loop: true,
+      addEventListener(event, handler) {
+        videoListeners.set(event, handler);
+      },
+      trigger(event) {
+        const handler = videoListeners.get(event);
+        if (handler) handler();
+      },
       setAttribute(name, value) {
         if (name === 'src') {
           this.src = value;
@@ -99,6 +110,9 @@ function createFloatingPreviewElements() {
         this.paused = true;
       },
       currentTime: 0
+    },
+    label: {
+      textContent: ''
     },
     name: {
       textContent: ''
@@ -208,6 +222,7 @@ test('animation playback: floating preview mirrors active playback and stops on 
     floatingPreviewButton: floating.button,
     floatingPreviewSettingsButton: floating.settingsButton,
     floatingPreviewVideo: floating.video,
+    floatingPreviewLabel: floating.label,
     floatingPreviewName: floating.name,
     floatingPreviewCountdown: floating.countdown,
     onOpenFloatingSettings: (trigger, filename) => openedSettings.push({ trigger, filename }),
@@ -218,6 +233,7 @@ test('animation playback: floating preview mirrors active playback and stops on 
   controller.markAnimationCardPlaying('alpha');
 
   assert.equal(floating.container.hidden, false);
+  assert.equal(floating.label.textContent, 'Playing now');
   assert.equal(floating.button.disabled, false);
   assert.equal(floating.settingsButton.disabled, false);
   assert.equal(floating.name.textContent, 'alpha');
@@ -233,4 +249,51 @@ test('animation playback: floating preview mirrors active playback and stops on 
   assert.equal(floating.container.hidden, true);
   assert.equal(stopButton.disabled, true);
   assert.equal(floating.settingsButton.disabled, true);
+});
+
+test('animation playback: shared floating preview plays locally and stops without live stop request', async () => {
+  const { factory } = loadControllerFactory('animation-playback.js', 'createAnimationPlaybackController');
+  const stopButton = { disabled: true };
+  const floating = createFloatingPreviewElements();
+  let stopEndpointCalls = 0;
+
+  const controller = factory({
+    documentRef: createFakeDocument([]),
+    fetchFn: async () => {
+      stopEndpointCalls += 1;
+      return { ok: true, json: async () => ({ clients: 1, obsClients: 1 }) };
+    },
+    getAnimationFileUrl: (name) => `/animations/${name}`,
+    getAnimationMappingByTrigger: (trigger) => (trigger === 'alpha' ? { file: 'a.mov' } : null),
+    getAnimationFileFromMapping: (mapping) => mapping.file,
+    isThumbnailInteractionActive: () => false,
+    playAnimationThumbnail: () => {},
+    stopAnimationThumbnail: () => {},
+    stopButton,
+    floatingPreviewContainer: floating.container,
+    floatingPreviewButton: floating.button,
+    floatingPreviewSettingsButton: floating.settingsButton,
+    floatingPreviewVideo: floating.video,
+    floatingPreviewLabel: floating.label,
+    floatingPreviewName: floating.name,
+    floatingPreviewCountdown: floating.countdown,
+    tickMs: 50
+  });
+
+  controller.cacheAnimationDuration('a.mov', 3);
+  const started = controller.startFloatingPreview('alpha', 'a.mov');
+
+  assert.equal(started, true);
+  assert.equal(floating.container.hidden, false);
+  assert.equal(floating.label.textContent, 'Preview');
+  assert.equal(floating.video.src, '/animations/a.mov');
+  assert.equal(floating.video.muted, false);
+  assert.equal(floating.video.loop, false);
+  assert.match(floating.countdown.textContent, /s$/);
+
+  await floating.button.trigger('click');
+
+  assert.equal(controller.getCurrentPreviewPlayback(), null);
+  assert.equal(floating.container.hidden, true);
+  assert.equal(stopEndpointCalls, 0);
 });

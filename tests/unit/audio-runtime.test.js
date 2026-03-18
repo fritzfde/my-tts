@@ -22,9 +22,24 @@ function loadControllerFactory(fileName, factoryName) {
 
 function createDocumentStub() {
   const listeners = new Map();
+  const appended = [];
   return {
     hidden: false,
-    body: { appendChild() {} },
+    body: {
+      appendChild(node) {
+        appended.push(node);
+      }
+    },
+    createElement() {
+      return {
+        style: {},
+        textContent: '',
+        removed: false,
+        remove() {
+          this.removed = true;
+        }
+      };
+    },
     addEventListener(type, cb) {
       listeners.set(type, cb);
     },
@@ -34,6 +49,9 @@ function createDocumentStub() {
     trigger(type) {
       const handler = listeners.get(type);
       if (handler) handler();
+    },
+    _appended() {
+      return appended;
     }
   };
 }
@@ -119,4 +137,38 @@ test('audio runtime: unlockAudio sets unlocked state and resumes audio context',
   assert.equal(unlocked, true);
   assert.equal(controller.isAudioUnlocked(), true);
   assert.equal(resumeCount, 1);
+});
+
+test('audio runtime: init does not show unlock notice on load, but manual prompt does', async () => {
+  const { factory } = loadControllerFactory('audio-runtime.js', 'createAudioRuntimeController');
+  const doc = createDocumentStub();
+  const loadListeners = new Map();
+
+  const controller = factory({
+    windowRef: {
+      addEventListener(event, handler) {
+        loadListeners.set(event, handler);
+      },
+      Audio: class {
+        play() {
+          return Promise.reject(new Error('blocked'));
+        }
+      }
+    },
+    documentRef: doc,
+    setTimeoutFn: (handler) => {
+      handler();
+      return 1;
+    },
+    clearTimeoutFn: () => {}
+  });
+
+  controller.init();
+  loadListeners.get('load')?.();
+
+  assert.equal(doc._appended().length, 0);
+
+  controller.showUnlockNotice('Unlock audio');
+  assert.equal(doc._appended().length, 1);
+  assert.equal(doc._appended()[0].textContent, 'Unlock audio');
 });

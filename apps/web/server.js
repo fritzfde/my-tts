@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const { createStorage } = require('./storage');
 const { isSafeSoundFilename } = require('./lib/sound-filenames');
 const { normalizeTikTokUsername, classifyTikTokConnectError } = require('./lib/tiktok-connect');
@@ -39,6 +40,11 @@ loadRootEnv();
 
 const TTS_SERVER_URL = (process.env.TTS_SERVER_URL || 'http://127.0.0.1:5000').replace(/\/+$/, '');
 const TTS_TIMEOUT_MS = 60000;
+const FFMPEG_BIN = String(process.env.FFMPEG_BIN || 'ffmpeg').trim() || 'ffmpeg';
+const FFPROBE_BIN = String(process.env.FFPROBE_BIN || 'ffprobe').trim() || 'ffprobe';
+const ANIMATION_THUMBNAIL_TIMESTAMP = String(process.env.ANIMATION_THUMBNAIL_TIMESTAMP || '00:00:00.4').trim() || '00:00:00.4';
+const ANIMATION_THUMBNAIL_SIZE = 320;
+const ANIMATION_THUMBNAIL_CACHE_VERSION = '2';
 const SUPPORTED_TTS_LANGUAGES = new Set([
   'en', 'de', 'es', 'fr', 'it', 'pt', 'pl', 'tr', 'ru', 'nl', 'cs', 'ar', 'zh-cn', 'ja', 'ko', 'hu', 'hi'
 ]);
@@ -55,6 +61,9 @@ const storage = createStorage({
 
 const { WebcastPushConnection } = require('tiktok-live-connector');
 const TIKTOK_SIGN_API_KEY = String(process.env.TIKTOK_SIGN_API_KEY || '').trim();
+const animationThumbnailJobs = new Map();
+const animationDurationJobs = new Map();
+const animationDurationCache = new Map();
 
 function normalizeTtsLanguage(language) {
   const normalized = String(language || '').trim().toLowerCase().replace('_', '-');
@@ -1190,6 +1199,231 @@ function ensureAnimationsDir() {
   return animationsDir;
 }
 
+function getAnimationThumbnailsDir() {
+  return path.join(__dirname, 'cache', 'animation-thumbnails');
+}
+
+function ensureAnimationThumbnailsDir() {
+  const thumbnailsDir = getAnimationThumbnailsDir();
+  if (!fs.existsSync(thumbnailsDir)) {
+    fs.mkdirSync(thumbnailsDir, { recursive: true });
+  }
+  return thumbnailsDir;
+}
+
+function getAnimationDurationCacheKey(filename, stats = null) {
+  const safeFilename = path.basename(String(filename || ''));
+  const versionToken = Number.isFinite(stats?.mtimeMs) ? Math.round(stats.mtimeMs) : '0';
+  return `${safeFilename}:${versionToken}`;
+}
+
+function getAnimationThumbnailFilename(filename) {
+  const base = path.basename(String(filename || ''), path.extname(String(filename || '')));
+  return `${base}.v${ANIMATION_THUMBNAIL_CACHE_VERSION}.jpg`;
+}
+
+function getAnimationThumbnailPath(filename) {
+  return path.join(ensureAnimationThumbnailsDir(), getAnimationThumbnailFilename(filename));
+}
+
+function sendAnimationThumbnailPlaceholder(res, filename) {
+  const label = path.basename(String(filename || ''), path.extname(String(filename || ''))) || 'animation';
+  const safeLabel = label
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${ANIMATION_THUMBNAIL_SIZE}" height="${ANIMATION_THUMBNAIL_SIZE}" viewBox="0 0 ${ANIMATION_THUMBNAIL_SIZE} ${ANIMATION_THUMBNAIL_SIZE}">
+      <defs>
+        <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#111827"/>
+          <stop offset="100%" stop-color="#1f2937"/>
+        </linearGradient>
+      </defs>
+      <rect width="${ANIMATION_THUMBNAIL_SIZE}" height="${ANIMATION_THUMBNAIL_SIZE}" fill="url(#bg)"/>
+      <circle cx="70" cy="72" r="52" fill="rgba(59,130,246,0.18)"/>
+      <circle cx="250" cy="94" r="38" fill="rgba(34,197,94,0.12)"/>
+      <rect x="20" y="242" width="280" height="42" rx="10" fill="rgba(15,23,42,0.72)" stroke="rgba(148,163,184,0.22)"/>
+      <text x="32" y="268" fill="#e5e7eb" font-size="18" font-family="system-ui, sans-serif">${safeLabel}</text>
+    </svg>
+  `.trim();
+
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(svg);
+}
+
+function generateAnimationThumbnail(sourcePath, thumbnailPath) {
+  return new Promise((resolve, reject) => {
+    const scaleFilter = `scale=${ANIMATION_THUMBNAIL_SIZE}:${ANIMATION_THUMBNAIL_SIZE}:force_original_aspect_ratio=increase,crop=${ANIMATION_THUMBNAIL_SIZE}:${ANIMATION_THUMBNAIL_SIZE},setsar=1`;
+    const ffmpegArgs = [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-y',
+      '-ss', ANIMATION_THUMBNAIL_TIMESTAMP,
+      '-i', sourcePath,
+      '-frames:v', '1',
+      '-vf', scaleFilter,
+      '-q:v', '3',
+      thumbnailPath
+    ];
+
+    const child = spawn(FFMPEG_BIN, ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (err) => {
+      reject(err);
+    });
+    child.on('close', (code) => {
+      if (code === 0 && fs.existsSync(thumbnailPath)) {
+        resolve(thumbnailPath);
+        return;
+      }
+      reject(new Error(stderr.trim() || `ffmpeg exited with code ${code}`));
+    });
+  });
+}
+
+function probeAnimationDurationSeconds(sourcePath) {
+  return new Promise((resolve, reject) => {
+    const ffprobeArgs = [
+      '-v', 'error',
+      '-show_entries', 'format=duration',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      sourcePath
+    ];
+
+    const child = spawn(FFPROBE_BIN, ffprobeArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (err) => {
+      reject(err);
+    });
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `ffprobe exited with code ${code}`));
+        return;
+      }
+
+      const numeric = Number.parseFloat(String(stdout || '').trim());
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        resolve(null);
+        return;
+      }
+      resolve(numeric);
+    });
+  });
+}
+
+async function ensureAnimationDurationSeconds(filename, sourceStats = null) {
+  const safeFilename = path.basename(String(filename || ''));
+  const ext = path.extname(safeFilename).toLowerCase();
+  if (!safeFilename || !ALLOWED_ANIMATION_EXTENSIONS.has(ext)) {
+    throw new Error('Invalid animation file type');
+  }
+
+  const animationsDir = ensureAnimationsDir();
+  const sourcePath = path.join(animationsDir, safeFilename);
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error('Animation file not found');
+  }
+
+  const stats = sourceStats || fs.statSync(sourcePath);
+  const cacheKey = getAnimationDurationCacheKey(safeFilename, stats);
+  if (animationDurationCache.has(cacheKey)) {
+    return animationDurationCache.get(cacheKey);
+  }
+
+  const existingJob = animationDurationJobs.get(cacheKey);
+  if (existingJob) {
+    return existingJob;
+  }
+
+  const job = probeAnimationDurationSeconds(sourcePath)
+    .then((durationSeconds) => {
+      if (Number.isFinite(durationSeconds) && durationSeconds > 0) {
+        animationDurationCache.set(cacheKey, durationSeconds);
+        return durationSeconds;
+      }
+      return null;
+    })
+    .finally(() => {
+      animationDurationJobs.delete(cacheKey);
+    });
+
+  animationDurationJobs.set(cacheKey, job);
+  return job;
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+  const safeLimit = Math.max(1, Number(limit) || 1);
+  const results = new Array(items.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(safeLimit, items.length || 0) }, () => worker())
+  );
+  return results;
+}
+
+async function ensureAnimationThumbnail(filename) {
+  const safeFilename = path.basename(String(filename || ''));
+  const ext = path.extname(safeFilename).toLowerCase();
+  if (!safeFilename || !ALLOWED_ANIMATION_EXTENSIONS.has(ext)) {
+    throw new Error('Invalid animation file type');
+  }
+
+  const animationsDir = ensureAnimationsDir();
+  const sourcePath = path.join(animationsDir, safeFilename);
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error('Animation file not found');
+  }
+
+  const thumbnailPath = getAnimationThumbnailPath(safeFilename);
+  const sourceStats = fs.statSync(sourcePath);
+  const thumbnailStats = fs.existsSync(thumbnailPath) ? fs.statSync(thumbnailPath) : null;
+  if (thumbnailStats && thumbnailStats.mtimeMs >= sourceStats.mtimeMs) {
+    return thumbnailPath;
+  }
+
+  if (fs.existsSync(thumbnailPath)) {
+    try {
+      fs.unlinkSync(thumbnailPath);
+    } catch (err) {
+      console.warn(`Failed to remove stale thumbnail for "${safeFilename}":`, err.message);
+    }
+  }
+
+  const existingJob = animationThumbnailJobs.get(safeFilename);
+  if (existingJob) {
+    return existingJob;
+  }
+
+  const job = generateAnimationThumbnail(sourcePath, thumbnailPath)
+    .finally(() => {
+      animationThumbnailJobs.delete(safeFilename);
+    });
+  animationThumbnailJobs.set(safeFilename, job);
+  return job;
+}
+
 function sanitizeFileBaseName(name) {
   return String(name || '')
     .trim()
@@ -1289,6 +1523,14 @@ app.delete('/api/animations/file/:filename', (req, res) => {
     }
 
     fs.unlinkSync(filePath);
+    const thumbnailPath = getAnimationThumbnailPath(filename);
+    if (fs.existsSync(thumbnailPath)) {
+      try {
+        fs.unlinkSync(thumbnailPath);
+      } catch (thumbErr) {
+        console.warn(`Failed to remove thumbnail for "${filename}":`, thumbErr.message);
+      }
+    }
     res.json({ success: true, filename });
   } catch (err) {
     console.error('Animation delete error:', err);
@@ -1296,8 +1538,20 @@ app.delete('/api/animations/file/:filename', (req, res) => {
   }
 });
 
+app.get('/api/animations/thumbnail/:filename', async (req, res) => {
+  const filename = path.basename(String(req.params.filename || ''));
+  try {
+    const thumbnailPath = await ensureAnimationThumbnail(filename);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(thumbnailPath);
+  } catch (err) {
+    console.warn(`Animation thumbnail fallback for "${filename}":`, err.message);
+    sendAnimationThumbnailPlaceholder(res, filename);
+  }
+});
+
 // List available animation files
-app.get('/api/animations/list', (req, res) => {
+app.get('/api/animations/list', async (req, res) => {
   const animationsDir = ensureAnimationsDir();
 
   try {
@@ -1319,12 +1573,33 @@ app.get('/api/animations/list', (req, res) => {
           filename: filename,
           name: filename.replace(/\.(mov|mp4|webm|avi)$/i, ''),
           path: `/animations/${filename}`,
+          thumbnailPath: `/api/animations/thumbnail/${encodeURIComponent(filename)}?thumb=${encodeURIComponent(ANIMATION_THUMBNAIL_CACHE_VERSION)}${Number.isFinite(stats?.mtimeMs) ? `&v=${Math.round(stats.mtimeMs)}` : ''}`,
           mtimeMs: Number.isFinite(stats?.mtimeMs) ? Math.round(stats.mtimeMs) : null,
-          birthtimeMs: Number.isFinite(stats?.birthtimeMs) ? Math.round(stats.birthtimeMs) : null
+          birthtimeMs: Number.isFinite(stats?.birthtimeMs) ? Math.round(stats.birthtimeMs) : null,
+          stats
         };
       });
 
-    res.json({ animations: files });
+    const animations = await mapWithConcurrency(files, 4, async (file) => {
+      let durationSeconds = null;
+      try {
+        durationSeconds = await ensureAnimationDurationSeconds(file.filename, file.stats);
+      } catch (err) {
+        console.warn(`Failed to probe animation duration for "${file.filename}":`, err.message);
+      }
+
+      return {
+        filename: file.filename,
+        name: file.name,
+        path: file.path,
+        thumbnailPath: file.thumbnailPath,
+        mtimeMs: file.mtimeMs,
+        birthtimeMs: file.birthtimeMs,
+        durationSeconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : null
+      };
+    });
+
+    res.json({ animations });
   } catch (err) {
     console.error('Error listing animations:', err);
     res.status(500).json({ error: 'Failed to list animations' });

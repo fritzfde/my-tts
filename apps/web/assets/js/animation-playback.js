@@ -13,6 +13,7 @@
     floatingPreviewButton = null,
     floatingPreviewSettingsButton = null,
     floatingPreviewVideo = null,
+    floatingPreviewLabel = null,
     floatingPreviewName = null,
     floatingPreviewCountdown = null,
     onOpenFloatingSettings = null,
@@ -26,7 +27,8 @@
       ticker: null,
       durationSecondsCache: new Map(),
       durationProbePromises: new Map(),
-      activePlayback: new Map()
+      activePlayback: new Map(),
+      previewPlayback: null
     };
 
     function cacheAnimationDuration(filename, durationSeconds) {
@@ -117,6 +119,12 @@
       return probePromise;
     }
 
+    function getCachedAnimationDurationSeconds(filename) {
+      if (!filename) return null;
+      const cached = Number(state.durationSecondsCache.get(filename));
+      return Number.isFinite(cached) && cached > 0 ? cached : null;
+    }
+
     function formatAnimationPlaybackCountdown(remainingMs) {
       const remainingSeconds = Math.max(0, remainingMs / 1000);
       if (remainingSeconds >= 60) {
@@ -163,6 +171,28 @@
       return next && !next.done ? next.value : null;
     }
 
+    function getCurrentPreviewPlayback() {
+      return state.previewPlayback || null;
+    }
+
+    function getCurrentFloatingPlayback() {
+      const livePlayback = getCurrentPlayback();
+      if (livePlayback) {
+        return { mode: 'live', playback: livePlayback };
+      }
+      if (state.previewPlayback) {
+        return { mode: 'preview', playback: state.previewPlayback };
+      }
+      return { mode: '', playback: null };
+    }
+
+    function clearPreviewPlayback({ resetVideo = true } = {}) {
+      state.previewPlayback = null;
+      if (resetVideo) {
+        pauseFloatingPreviewVideo();
+      }
+    }
+
     function pauseFloatingPreviewVideo() {
       if (!floatingPreviewVideo) return;
       try {
@@ -178,13 +208,16 @@
     function updateFloatingPreviewUi() {
       if (!floatingPreviewContainer || !floatingPreviewButton || !floatingPreviewVideo) return;
 
-      const playback = getCurrentPlayback();
+      const { mode, playback } = getCurrentFloatingPlayback();
       if (!playback) {
         floatingPreviewContainer.hidden = true;
         floatingPreviewContainer.classList?.remove?.('is-visible');
         floatingPreviewButton.disabled = true;
         if (floatingPreviewSettingsButton) {
           floatingPreviewSettingsButton.disabled = true;
+        }
+        if (floatingPreviewLabel) {
+          floatingPreviewLabel.textContent = 'Playing now';
         }
         if (floatingPreviewName) {
           floatingPreviewName.textContent = '';
@@ -202,14 +235,23 @@
         floatingPreviewVideo.setAttribute('src', nextSrc);
         floatingPreviewVideo.load();
       }
+      floatingPreviewVideo.loop = mode === 'live';
+      floatingPreviewVideo.muted = mode === 'live';
 
       floatingPreviewContainer.hidden = false;
       floatingPreviewContainer.classList?.add?.('is-visible');
+      floatingPreviewContainer.dataset.mode = mode;
       floatingPreviewButton.disabled = false;
       if (floatingPreviewSettingsButton) {
         floatingPreviewSettingsButton.disabled = false;
       }
-      floatingPreviewButton.title = 'Click to stop the current animation';
+      floatingPreviewButton.title = mode === 'preview'
+        ? 'Click to stop the preview'
+        : 'Click to stop the current animation';
+
+      if (floatingPreviewLabel) {
+        floatingPreviewLabel.textContent = mode === 'preview' ? 'Preview' : 'Playing now';
+      }
 
       if (floatingPreviewName) {
         floatingPreviewName.textContent = playback.trigger || '';
@@ -223,22 +265,39 @@
     }
 
     function bindFloatingPreviewEvents() {
+      if (floatingPreviewVideo) {
+        const dataset = floatingPreviewVideo.dataset || (floatingPreviewVideo.dataset = {});
+        if (dataset.boundPreviewEnded !== '1') {
+          dataset.boundPreviewEnded = '1';
+          floatingPreviewVideo.addEventListener('ended', () => {
+            if (!state.previewPlayback) return;
+            clearPreviewPlayback({ resetVideo: true });
+            updateAnimationPlaybackUi();
+          });
+        }
+      }
+
       if (!floatingPreviewButton) return;
       const dataset = floatingPreviewButton.dataset || (floatingPreviewButton.dataset = {});
       if (dataset.bound === '1') return;
       dataset.bound = '1';
       floatingPreviewButton.addEventListener('click', async (event) => {
         event?.preventDefault?.();
-        if (state.activePlayback.size === 0) return;
-        floatingPreviewButton.disabled = true;
-        await stopAllActiveAnimations();
+        if (state.activePlayback.size > 0) {
+          floatingPreviewButton.disabled = true;
+          await stopAllActiveAnimations();
+          return;
+        }
+        if (!state.previewPlayback) return;
+        clearPreviewPlayback({ resetVideo: true });
+        updateAnimationPlaybackUi();
       });
 
       if (floatingPreviewSettingsButton) {
         floatingPreviewSettingsButton.addEventListener('click', (event) => {
           event?.preventDefault?.();
           event?.stopPropagation?.();
-          const playback = getCurrentPlayback();
+          const { playback } = getCurrentFloatingPlayback();
           if (!playback || typeof onOpenFloatingSettings !== 'function') return;
           onOpenFloatingSettings(playback.trigger, playback.filename);
         });
@@ -259,6 +318,7 @@
         ? cachedDuration
         : fallbackSeconds;
 
+      clearPreviewPlayback({ resetVideo: false });
       state.activePlayback.clear();
       setAnimationCardPlaybackState(trigger, filename, initialDuration, startedAtMs);
 
@@ -275,6 +335,61 @@
         });
 
       return startedAtMs;
+    }
+
+    function startFloatingPreview(trigger, filename = '') {
+      const resolvedTrigger = String(trigger || '').trim();
+      if (!resolvedTrigger) return false;
+
+      const resolvedFilename = String(filename || '').trim()
+        || getAnimationFileFromMapping(getAnimationMappingByTrigger(resolvedTrigger));
+      if (!resolvedFilename) return false;
+
+      const existingPreview = state.previewPlayback;
+      if (existingPreview && existingPreview.trigger === resolvedTrigger && existingPreview.filename === resolvedFilename) {
+        clearPreviewPlayback({ resetVideo: true });
+        updateAnimationPlaybackUi();
+        return false;
+      }
+
+      const startedAtMs = Date.now();
+      const cachedDuration = state.durationSecondsCache.get(resolvedFilename);
+      const initialDuration = Number.isFinite(cachedDuration) && cachedDuration > 0
+        ? cachedDuration
+        : fallbackSeconds;
+
+      state.previewPlayback = {
+        trigger: resolvedTrigger,
+        filename: resolvedFilename,
+        startedAtMs,
+        endAtMs: startedAtMs + (initialDuration * 1000),
+        durationSeconds: initialDuration
+      };
+
+      if (!state.ticker) {
+        state.ticker = setInterval(() => {
+          updateAnimationPlaybackUi();
+        }, tickMs);
+      }
+      updateAnimationPlaybackUi();
+
+      getAnimationDurationSeconds(resolvedFilename)
+        .then((duration) => {
+          if (!Number.isFinite(duration) || duration <= 0) return;
+          if (!state.previewPlayback) return;
+          if (state.previewPlayback.startedAtMs !== startedAtMs) return;
+          state.previewPlayback = {
+            ...state.previewPlayback,
+            durationSeconds: duration,
+            endAtMs: startedAtMs + (duration * 1000)
+          };
+          updateAnimationPlaybackUi();
+        })
+        .catch((err) => {
+          console.debug('Animation preview duration probe failed:', err);
+        });
+
+      return true;
     }
 
     function clearAnimationCardPlaybackIfMatches(trigger, startedAtMs) {
@@ -339,23 +454,38 @@
           state.activePlayback.delete(trigger);
         }
       }
+      if (state.previewPlayback && state.previewPlayback.endAtMs <= now) {
+        clearPreviewPlayback({ resetVideo: true });
+      }
 
       const cards = doc.querySelectorAll('.animation-mapping-card[data-animation-trigger]');
       cards.forEach((card) => {
         const trigger = card.dataset.animationTrigger || '';
         const playback = state.activePlayback.get(trigger);
+        const preview = state.previewPlayback && state.previewPlayback.trigger === trigger
+          ? state.previewPlayback
+          : null;
         const countdownEl = card.querySelector('.animation-playing-countdown');
-        const button = card.querySelector('.preview-mapping-btn');
-        const video = card.querySelector('.animation-thumb-video');
+        const labelEl = card.querySelector('.animation-playing-label');
 
         if (!playback) {
           card.classList.remove('playing');
           card.style.removeProperty('--play-progress');
-          if (countdownEl) countdownEl.textContent = '';
-          if (isThumbnailInteractionActive(button)) {
-            playAnimationThumbnail(video);
+          if (preview) {
+            card.classList.add('previewing');
+            if (countdownEl) {
+              const remainingMs = Math.max(0, preview.endAtMs - now);
+              countdownEl.textContent = formatAnimationPlaybackCountdown(remainingMs);
+            }
+            if (labelEl) {
+              labelEl.textContent = 'Preview';
+            }
           } else {
-            stopAnimationThumbnail(video);
+            card.classList.remove('previewing');
+            if (countdownEl) countdownEl.textContent = '';
+            if (labelEl) {
+              labelEl.textContent = 'Playing';
+            }
           }
           return;
         }
@@ -366,12 +496,15 @@
         const progress = Math.min(1, elapsedMs / totalMs);
 
         card.classList.add('playing');
+        card.classList.remove('previewing');
         card.style.setProperty('--play-progress', progress.toFixed(4));
         if (countdownEl) countdownEl.textContent = formatAnimationPlaybackCountdown(remainingMs);
-        playAnimationThumbnail(video);
+        if (labelEl) {
+          labelEl.textContent = 'Playing';
+        }
       });
 
-      if (state.activePlayback.size === 0 && state.ticker) {
+      if (state.activePlayback.size === 0 && !state.previewPlayback && state.ticker) {
         clearInterval(state.ticker);
         state.ticker = null;
       }
@@ -388,6 +521,7 @@
       cacheAnimationDurationFromVideo,
       bindAnimationThumbnailDurationListener,
       probeAnimationDurationSeconds,
+      getCachedAnimationDurationSeconds,
       getAnimationDurationSeconds,
       formatAnimationPlaybackCountdown,
       setAnimationCardPlaybackState,
@@ -398,6 +532,13 @@
       updateAnimationPlaybackUi,
       updateFloatingPreviewUi,
       getCurrentPlayback
+      ,
+      getCurrentPreviewPlayback,
+      startFloatingPreview,
+      stopFloatingPreview: () => {
+        clearPreviewPlayback({ resetVideo: true });
+        updateAnimationPlaybackUi();
+      }
     };
   }
 

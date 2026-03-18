@@ -412,6 +412,7 @@
                         <button type="button" class="secondary animation-sort-chip" data-sort-mode="name">Custom</button>
                         <button type="button" class="secondary animation-sort-chip" data-sort-mode="gift">Gift name</button>
                         <button type="button" class="secondary animation-sort-chip" data-sort-mode="value">Gift value</button>
+                        <button type="button" class="secondary animation-sort-chip" data-sort-mode="length">Video length</button>
                     </div>
                     <div class="animation-filter-chips">
                         <button type="button" id="animationMapFilterBtn" class="secondary animation-filter-chip" data-filter-type="mapping">Mappings: All</button>
@@ -436,6 +437,7 @@
                         <option value="oldest">Sort: Oldest</option>
                         <option value="gift">Sort: Gift Name</option>
                         <option value="value">Sort: Gift Value</option>
+                        <option value="length">Sort: Video Length</option>
                     </select>
                     <select id="animationMapFilterSelect" tabindex="-1">
                         <option value="all">All Mappings</option>
@@ -864,7 +866,7 @@
             <div class="active-animation-floating-scrim"></div>
             <span class="active-floating-stop-icon" aria-hidden="true">■</span>
             <div class="active-animation-floating-meta">
-                <span class="active-animation-floating-label">Playing now</span>
+                <span id="activeAnimationFloatingLabel" class="active-animation-floating-label">Playing now</span>
                 <span id="activeAnimationFloatingName" class="active-animation-floating-name"></span>
                 <span id="activeAnimationFloatingCountdown" class="active-animation-floating-countdown"></span>
             </div>

@@ -148,6 +148,10 @@ function unlockAudio() {
   return audioRuntimeController?.unlockAudio();
 }
 
+function showAudioUnlockNotice(message) {
+  return audioRuntimeController?.showUnlockNotice?.(message);
+}
+
 // Platform-specific state
 let youtubeController = null;
 let tiktokController = null;
@@ -1169,6 +1173,7 @@ const voiceUiController = window.createVoiceUiController({
   loadVoices: () => loadVoices(),
   speakWithCustomVoice: (voiceId, text) => speakWithCustomVoice(voiceId, text),
   unlockAudio: () => unlockAudio(),
+  showAudioUnlockNotice: (message) => showAudioUnlockNotice(message),
   synth,
   resolveSystemVoice: (voiceId) => {
     if (!voiceId || !voiceId.startsWith('system-')) return null;
@@ -1282,6 +1287,7 @@ voiceTestControlsController = window.createVoiceTestControlsController({
     },
     speakWithCustomVoice: (voiceId, text) => speakWithCustomVoice(voiceId, text),
     unlockAudio: () => unlockAudio(),
+    showAudioUnlockNotice: (message) => showAudioUnlockNotice(message),
     addChatMessage: (...args) => addChatMessage(...args),
     getVoiceName: (voiceId) => getVoiceName(voiceId)
   },
@@ -1997,6 +2003,7 @@ const activeAnimationFloating = document.getElementById('activeAnimationFloating
 const activeAnimationFloatingBtn = document.getElementById('activeAnimationFloatingBtn');
 const activeAnimationFloatingSettingsBtn = document.getElementById('activeAnimationFloatingSettingsBtn');
 const activeAnimationFloatingVideo = document.getElementById('activeAnimationFloatingVideo');
+const activeAnimationFloatingLabel = document.getElementById('activeAnimationFloatingLabel');
 const activeAnimationFloatingName = document.getElementById('activeAnimationFloatingName');
 const activeAnimationFloatingCountdown = document.getElementById('activeAnimationFloatingCountdown');
 const animationResetPopup = document.getElementById('animationResetPopup');
@@ -2023,6 +2030,7 @@ const animationPlaybackController = window.createAnimationPlaybackController({
   floatingPreviewButton: activeAnimationFloatingBtn,
   floatingPreviewSettingsButton: activeAnimationFloatingSettingsBtn,
   floatingPreviewVideo: activeAnimationFloatingVideo,
+  floatingPreviewLabel: activeAnimationFloatingLabel,
   floatingPreviewName: activeAnimationFloatingName,
   floatingPreviewCountdown: activeAnimationFloatingCountdown,
   onOpenFloatingSettings: (trigger, filename) => openAnimationCardPopup(trigger, filename),
@@ -2136,6 +2144,7 @@ const animationUiController = window.createAnimationUiController({
   helpers: {
     escapeAttribute,
     getAnimationFileUrl,
+    getAnimationThumbnailUrl,
     getAnimationFileFromMapping,
     toAnimationMappingObject,
     normalizeTriggerFromFilename,
@@ -2145,13 +2154,15 @@ const animationUiController = window.createAnimationUiController({
     hasStickerForAnimationTrigger,
     renderAnimationVisibilityBadges,
     isDefaultGiftAnimationTrigger,
-    formatAnimationPlaybackCountdown
+    formatAnimationPlaybackCountdown,
+    getCurrentAnimationPreviewPlayback,
+    getCachedAnimationDurationSeconds,
+    probeAnimationDurationSeconds
   },
   callbacks: {
-    bindAnimationThumbnailDurationListener,
     updateStopAnimationButtonState,
     updateAnimationPlaybackUi,
-    triggerAnimation,
+    startAnimationFloatingPreview,
     openAnimationCardPopup,
     loadAvailableAnimations,
     generateMissingAnimationKeywords,
@@ -2237,6 +2248,12 @@ function getAnimationFileUrl(filename) {
   return `/animations/${encodeURIComponent(filename)}`;
 }
 
+function getAnimationThumbnailUrl(filename, cacheKey = '') {
+  const safeFilename = encodeURIComponent(String(filename || ''));
+  const suffix = cacheKey ? `?v=${encodeURIComponent(String(cacheKey))}` : '';
+  return `/api/animations/thumbnail/${safeFilename}${suffix}`;
+}
+
 function cacheAnimationDuration(filename, durationSeconds) {
   animationPlaybackController.cacheAnimationDuration(filename, durationSeconds);
 }
@@ -2255,6 +2272,18 @@ function probeAnimationDurationSeconds(filename) {
 
 function getAnimationDurationSeconds(filename) {
   return animationPlaybackController.getAnimationDurationSeconds(filename);
+}
+
+function getCachedAnimationDurationSeconds(filename) {
+  return animationPlaybackController.getCachedAnimationDurationSeconds(filename);
+}
+
+function getCurrentAnimationPreviewPlayback() {
+  return animationPlaybackController.getCurrentPreviewPlayback();
+}
+
+function startAnimationFloatingPreview(trigger, filename = '') {
+  return animationPlaybackController.startFloatingPreview(trigger, filename);
 }
 
 function formatAnimationPlaybackCountdown(remainingMs) {

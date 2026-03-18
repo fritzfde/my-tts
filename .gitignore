@@ -50,6 +50,7 @@ apps/web/sounds/*
 apps/web/data/*.sqlite
 apps/web/data/*.sqlite-shm
 apps/web/data/*.sqlite-wal
+apps/web/cache/
 playwright-report/
 test-results/
 copilot-instructions.md

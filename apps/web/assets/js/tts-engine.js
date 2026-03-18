@@ -3,6 +3,7 @@
     synth,
     ensureAudioContext,
     unlockAudio,
+    showAudioUnlockNotice,
     getReadOptions,
     getPlatformDefaultVoice,
     getUserVoice,
@@ -365,6 +366,9 @@
               }
               clearWatchdog();
               state.isSpeaking = false;
+              if (typeof showAudioUnlockNotice === 'function') {
+                showAudioUnlockNotice('🔊 Click anywhere to enable TTS audio');
+              }
               if (typeof unlockAudio === 'function') {
                 unlockAudio();
               }
