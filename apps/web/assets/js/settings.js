@@ -14,18 +14,47 @@
     return snapshot;
   }
 
-  function persistSettingsToServer() {
-    const payload = {
+  function buildSettingsPayload() {
+    return {
       scope: SETTINGS_SCOPE,
       settings: getSettingsSnapshot()
     };
+  }
+
+  function persistSettingsToServer({ keepalive = false, preferBeacon = false } = {}) {
+    const payload = buildSettingsPayload();
+    const body = JSON.stringify(payload);
+
+    if (preferBeacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+      try {
+        const blob = new Blob([body], { type: 'application/json' });
+        if (navigator.sendBeacon('/api/settings', blob)) {
+          return Promise.resolve();
+        }
+      } catch (err) {
+        console.warn('Failed to persist settings via sendBeacon, falling back to fetch:', err);
+      }
+    }
 
     return fetch('/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body,
+      keepalive
     }).catch((err) => {
       console.error('Failed to persist settings to server DB:', err);
+    });
+  }
+
+  function flushSettingsSync({ onUnload = false } = {}) {
+    if (!settingsSyncReady) return Promise.resolve();
+    if (settingsSyncTimer) {
+      clearTimeout(settingsSyncTimer);
+      settingsSyncTimer = null;
+    }
+    return persistSettingsToServer({
+      keepalive: onUnload,
+      preferBeacon: onUnload
     });
   }
 
@@ -79,6 +108,9 @@
     clear() {
       settingsMap.clear();
       scheduleSettingsSync();
+    },
+    flush(options) {
+      return flushSettingsSync(options);
     }
   };
 
@@ -95,6 +127,14 @@
 
   hydrateSettingsStoreFromServer();
   settingsSyncReady = true;
+
+  window.addEventListener('pagehide', () => {
+    void flushSettingsSync({ onUnload: true });
+  });
+
+  window.addEventListener('beforeunload', () => {
+    void flushSettingsSync({ onUnload: true });
+  });
 
   // Expose for app modules/scripts.
   window.SETTINGS_SCOPE = SETTINGS_SCOPE;

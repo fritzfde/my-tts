@@ -56,6 +56,15 @@ async function openDashboard(page, scope) {
   await expect(page.locator('h1')).toHaveText('Multi-Platform Chat TTS');
 }
 
+async function flushSettings(page) {
+  await page.evaluate(async () => {
+    if (window.settingsStore?.flush) {
+      await window.settingsStore.flush();
+    }
+  });
+  await page.waitForTimeout(100);
+}
+
 async function mockAnimationsApi(page, files = [{ name: 'smoke', filename: 'smoke.mov' }]) {
   await page.route('**/api/animations/list', async (route) => {
     await route.fulfill({
@@ -144,6 +153,7 @@ test.describe('Dashboard smoke suite', () => {
     });
 
     await page.waitForTimeout(SETTINGS_SYNC_WAIT_MS);
+    await flushSettings(page);
     await page.reload();
 
     await expect(page.locator('#channelUrl')).toHaveValue('https://www.youtube.com/@example');
@@ -340,6 +350,7 @@ test.describe('Dashboard smoke suite', () => {
     await expect(page.locator('.animation-mapping-card[data-animation-trigger="smoke-renamed"]')).toBeVisible();
 
     await page.waitForTimeout(SETTINGS_SYNC_WAIT_MS);
+    await flushSettings(page);
     await page.reload();
 
     await expect(page.locator('.animation-mapping-card[data-animation-trigger="smoke-renamed"]')).toBeVisible();
@@ -416,6 +427,7 @@ test.describe('Dashboard smoke suite', () => {
     await page.selectOption('#voiceSelectYouTube', 'cloned-alpha');
     await page.selectOption('#voiceSelectTikTok', 'cloned-bravo');
     await page.waitForTimeout(SETTINGS_SYNC_WAIT_MS);
+    await flushSettings(page);
     await page.reload();
 
     await expect(page.locator('#voiceSelectYouTube')).toHaveValue('cloned-alpha');
@@ -558,6 +570,7 @@ test.describe('Dashboard smoke suite', () => {
     await expect(firstCard.locator('.sound-library-card-summary')).toHaveText('2 keywords • Viewer chat • Voice');
 
     await page.waitForTimeout(SETTINGS_SYNC_WAIT_MS);
+    await flushSettings(page);
     await page.reload();
 
     const reloadedFirstCard = page.locator('.sound-library-card').first();
@@ -639,6 +652,7 @@ test.describe('Dashboard smoke suite', () => {
     await row.locator('select[data-field="animationTrigger"]').selectOption('anim-alpha');
 
     await page.waitForTimeout(SETTINGS_SYNC_WAIT_MS);
+    await flushSettings(page);
     await page.reload();
 
     const reloadedRow = page.locator('#soundAlertRulesBody tr').first();
