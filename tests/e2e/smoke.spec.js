@@ -291,43 +291,32 @@ test.describe('Dashboard smoke suite', () => {
     await expect(page.locator('#chatFeed')).toContainText('sent Rose');
   });
 
-  test('@smoke plays and stops an animation from card controls', async ({ page, request }) => {
+  test('@smoke starts and stops a shared animation preview from card controls', async ({ page, request }) => {
     const scope = uniqueScope('animation-play-stop');
     await seedScopeSettings(request, scope);
 
     await mockAnimationsApi(page);
 
-    await page.route('**/api/animations/trigger', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, clients: 1 })
-      });
-    });
-
-    await page.route('**/api/animations/stop', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ success: true, clients: 1, obsClients: 1 })
-      });
-    });
-
     await openDashboard(page, scope);
 
     const firstCard = page.locator('.animation-mapping-card').first();
     const firstPlayButton = firstCard.locator('.preview-mapping-btn');
+    const floatingPreview = page.locator('#activeAnimationFloating');
+    const floatingPreviewButton = page.locator('#activeAnimationFloatingBtn');
 
     await expect(firstCard).toBeVisible();
     await expect(page.locator('#stopAnimationBtn')).toBeDisabled();
 
     await firstPlayButton.click();
-    await expect(page.locator('#stopAnimationBtn')).toBeEnabled();
-    await expect(firstCard).toHaveClass(/playing/);
-
-    await page.click('#stopAnimationBtn');
     await expect(page.locator('#stopAnimationBtn')).toBeDisabled();
-    await expect(firstCard).not.toHaveClass(/playing/);
+    await expect(firstCard).toHaveClass(/previewing/);
+    await expect(floatingPreview).toBeVisible();
+    await expect(page.locator('#activeAnimationFloatingLabel')).toHaveText('Preview');
+
+    await floatingPreviewButton.click();
+    await expect(page.locator('#stopAnimationBtn')).toBeDisabled();
+    await expect(firstCard).not.toHaveClass(/previewing/);
+    await expect(floatingPreview).toBeHidden();
   });
 
   test('@smoke persists animation mapping edits after reload', async ({ page, request }) => {
@@ -499,26 +488,32 @@ test.describe('Dashboard smoke suite', () => {
 
     const firstCard = page.locator('.animation-mapping-card').nth(0);
     const secondCard = page.locator('.animation-mapping-card').nth(1);
+    const floatingPreview = page.locator('#activeAnimationFloating');
+    const floatingPreviewButton = page.locator('#activeAnimationFloatingBtn');
     await expect(firstCard).toBeVisible();
     await expect(secondCard).toBeVisible();
 
     await firstCard.locator('.preview-mapping-btn').click();
-    await expect(firstCard).toHaveClass(/playing/);
-    await expect(secondCard).not.toHaveClass(/playing/);
-    await expect(page.locator('#stopAnimationBtn')).toBeEnabled();
+    await expect(firstCard).toHaveClass(/previewing/);
+    await expect(secondCard).not.toHaveClass(/previewing/);
+    await expect(page.locator('#stopAnimationBtn')).toBeDisabled();
+    await expect(floatingPreview).toBeVisible();
+    await expect(page.locator('#activeAnimationFloatingName')).toHaveText('one');
 
     await secondCard.locator('.preview-mapping-btn').click();
-    await expect(secondCard).toHaveClass(/playing/);
-    await expect(firstCard).not.toHaveClass(/playing/);
-    await expect(page.locator('#stopAnimationBtn')).toBeEnabled();
-
-    await page.click('#stopAnimationBtn');
+    await expect(secondCard).toHaveClass(/previewing/);
+    await expect(firstCard).not.toHaveClass(/previewing/);
     await expect(page.locator('#stopAnimationBtn')).toBeDisabled();
-    await expect(firstCard).not.toHaveClass(/playing/);
-    await expect(secondCard).not.toHaveClass(/playing/);
+    await expect(page.locator('#activeAnimationFloatingName')).toHaveText('two');
 
-    expect(triggerCalls).toBeGreaterThanOrEqual(2);
-    expect(stopCalls).toBe(1);
+    await floatingPreviewButton.click();
+    await expect(page.locator('#stopAnimationBtn')).toBeDisabled();
+    await expect(firstCard).not.toHaveClass(/previewing/);
+    await expect(secondCard).not.toHaveClass(/previewing/);
+    await expect(floatingPreview).toBeHidden();
+
+    expect(triggerCalls).toBe(0);
+    expect(stopCalls).toBe(0);
   });
 
   test('@smoke persists sound settings popup edits after reload', async ({ page, request }) => {
