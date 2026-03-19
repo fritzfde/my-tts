@@ -74,7 +74,8 @@ function createButton() {
     },
     trigger(type) {
       const handler = listeners.get(type);
-      if (handler) handler();
+      if (handler) return handler();
+      return undefined;
     }
   };
 }
@@ -89,7 +90,8 @@ function createInput() {
     },
     trigger(type) {
       const handler = listeners.get(type);
-      if (handler) handler();
+      if (handler) return handler();
+      return undefined;
     }
   };
 }
@@ -136,15 +138,15 @@ function createSuggestionContainer() {
       html = String(value || '');
       playButtons.length = 0;
       settingsButtons.length = 0;
-      const pattern = /<button class="(mic-suggestion-play-btn|mic-suggestion-settings-btn)" type="button" data-kind="([^"]+)"(?: data-trigger="([^"]*)")?(?: data-filename="([^"]*)")?(?: data-sound-path="([^"]*)")?[^>]*>/g;
+      const pattern = /<button class="(mic-suggestion-play-btn|mic-suggestion-settings-btn)"[^>]*>/g;
       let match;
       while ((match = pattern.exec(html))) {
-        const attrs = {
-          'data-kind': match[2] || '',
-          'data-trigger': match[3] || '',
-          'data-filename': match[4] || '',
-          'data-sound-path': match[5] || ''
-        };
+        const rawTag = match[0];
+        const attrs = {};
+        rawTag.replace(/([a-zA-Z0-9_-]+)="([^"]*)"/g, (_, name, attrValue) => {
+          attrs[name] = attrValue;
+          return '';
+        });
         const listeners = new Map();
         const node = {
           addEventListener(type, cb) {
@@ -155,7 +157,8 @@ function createSuggestionContainer() {
           },
           trigger(type) {
             const handler = listeners.get(type);
-            if (handler) handler();
+            if (handler) return handler();
+            return undefined;
           }
         };
         if (match[1] === 'mic-suggestion-settings-btn') {
@@ -848,7 +851,8 @@ test('mic trigger: suggestion mode previews matches without auto-triggering', as
   const suggestionsNode = createSuggestionContainer();
   const transcriptCalls = [];
   const previewCalls = [];
-  const suggestedAnimations = [];
+  const previewedAnimations = [];
+  const stoppedAnimations = [];
   const openedAnimationSettings = [];
 
   class WebSocketMock {
@@ -963,7 +967,15 @@ test('mic trigger: suggestion mode previews matches without auto-triggering', as
         filename: 'alpha.mov'
       }),
       triggerSuggestedAnimation: ({ trigger }) => {
-        suggestedAnimations.push(trigger);
+        previewedAnimations.push(`trigger:${trigger}`);
+        return true;
+      },
+      previewSuggestedAnimation: ({ trigger }) => {
+        previewedAnimations.push(trigger);
+        return true;
+      },
+      stopSuggestedAnimation: async ({ trigger }) => {
+        stoppedAnimations.push(trigger);
         return true;
       },
       openSuggestedAnimationSettings: ({ trigger, filename }) => {
@@ -1021,8 +1033,169 @@ test('mic trigger: suggestion mode previews matches without auto-triggering', as
   assert.equal(settingsButtons.length, 1);
   settingsButtons[0].trigger('click');
   assert.deepEqual(openedAnimationSettings, [{ trigger: 'alpha', filename: 'alpha.mov' }]);
-  suggestionButtons[0].trigger('click');
-
-  assert.deepEqual(suggestedAnimations, ['alpha']);
+  await suggestionButtons[0].trigger('click');
+  assert.deepEqual(previewedAnimations, ['alpha']);
   assert.equal(suggestionsNode.hidden, false);
+  assert.match(suggestionsNode.innerHTML, /Active now/);
+
+  const activeButtons = suggestionsNode.querySelectorAll('.mic-suggestion-play-btn');
+  await activeButtons[0].trigger('click');
+  assert.deepEqual(stoppedAnimations, ['alpha']);
+  assert.equal(suggestionsNode.hidden, true);
+});
+
+test('mic trigger: auto-triggered animation suggestion can be stopped from the dock and removed', async () => {
+  const { factory } = loadControllerFactory('mic-trigger.js', 'createMicTriggerController');
+  const settingsStore = createSettingsStore({
+    mic_asr_base_url: 'http://127.0.0.1:9001/',
+    mic_asr_language: 'en',
+    mic_trigger_mode: 'auto'
+  });
+
+  const button = createButton();
+  const buttonLabel = { textContent: '' };
+  const input = createInput();
+  const languageSelect = createInput();
+  const status = createStatusElement();
+  const transcriptDock = {
+    hidden: true,
+    classList: createClassList()
+  };
+  const modeButton = createButton();
+  const closeButton = createButton();
+  const meterFill = { style: { width: '0%' } };
+  const meterValue = { textContent: '' };
+  const transcriptNode = createHtmlElement();
+  const matchesNode = createHtmlElement();
+  const suggestionsNode = createSuggestionContainer();
+  let stopCalls = 0;
+
+  class WebSocketMock {
+    static OPEN = 1;
+    static CLOSED = 3;
+    constructor(url) {
+      this.url = url;
+      this.readyState = 0;
+      WebSocketMock.instances.push(this);
+    }
+    send() {}
+    close() {
+      this.readyState = WebSocketMock.CLOSED;
+      if (typeof this.onclose === 'function') this.onclose();
+    }
+    triggerOpen() {
+      this.readyState = WebSocketMock.OPEN;
+      if (typeof this.onopen === 'function') this.onopen();
+    }
+    triggerMessage(payload) {
+      if (typeof this.onmessage === 'function') {
+        this.onmessage({ data: JSON.stringify(payload) });
+      }
+    }
+  }
+  WebSocketMock.instances = [];
+
+  class AudioContextMock {
+    constructor() {
+      this.sampleRate = 16000;
+      this.destination = {};
+      this.audioWorklet = null;
+    }
+    async resume() {}
+    createMediaStreamSource() {
+      return { connect() {}, disconnect() {} };
+    }
+    createGain() {
+      return { gain: { value: 1 }, connect() {}, disconnect() {} };
+    }
+    createScriptProcessor() {
+      return { connect() {}, disconnect() {}, onaudioprocess: null };
+    }
+    async close() {}
+  }
+
+  const controller = factory({
+    settingsStore,
+    elements: {
+      micTriggerToggleBtn: button,
+      micTriggerToggleLabel: buttonLabel,
+      micTriggerStatus: status,
+      micAsrBaseUrlInput: input,
+      micAsrLanguageSelect: languageSelect,
+      micTranscriptDock: transcriptDock,
+      micTranscriptDockCloseBtn: closeButton,
+      micTriggerModeBtn: modeButton,
+      micTriggerMeterFill: meterFill,
+      micTriggerMeterValue: meterValue,
+      micTriggerTranscript: transcriptNode,
+      micTriggerMatches: matchesNode,
+      micTriggerSuggestions: suggestionsNode
+    },
+    callbacks: {
+      onTranscript: () => ({
+        animationMatch: { trigger: 'alpha', keyword: 'very very low' },
+        soundMatch: null,
+        animationMatches: [{ keyword: 'very very low' }],
+        soundMatches: []
+      }),
+      previewTranscript: () => ({
+        animationMatch: { trigger: 'alpha', score: 1, keyword: 'very very low' },
+        soundMatch: null,
+        animationMatches: [{ keyword: 'very very low', score: 1 }],
+        soundMatches: []
+      }),
+      getAnimationSuggestion: ({ trigger }) => ({
+        trigger,
+        label: 'Alpha animation',
+        fileUrl: '/animations/alpha.mov',
+        filename: 'alpha.mov'
+      }),
+      stopSuggestedAnimation: async () => {
+        stopCalls += 1;
+        return true;
+      }
+    },
+    fetchFn: async () => ({
+      ok: true,
+      json: async () => ({ whisper_model: 'base' })
+    }),
+    navigatorRef: {
+      mediaDevices: {
+        async getUserMedia() {
+          return {
+            getTracks() {
+              return [{ stop() {} }];
+            }
+          };
+        }
+      }
+    },
+    WebSocketRef: WebSocketMock,
+    AudioContextRef: AudioContextMock
+  });
+
+  controller.init();
+  await controller.startListening();
+  WebSocketMock.instances[0].triggerOpen();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  controller.state.listeningStartedAtMs = Date.now() - 3000;
+
+  WebSocketMock.instances[0].triggerMessage({
+    type: 'final',
+    transcript_text: 'we flew very very low',
+    language: 'en',
+    asr_confidence: 0.91,
+    segment_duration_ms: 2200,
+    asr_latency_ms: 180
+  });
+
+  assert.equal(suggestionsNode.hidden, false);
+  const suggestionButtons = suggestionsNode.querySelectorAll('.mic-suggestion-play-btn');
+  assert.equal(suggestionButtons.length, 1);
+  assert.equal(suggestionButtons[0].getAttribute('data-active'), 'true');
+
+  await suggestionButtons[0].trigger('click');
+
+  assert.equal(stopCalls, 1);
+  assert.equal(suggestionsNode.hidden, true);
 });

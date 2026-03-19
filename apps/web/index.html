@@ -790,7 +790,20 @@
                     <input type="range" id="micVoiceMatchThreshold" min="60" max="95" value="74">
                     <span id="micVoiceMatchThresholdValue" class="mic-trigger-threshold-value">74%</span>
                 </div>
+                <div class="mic-trigger-slider-stack mic-transcript-dock-slider-stack">
+                    <div class="mic-trigger-slider-row">
+                        <label for="micAnimationVolumeSlider">Animations volume</label>
+                        <input type="range" id="micAnimationVolumeSlider" min="0" max="100" value="100">
+                        <span id="micAnimationVolumeValue" class="mic-trigger-slider-value">100%</span>
+                    </div>
+                    <div class="mic-trigger-slider-row">
+                        <label for="micSoundAlertsVolumeSlider">Sound alerts volume</label>
+                        <input type="range" id="micSoundAlertsVolumeSlider" min="0" max="100" value="100">
+                        <span id="micSoundAlertsVolumeValue" class="mic-trigger-slider-value">100%</span>
+                    </div>
+                </div>
                 <button id="micTriggerModeBtn" class="secondary mic-trigger-mode-btn is-auto" type="button" title="Automatic triggering is enabled for sounds and animations. Click to switch to suggestion mode.">Auto trigger</button>
+                <button id="micTranscriptDockCloseBtn" class="secondary mic-transcript-dock-close-btn" type="button" title="Collapse and clear current transcript cards" aria-label="Collapse and clear current transcript cards">✕</button>
             </div>
         </div>
         <div class="mic-transcript-dock-controls">
@@ -801,18 +814,6 @@
                 </div>
                 <div class="mic-trigger-meter">
                     <div id="micTriggerMeterFill" class="mic-trigger-meter-fill"></div>
-                </div>
-            </div>
-            <div class="mic-trigger-slider-stack">
-                <div class="mic-trigger-slider-row">
-                    <label for="micAnimationVolumeSlider">Animations volume</label>
-                    <input type="range" id="micAnimationVolumeSlider" min="0" max="100" value="100">
-                    <span id="micAnimationVolumeValue" class="mic-trigger-slider-value">100%</span>
-                </div>
-                <div class="mic-trigger-slider-row">
-                    <label for="micSoundAlertsVolumeSlider">Sound alerts volume</label>
-                    <input type="range" id="micSoundAlertsVolumeSlider" min="0" max="100" value="100">
-                    <span id="micSoundAlertsVolumeValue" class="mic-trigger-slider-value">100%</span>
                 </div>
             </div>
         </div>

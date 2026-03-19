@@ -70,8 +70,50 @@
       enrollmentCountdownRemaining: 0,
       triggerMode: 'auto',
       suggestions: [],
-      suggestionClearTimer: null
+      suggestionClearTimer: null,
+      dockDismissed: false
     };
+
+    function removeSuggestionById(id = '') {
+      const normalizedId = String(id || '').trim();
+      if (!normalizedId) return;
+      state.suggestions = state.suggestions.filter((entry) => String(entry?.id || '').trim() !== normalizedId);
+      renderSuggestions();
+      scheduleSuggestionClear(getSuggestionClearDelay(state.suggestions.length));
+    }
+
+    function updateSuggestionById(id = '', updater = null) {
+      const normalizedId = String(id || '').trim();
+      if (!normalizedId || typeof updater !== 'function') return;
+      state.suggestions = state.suggestions.map((entry) => {
+        if (String(entry?.id || '').trim() !== normalizedId) return entry;
+        return updater(entry);
+      });
+    }
+
+    function markSuggestionActive(id = '', extra = {}) {
+      const normalizedId = String(id || '').trim();
+      if (!normalizedId) return;
+      updateSuggestionById(normalizedId, (entry) => ({
+        ...entry,
+        active: true,
+        dismissOnStop: extra.dismissOnStop === true,
+        localPreview: extra.localPreview === true
+      }));
+      renderSuggestions();
+      scheduleSuggestionClear(Math.max(MIC_SUGGESTION_INTERACTION_CLEAR_MS, getSuggestionClearDelay(state.suggestions.length)));
+    }
+
+    function clearDockSurface() {
+      clearSuggestionTimer();
+      state.suggestions = [];
+      state.dockDismissed = true;
+      renderSuggestions();
+      renderTranscript('', null, {});
+      if (state.listening) {
+        setStatus(`Mic active • ${isSuggestionMode() ? 'suggestion mode' : 'listening'} (lang=${describeLanguage()})`, 'listening');
+      }
+    }
 
     function normalizeBaseUrl(value) {
       const raw = String(value || '').trim();
@@ -487,6 +529,8 @@
 
       if (transcriptEl) {
         if (!preserveTranscript) {
+          state.dockDismissed = false;
+          updateDockVisibility();
           transcriptEl.classList?.toggle('mic-trigger-transcript-ignored', Boolean(ignoredReason));
           if (!transcript) {
             transcriptEl.classList?.add('mic-trigger-transcript-empty');
@@ -652,7 +696,7 @@
       if (!dock) return;
       const visible = state.listening || state.connecting;
       dock.hidden = !visible;
-      dock.classList?.toggle('is-visible', visible);
+      dock.classList?.toggle('is-visible', visible && !state.dockDismissed);
     }
 
     function clearSuggestionTimer() {
@@ -662,7 +706,7 @@
       }
     }
 
-    function buildSuggestions(triggerResult = null) {
+    function buildSuggestions(triggerResult = null, { active = false, dismissOnStop = false } = {}) {
       const suggestions = [];
 
       const animationTrigger = String(triggerResult?.animationMatch?.trigger || '').trim();
@@ -672,6 +716,9 @@
           suggestions.push({
             id: `animation:${animationTrigger}`,
             kind: 'animation',
+            active,
+            dismissOnStop,
+            localPreview: false,
             trigger: String(animationSuggestion.trigger || animationTrigger).trim() || animationTrigger,
             label: String(animationSuggestion.label || animationTrigger).trim() || animationTrigger,
             keyword: String(triggerResult?.animationMatch?.keyword || '').trim(),
@@ -688,6 +735,9 @@
           suggestions.push({
             id: `sound:${soundPath}`,
             kind: 'sound',
+            active,
+            dismissOnStop,
+            localPreview: false,
             soundPath: String(soundSuggestion.soundPath || soundPath).trim() || soundPath,
             label: String(soundSuggestion.label || fileNameFromPath(soundPath)).trim() || fileNameFromPath(soundPath),
             keyword: String(triggerResult?.soundMatch?.keyword || '').trim()
@@ -703,7 +753,7 @@
       const dock = elements.micTranscriptDock || null;
       if (!container) return;
 
-      const visible = Boolean(state.listening && isSuggestionMode() && state.suggestions.length > 0);
+      const visible = Boolean(state.listening && state.suggestions.length > 0);
       container.hidden = !visible;
       dock?.classList?.toggle('has-suggestions', visible);
 
@@ -716,18 +766,25 @@
         const safeLabel = escapeHtml(suggestion.label);
         const safeKeyword = escapeHtml(suggestion.keyword || '');
         const safeKind = escapeHtml(suggestion.kind === 'sound' ? 'Sound alert' : 'Animation');
+        const safeSuggestionId = escapeHtml(suggestion.id || '');
+        const isActive = suggestion.active === true;
+        const safeStatus = isActive ? '<span class="mic-suggestion-status">Active now</span>' : '';
 
         if (suggestion.kind === 'animation') {
           const safeFileUrl = escapeHtml(suggestion.fileUrl || '');
           const safeTrigger = escapeHtml(suggestion.trigger || '');
           const safeFilename = escapeHtml(suggestion.filename || '');
+          const shouldMutePreview = !isActive || suggestion.localPreview === true;
+          const shouldLoopPreview = !isActive;
           return `
-            <div class="mic-suggestion-card media" data-kind="animation">
-              <button class="mic-suggestion-play-btn" type="button" data-kind="animation" data-trigger="${safeTrigger}" title="Play suggested animation">
-                <video class="mic-suggestion-video" src="${safeFileUrl}" autoplay muted loop playsinline preload="metadata"></video>
+            <div class="mic-suggestion-card media${isActive ? ' is-active' : ''}" data-kind="animation">
+              <button class="mic-suggestion-play-btn" type="button" data-kind="animation" data-suggestion-id="${safeSuggestionId}" data-active="${isActive ? 'true' : 'false'}" data-trigger="${safeTrigger}" title="${isActive ? 'Stop current animation' : 'Play suggested animation'}">
+                <video class="mic-suggestion-video" src="${safeFileUrl}" autoplay ${shouldMutePreview ? 'muted ' : ''}${shouldLoopPreview ? 'loop ' : ''}playsinline preload="metadata"></video>
+                <span class="mic-suggestion-stop-hint" aria-hidden="true">■ Stop</span>
                 <span class="mic-suggestion-body">
                   <span class="mic-suggestion-type">${safeKind}</span>
                   <span class="mic-suggestion-name">${safeLabel}</span>
+                  ${safeStatus}
                   ${safeKeyword ? `<span class="mic-suggestion-keyword">Keyword: ${safeKeyword}</span>` : ''}
                 </span>
               </button>
@@ -738,14 +795,16 @@
 
         const safeSoundPath = escapeHtml(suggestion.soundPath || '');
         return `
-          <div class="mic-suggestion-card sound" data-kind="sound">
-            <button class="mic-suggestion-play-btn" type="button" data-kind="sound" data-sound-path="${safeSoundPath}" title="Play suggested sound alert">
+          <div class="mic-suggestion-card sound${isActive ? ' is-active' : ''}" data-kind="sound">
+            <button class="mic-suggestion-play-btn" type="button" data-kind="sound" data-suggestion-id="${safeSuggestionId}" data-active="${isActive ? 'true' : 'false'}" data-sound-path="${safeSoundPath}" title="${isActive ? 'Stop current sound alert' : 'Play suggested sound alert'}">
               <span class="mic-suggestion-sound-visual" aria-hidden="true">
                 <span class="mic-suggestion-sound-icon">🔊</span>
               </span>
+              <span class="mic-suggestion-stop-hint" aria-hidden="true">■ Stop</span>
               <span class="mic-suggestion-body">
                 <span class="mic-suggestion-type">${safeKind}</span>
                 <span class="mic-suggestion-name">${safeLabel}</span>
+                ${safeStatus}
                 ${safeKeyword ? `<span class="mic-suggestion-keyword">Keyword: ${safeKeyword}</span>` : ''}
               </span>
             </button>
@@ -756,26 +815,84 @@
 
       if (typeof container.querySelectorAll !== 'function') return;
       container.querySelectorAll('.mic-suggestion-play-btn').forEach((button) => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', async () => {
           const kind = String(button.getAttribute('data-kind') || '').trim();
+          const suggestionId = String(button.getAttribute('data-suggestion-id') || '').trim();
+          const isActive = String(button.getAttribute('data-active') || '').trim() === 'true';
+          const suggestion = state.suggestions.find((entry) => String(entry?.id || '').trim() === suggestionId) || null;
           if (kind === 'animation') {
             const trigger = String(button.getAttribute('data-trigger') || '').trim();
             if (trigger) {
-              const triggered = callbacks.triggerSuggestedAnimation?.({ trigger });
-              if (triggered !== false) {
-                setStatus(`Mic suggestion triggered animation: ${trigger}`, 'online');
+              if (isActive) {
+                const stopped = await callbacks.stopSuggestedAnimation?.({
+                  trigger,
+                  previewOnly: suggestion?.localPreview === true
+                });
+                if (stopped !== false) {
+                  setStatus(
+                    suggestion?.localPreview
+                      ? `Stopped mic animation preview: ${trigger}`
+                      : `Stopped mic animation: ${trigger}`,
+                    'online'
+                  );
+                  if (suggestion?.dismissOnStop) {
+                    removeSuggestionById(suggestionId);
+                  } else {
+                    updateSuggestionById(suggestionId, (entry) => ({
+                      ...entry,
+                      active: false,
+                      localPreview: false
+                    }));
+                    renderSuggestions();
+                    scheduleSuggestionClear(getSuggestionClearDelay(state.suggestions.length));
+                  }
+                }
+              } else {
+                if (isSuggestionMode()) {
+                  const previewed = await (callbacks.previewSuggestedAnimation?.({
+                    trigger,
+                    filename: suggestion?.filename || ''
+                  }) ?? callbacks.triggerSuggestedAnimation?.({ trigger }));
+                  if (previewed !== false) {
+                    markSuggestionActive(suggestionId, { dismissOnStop: true, localPreview: true });
+                    setStatus(`Mic suggestion previewing animation: ${trigger}`, 'online');
+                  }
+                } else {
+                  const triggered = await callbacks.triggerSuggestedAnimation?.({ trigger });
+                  if (triggered !== false) {
+                    setStatus(`Mic suggestion triggered animation: ${trigger}`, 'online');
+                    markSuggestionActive(suggestionId, { dismissOnStop: false, localPreview: false });
+                  }
+                }
               }
             }
           } else if (kind === 'sound') {
             const soundPathValue = String(button.getAttribute('data-sound-path') || '').trim();
             if (soundPathValue) {
-              const triggered = callbacks.triggerSuggestedSound?.({ soundPath: soundPathValue });
-              if (triggered !== false) {
-                setStatus(`Mic suggestion triggered sound: ${fileNameFromPath(soundPathValue)}`, 'online');
+              if (isActive) {
+                const stopped = await callbacks.stopSuggestedSound?.({ soundPath: soundPathValue });
+                if (stopped !== false) {
+                  setStatus(`Stopped mic sound: ${fileNameFromPath(soundPathValue)}`, 'online');
+                  if (suggestion?.dismissOnStop) {
+                    removeSuggestionById(suggestionId);
+                  } else {
+                    updateSuggestionById(suggestionId, (entry) => ({
+                      ...entry,
+                      active: false
+                    }));
+                    renderSuggestions();
+                    scheduleSuggestionClear(getSuggestionClearDelay(state.suggestions.length));
+                  }
+                }
+              } else {
+                const triggered = await callbacks.triggerSuggestedSound?.({ soundPath: soundPathValue });
+                if (triggered !== false) {
+                  setStatus(`Mic suggestion triggered sound: ${fileNameFromPath(soundPathValue)}`, 'online');
+                  markSuggestionActive(suggestionId, { dismissOnStop: false, localPreview: false });
+                }
               }
             }
           }
-          scheduleSuggestionClear(Math.max(MIC_SUGGESTION_INTERACTION_CLEAR_MS, getSuggestionClearDelay(state.suggestions.length)));
         });
       });
       container.querySelectorAll('.mic-suggestion-settings-btn').forEach((button) => {
@@ -817,13 +934,29 @@
 
     function setSuggestions(suggestions = [], { preserveExisting = false } = {}) {
       const nextSuggestions = Array.isArray(suggestions) ? suggestions.filter(Boolean) : [];
+      if (nextSuggestions.length > 0) {
+        state.dockDismissed = false;
+      }
       if (preserveExisting && nextSuggestions.length === 0 && state.suggestions.length > 0) {
         renderSuggestions();
         scheduleSuggestionClear(getSuggestionClearDelay(state.suggestions.length));
         return;
       }
       clearSuggestionTimer();
-      state.suggestions = nextSuggestions;
+      if (preserveExisting && state.suggestions.length > 0 && nextSuggestions.length > 0) {
+        const merged = new Map();
+        state.suggestions.forEach((entry) => {
+          if (!entry?.id) return;
+          merged.set(entry.id, entry);
+        });
+        nextSuggestions.forEach((entry) => {
+          if (!entry?.id) return;
+          merged.set(entry.id, entry);
+        });
+        state.suggestions = Array.from(merged.values());
+      } else {
+        state.suggestions = nextSuggestions;
+      }
       renderSuggestions();
       scheduleSuggestionClear(getSuggestionClearDelay(state.suggestions.length));
     }
@@ -1549,7 +1682,7 @@
                   setSuggestions(buildSuggestions(triggerResult || previewResult || null));
                   setStatus(`Mic suggestion ready (${describeLanguage()}): ${text.slice(0, 90)}`, 'listening');
                 } else {
-                  setSuggestions([]);
+                  setSuggestions(buildSuggestions(triggerResult || previewResult || null, { active: true, dismissOnStop: true }), { preserveExisting: true });
                   setStatus(`Mic active • heard (${describeLanguage()}): ${text.slice(0, 90)}`, 'listening');
                 }
                 return;
@@ -1597,7 +1730,7 @@
               setSuggestions(buildSuggestions(triggerResult || previewResult || null), { preserveExisting: true });
               setStatus(`Mic suggestion ready (${describeLanguage()}): ${text.slice(0, 90)}`, 'listening');
             } else {
-              setSuggestions([]);
+              setSuggestions(buildSuggestions(triggerResult || previewResult || null, { active: true, dismissOnStop: true }), { preserveExisting: true });
               setStatus(`Mic active • heard (${describeLanguage()}): ${text.slice(0, 90)}`, 'listening');
             }
             return;
@@ -1636,7 +1769,7 @@
                 setSuggestions(buildSuggestions(triggerResult || previewResult || null));
                 setStatus(`Mic suggestion ready (${describeLanguage()}): ${text.slice(0, 90)}`, 'listening');
               } else {
-                setSuggestions([]);
+                setSuggestions(buildSuggestions(triggerResult || previewResult || null, { active: true, dismissOnStop: true }), { preserveExisting: true });
                 setStatus(`Mic active • heard (${describeLanguage()}): ${text.slice(0, 90)}`, 'listening');
               }
               return;
@@ -1754,6 +1887,10 @@
 
       elements.micVoiceClearBtn?.addEventListener('click', () => {
         clearVoiceProfile();
+      });
+
+      elements.micTranscriptDockCloseBtn?.addEventListener('click', () => {
+        clearDockSurface();
       });
     }
 

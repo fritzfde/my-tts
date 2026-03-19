@@ -1697,6 +1697,7 @@ micTriggerController = window.createMicTriggerController({
     micAsrBaseUrlInput,
     micAsrLanguageSelect,
     micTranscriptDock,
+    micTranscriptDockCloseBtn: document.getElementById('micTranscriptDockCloseBtn'),
     micTriggerModeBtn,
     micVoiceGateEnabled: document.getElementById('micVoiceGateEnabled'),
     micVoiceEnrollBtn: document.getElementById('micVoiceEnrollBtn'),
@@ -1748,9 +1749,30 @@ micTriggerController = window.createMicTriggerController({
       if (!trigger) return false;
       return triggerAnimation(trigger, 'mic', 'host-mic', 'keyword') === true;
     },
+    previewSuggestedAnimation: ({ trigger, filename }) => {
+      if (!trigger) return false;
+      return startAnimationFloatingPreview(trigger, filename || '') === true;
+    },
     triggerSuggestedSound: ({ soundPath }) => {
       if (!soundPath) return false;
       return playAlertSound(soundPath) === true;
+    },
+    stopSuggestedAnimation: async ({ previewOnly = false } = {}) => {
+      if (previewOnly) {
+        stopAnimationFloatingPreview();
+        return true;
+      }
+      const hadPreview = Boolean(getCurrentAnimationPreviewPlayback());
+      const stoppedLive = await stopAllActiveAnimations();
+      if (stoppedLive || hadPreview) {
+        stopAnimationFloatingPreview();
+        return true;
+      }
+      return false;
+    },
+    stopSuggestedSound: async () => {
+      soundAlertsController?.stopActiveAudio?.();
+      return true;
     },
     openSuggestedAnimationSettings: ({ trigger, filename }) => {
       if (!trigger) return false;
@@ -2284,6 +2306,10 @@ function getCurrentAnimationPreviewPlayback() {
 
 function startAnimationFloatingPreview(trigger, filename = '') {
   return animationPlaybackController.startFloatingPreview(trigger, filename);
+}
+
+function stopAnimationFloatingPreview() {
+  animationPlaybackController.stopFloatingPreview();
 }
 
 function formatAnimationPlaybackCountdown(remainingMs) {

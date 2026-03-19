@@ -837,14 +837,11 @@
             <span class="animation-thumb-poster-filename">${safeFilename}</span>
           </div>
           ${visibilityBadges}
-          <span class="animation-thumb-duration${card.hasKnownDuration ? ' is-visible' : ''}" aria-hidden="true">${card.hasKnownDuration ? formatDurationBadgeLabel(card.durationSeconds) : ''}</span>
-          <span class="animation-thumb-play-icon" aria-hidden="true">▶</span>
-          <span class="animation-thumb-stop-icon" aria-hidden="true">■</span>
-          <span class="animation-thumb-overlay">${isPreviewing ? '■ Stop preview' : '▶ Preview'}</span>
-          <span class="animation-playing-state" aria-hidden="true">
-            <span class="animation-playing-label">${isPreviewing ? 'Preview' : 'Playing'}</span>
+          <span class="animation-thumb-center-badge${card.hasKnownDuration ? ' has-duration' : ''}" aria-hidden="true">
+            <span class="animation-thumb-duration${card.hasKnownDuration ? ' is-visible' : ''}">${card.hasKnownDuration ? formatDurationBadgeLabel(card.durationSeconds) : ''}</span>
             <span class="animation-playing-countdown">${countdown}</span>
-            <span class="animation-playing-progress"><span class="animation-playing-progress-fill"></span></span>
+            <span class="animation-thumb-play-icon">▶</span>
+            <span class="animation-thumb-stop-icon">■</span>
           </span>
         </button>
         <button class="animation-gear-btn open-animation-settings-btn" data-trigger="${safeTrigger}" data-file="${safeFilename}" title="Settings">⚙️</button>
