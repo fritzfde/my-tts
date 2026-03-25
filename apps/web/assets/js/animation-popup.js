@@ -134,12 +134,20 @@
       button.textContent = loading ? 'Generating...' : '✨ Generate';
     }
 
+    function setAnimationPopupPlayLiveButtonState(loading = false) {
+      const button = elements.animationPopupPlayLiveBtn || null;
+      if (!button) return;
+      button.disabled = Boolean(loading) || !stateRef.activePopup;
+      button.textContent = loading ? 'Playing...' : 'Play Live';
+    }
+
     function closeAnimationCardPopup() {
       if (!elements.animationCardPopup) return;
       stopAnimationPopupPreview();
       elements.animationCardPopup.style.display = 'none';
       stateRef.activePopup = null;
       setAnimationPopupGenerateButtonState(false);
+      setAnimationPopupPlayLiveButtonState(false);
     }
 
     function closeAnimationGeneralSettingsPopup() {
@@ -212,6 +220,7 @@
       setAnimationPopupPreview(filename);
       elements.animationCardPopup.style.display = 'flex';
       setAnimationPopupGenerateButtonState(false);
+      setAnimationPopupPlayLiveButtonState(false);
       elements.animationPopupName.focus();
     }
 
@@ -430,6 +439,21 @@
       return runner;
     }
 
+    async function handlePopupPlayLive() {
+      if (!stateRef.activePopup || typeof callbacks.playLiveAnimation !== 'function') return;
+      const trigger = String(stateRef.activePopup.trigger || '').trim();
+      if (!trigger) return;
+      setAnimationPopupPlayLiveButtonState(true);
+      try {
+        await callbacks.playLiveAnimation({
+          trigger,
+          filename: stateRef.activePopup.filename || ''
+        });
+      } finally {
+        setAnimationPopupPlayLiveButtonState(false);
+      }
+    }
+
     function attachEvents() {
       if (stateRef.eventsAttached) return;
       stateRef.eventsAttached = true;
@@ -484,6 +508,11 @@
       if (elements.animationPopupGenerateKeywordsBtn) {
         elements.animationPopupGenerateKeywordsBtn.addEventListener('click', async () => {
           await handleGenerateKeywords();
+        });
+      }
+      if (elements.animationPopupPlayLiveBtn) {
+        elements.animationPopupPlayLiveBtn.addEventListener('click', async () => {
+          await handlePopupPlayLive();
         });
       }
       if (elements.animationPopupDeleteBtn) {

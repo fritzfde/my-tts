@@ -469,6 +469,7 @@
       const container = elements.activeSoundFloating || null;
       const button = elements.activeSoundFloatingBtn || null;
       const settingsBtn = elements.activeSoundFloatingSettingsBtn || null;
+      const modeEl = elements.activeSoundFloatingMode || null;
       const nameEl = elements.activeSoundFloatingName || null;
       const countdownEl = elements.activeSoundFloatingCountdown || null;
       const progressFill = elements.activeSoundFloatingProgressFill || null;
@@ -482,6 +483,7 @@
         container.classList?.remove?.('is-visible');
         button.disabled = true;
         if (settingsBtn) settingsBtn.disabled = true;
+        if (modeEl) modeEl.textContent = 'LIVE';
         nameEl.textContent = '';
         countdownEl.textContent = '';
         progressFill.style.transform = 'scaleX(0)';
@@ -500,6 +502,7 @@
       container.classList?.add?.('is-visible');
       button.disabled = false;
       if (settingsBtn) settingsBtn.disabled = false;
+      if (modeEl) modeEl.textContent = 'LIVE';
       button.title = 'Click to stop the current sound';
       nameEl.textContent = getSoundLabel(soundPath);
       countdownEl.textContent = hasDuration ? formatSoundCountdown(remaining) : 'Playing';

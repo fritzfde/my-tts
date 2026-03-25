@@ -360,6 +360,7 @@
         stopAllAnimations();
 
         const filename = mapping.file || mapping;
+        const encodedFilename = encodeURIComponent(String(filename || ''));
         const position = mapping.position || globalPosition;
         const scale = mapping.scale || globalScale;
         const volume = Number.isFinite(Number(mapping.volume)) ? Number(mapping.volume) : 100;
@@ -378,7 +379,7 @@
         video.crossOrigin = 'anonymous';
         // Do not forcibly set muted here; allow audio to play when possible
         video.muted = false;
-        video.src = `/animations/${filename}`;
+        video.src = `/animations/${encodedFilename}`;
 
         const canvas = document.createElement('canvas');
         canvas.className = 'animation';
@@ -467,7 +468,14 @@
         }, { once: true });
 
         video.addEventListener('error', (err) => {
-            console.error('Video error', err);
+            const mediaError = video.error || null;
+            console.error('Video error', {
+                filename,
+                src: video.currentSrc || video.src || '',
+                code: mediaError ? mediaError.code : '',
+                message: mediaError ? mediaError.message || '' : '',
+                error: err
+            });
             try { if (tracked.audioSource) tracked.audioSource.disconnect(); } catch (e) {}
             try { if (tracked.gainNode) tracked.gainNode.disconnect(); } catch (e) {}
             try { if (tracked.cancelChroma) tracked.cancelChroma(); } catch (e) {}

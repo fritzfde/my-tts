@@ -866,10 +866,8 @@
             return;
           }
 
-          const animationData = getAnimationMappings()[trigger];
-          const filename = getAnimationFileFromMapping(animationData);
-          if (typeof callbacks.startAnimationFloatingPreview === 'function') {
-            callbacks.startAnimationFloatingPreview(trigger, filename);
+          if (typeof callbacks.triggerAnimation === 'function') {
+            await callbacks.triggerAnimation(trigger);
           }
         });
       });

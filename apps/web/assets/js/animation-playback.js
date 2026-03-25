@@ -13,6 +13,7 @@
     floatingPreviewButton = null,
     floatingPreviewSettingsButton = null,
     floatingPreviewVideo = null,
+    floatingPreviewMode = null,
     floatingPreviewLabel = null,
     floatingPreviewName = null,
     floatingPreviewCountdown = null,
@@ -216,6 +217,9 @@
         if (floatingPreviewSettingsButton) {
           floatingPreviewSettingsButton.disabled = true;
         }
+        if (floatingPreviewMode) {
+          floatingPreviewMode.textContent = 'LIVE';
+        }
         if (floatingPreviewLabel) {
           floatingPreviewLabel.textContent = 'Playing now';
         }
@@ -249,6 +253,9 @@
         ? 'Click to stop the preview'
         : 'Click to stop the current animation';
 
+      if (floatingPreviewMode) {
+        floatingPreviewMode.textContent = mode === 'preview' ? 'PREVIEW' : 'LIVE';
+      }
       if (floatingPreviewLabel) {
         floatingPreviewLabel.textContent = mode === 'preview' ? 'Preview' : 'Playing now';
       }

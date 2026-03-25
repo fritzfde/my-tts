@@ -347,7 +347,7 @@ test('animation ui: clicking an active card stops playback instead of retriggeri
   assert.equal(previewCalls, 0);
 });
 
-test('animation ui: clicking an idle card starts shared floating preview', async () => {
+test('animation ui: clicking an idle card triggers live playback', async () => {
   const { factory } = loadControllerFactory('animation-ui.js', 'createAnimationUiController');
   const previewListeners = new Map();
   const card = {
@@ -373,7 +373,7 @@ test('animation ui: clicking an idle card starts shared floating preview', async
     }
   };
 
-  const previewCalls = [];
+  const triggerCalls = [];
   const controller = factory({
     settingsStore: createSettingsStore(),
     elements: {
@@ -393,8 +393,8 @@ test('animation ui: clicking an idle card starts shared floating preview', async
       getCurrentAnimationPreviewPlayback: () => null
     },
     callbacks: {
-      startAnimationFloatingPreview: (trigger, filename) => {
-        previewCalls.push({ trigger, filename });
+      triggerAnimation: async (trigger) => {
+        triggerCalls.push(trigger);
         return true;
       }
     }
@@ -406,7 +406,7 @@ test('animation ui: clicking an idle card starts shared floating preview', async
     currentTarget: previewButton
   });
 
-  assert.deepEqual(previewCalls, [{ trigger: 'alpha', filename: 'alpha.mov' }]);
+  assert.deepEqual(triggerCalls, ['alpha']);
 });
 
 test('animation ui: rendered duration badge shows rounded-up total seconds', async () => {

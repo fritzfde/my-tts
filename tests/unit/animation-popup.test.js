@@ -468,3 +468,66 @@ test('animation popup: generate button fills keyword textarea from callback', as
   assert.equal(elements.animationPopupVoiceKeywordEnabled.checked, true);
   assert.equal(elements.animationPopupGenerateKeywordsBtn.textContent, '✨ Generate');
 });
+
+test('animation popup: play live button triggers live playback for the active card', async () => {
+  const { factory } = loadControllerFactory('animation-popup.js', 'createAnimationPopupController');
+
+  const previewVideo = createElement({
+    _src: '',
+    getAttribute(name) {
+      return name === 'src' ? this._src : null;
+    },
+    load() {},
+    pause() {},
+    removeAttribute(name) {
+      if (name === 'src') this._src = '';
+    },
+    set src(value) {
+      this._src = value;
+    },
+    get src() {
+      return this._src;
+    }
+  });
+
+  const elements = {
+    animationCardPopup: createElement(),
+    animationPopupName: createElement(),
+    animationPopupPreviewVideo: previewVideo,
+    animationPopupScale: createElement(),
+    animationPopupPlayLiveBtn: createElement()
+  };
+
+  const liveCalls = [];
+  const controller = factory({
+    elements,
+    state: {
+      animationMappings: {
+        scene: { file: 'scene.mov', position: 'bottom-left', scale: 1 }
+      },
+      giftMappings: { byName: {}, byValue: {} }
+    },
+    helpers: {
+      toAnimationMappingObject: (data, fallbackFilename) => ({
+        file: data?.file || fallbackFilename,
+        position: data?.position || 'bottom-left',
+        scale: Number(data?.scale || 1),
+        keywords: []
+      })
+    },
+    callbacks: {
+      playLiveAnimation: async ({ trigger, filename }) => {
+        liveCalls.push({ trigger, filename });
+        return true;
+      }
+    }
+  });
+
+  controller.attachEvents();
+  controller.openAnimationCardPopup('scene', 'scene.mov');
+
+  await elements.animationPopupPlayLiveBtn.trigger('click');
+
+  assert.deepEqual(liveCalls, [{ trigger: 'scene', filename: 'scene.mov' }]);
+  assert.equal(elements.animationPopupPlayLiveBtn.textContent, 'Play Live');
+});

@@ -1629,6 +1629,7 @@ soundAlertsController = window.createSoundAlertsController({
     activeSoundFloating: document.getElementById('activeSoundFloating'),
     activeSoundFloatingBtn: document.getElementById('activeSoundFloatingBtn'),
     activeSoundFloatingSettingsBtn: document.getElementById('activeSoundFloatingSettingsBtn'),
+    activeSoundFloatingMode: document.getElementById('activeSoundFloatingMode'),
     activeSoundFloatingName: document.getElementById('activeSoundFloatingName'),
     activeSoundFloatingCountdown: document.getElementById('activeSoundFloatingCountdown'),
     activeSoundFloatingProgressFill: document.getElementById('activeSoundFloatingProgressFill'),
@@ -2025,6 +2026,7 @@ const activeAnimationFloating = document.getElementById('activeAnimationFloating
 const activeAnimationFloatingBtn = document.getElementById('activeAnimationFloatingBtn');
 const activeAnimationFloatingSettingsBtn = document.getElementById('activeAnimationFloatingSettingsBtn');
 const activeAnimationFloatingVideo = document.getElementById('activeAnimationFloatingVideo');
+const activeAnimationFloatingMode = document.getElementById('activeAnimationFloatingMode');
 const activeAnimationFloatingLabel = document.getElementById('activeAnimationFloatingLabel');
 const activeAnimationFloatingName = document.getElementById('activeAnimationFloatingName');
 const activeAnimationFloatingCountdown = document.getElementById('activeAnimationFloatingCountdown');
@@ -2052,6 +2054,7 @@ const animationPlaybackController = window.createAnimationPlaybackController({
   floatingPreviewButton: activeAnimationFloatingBtn,
   floatingPreviewSettingsButton: activeAnimationFloatingSettingsBtn,
   floatingPreviewVideo: activeAnimationFloatingVideo,
+  floatingPreviewMode: activeAnimationFloatingMode,
   floatingPreviewLabel: activeAnimationFloatingLabel,
   floatingPreviewName: activeAnimationFloatingName,
   floatingPreviewCountdown: activeAnimationFloatingCountdown,
@@ -2184,6 +2187,7 @@ const animationUiController = window.createAnimationUiController({
   callbacks: {
     updateStopAnimationButtonState,
     updateAnimationPlaybackUi,
+    triggerAnimation: (trigger) => triggerAnimation(trigger, 'dashboard', 'host', 'manual'),
     startAnimationFloatingPreview,
     openAnimationCardPopup,
     loadAvailableAnimations,
@@ -3076,6 +3080,7 @@ const animationPopupMapShare = document.getElementById('animationPopupMapShare')
 const animationPopupMakeDefault = document.getElementById('animationPopupMakeDefault');
 const animationPopupScaleUpBtn = document.getElementById('animationPopupScaleUpBtn');
 const animationPopupScaleDownBtn = document.getElementById('animationPopupScaleDownBtn');
+const animationPopupPlayLiveBtn = document.getElementById('animationPopupPlayLiveBtn');
 const animationPopupSaveBtn = document.getElementById('animationPopupSaveBtn');
 const animationPopupDeleteBtn = document.getElementById('animationPopupDeleteBtn');
 const animationPopupCancelBtn = document.getElementById('animationPopupCancelBtn');
@@ -3128,6 +3133,7 @@ const animationPopupController = window.createAnimationPopupController({
     animationPopupMakeDefault,
     animationPopupScaleUpBtn,
     animationPopupScaleDownBtn,
+    animationPopupPlayLiveBtn,
     animationPopupSaveBtn,
     animationPopupDeleteBtn,
     animationPopupCancelBtn,
@@ -3170,6 +3176,7 @@ const animationPopupController = window.createAnimationPopupController({
     saveStickerMappings,
     renderGiftMappings,
     renderAnimationMappings,
+    playLiveAnimation: ({ trigger }) => triggerAnimation(trigger, 'dashboard', 'host', 'manual'),
     removeGiftAnimationReferences,
     removeEventAnimationReferences,
     removeStickerAnimationReferences,

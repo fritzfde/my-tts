@@ -499,7 +499,10 @@
                                 <div class="animation-popup-preview-block">
                                     <div class="animation-popup-preview-header">
                                         <span>Preview</span>
-                                        <span class="animation-popup-preview-note">Local only</span>
+                                        <div class="animation-popup-preview-actions">
+                                            <span class="animation-popup-preview-note">Local only</span>
+                                            <button id="animationPopupPlayLiveBtn" type="button" class="secondary animation-popup-play-live-btn" title="Play this animation live in the overlay">Play Live</button>
+                                        </div>
                                     </div>
                                     <video id="animationPopupPreviewVideo" class="animation-popup-preview-video" controls playsinline preload="metadata"></video>
                                 </div>
@@ -867,6 +870,7 @@
             <div class="active-animation-floating-scrim"></div>
             <span class="active-floating-stop-icon" aria-hidden="true">■</span>
             <div class="active-animation-floating-meta">
+                <span id="activeAnimationFloatingMode" class="active-floating-mode-badge">LIVE</span>
                 <span id="activeAnimationFloatingLabel" class="active-animation-floating-label">Playing now</span>
                 <span id="activeAnimationFloatingName" class="active-animation-floating-name"></span>
                 <span id="activeAnimationFloatingCountdown" class="active-animation-floating-countdown"></span>
@@ -883,6 +887,7 @@
             </div>
             <span class="active-floating-stop-icon" aria-hidden="true">■</span>
             <div class="active-sound-floating-meta">
+                <span id="activeSoundFloatingMode" class="active-floating-mode-badge">LIVE</span>
                 <span class="active-sound-floating-label">Sound now</span>
                 <span id="activeSoundFloatingName" class="active-sound-floating-name"></span>
                 <span id="activeSoundFloatingCountdown" class="active-sound-floating-countdown"></span>

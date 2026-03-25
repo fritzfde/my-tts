@@ -3287,6 +3287,21 @@ input[type="range"] {
   pointer-events: none;
 }
 
+.active-floating-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(248, 113, 113, 0.18);
+  border: 1px solid rgba(248, 113, 113, 0.55);
+  color: #fecaca;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
 .active-animation-floating-label {
   font-size: 0.66rem;
   text-transform: uppercase;
@@ -3519,10 +3534,21 @@ input[type="range"] {
   letter-spacing: 0.08em;
 }
 
+.animation-popup-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .animation-popup-preview-note {
   text-transform: none;
   letter-spacing: normal;
   font-size: 0.72rem;
+}
+
+.animation-popup-play-live-btn {
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .animation-popup-preview-video {
