@@ -3289,6 +3289,32 @@ async function triggerAnimation(trigger, platform, author, type = 'gift') {
     });
 
     if (response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      const hasClientInfo = Object.prototype.hasOwnProperty.call(payload || {}, 'clients');
+      const totalClients = hasClientInfo ? Number(payload?.clients || 0) : null;
+      const hasObsInfo = Object.prototype.hasOwnProperty.call(payload || {}, 'obsClients');
+      const obsClients = hasObsInfo ? Number(payload?.obsClients || 0) : null;
+      const browserClients = Object.prototype.hasOwnProperty.call(payload || {}, 'browserClients')
+        ? Number(payload?.browserClients || 0)
+        : null;
+
+      if (Number.isFinite(totalClients) && totalClients <= 0) {
+        console.warn('⚠️ Animation trigger reached no overlay clients. Clearing local playback state.');
+        clearAnimationCardPlaybackIfMatches(trigger, playbackToken);
+        return false;
+      }
+
+      if (
+        Number.isFinite(totalClients)
+        && totalClients > 0
+        && Number.isFinite(obsClients)
+        && obsClients <= 0
+      ) {
+        console.warn(
+          `⚠️ Animation trigger reached ${totalClients} overlay client(s), but no OBS client was detected (browser clients: ${Number.isFinite(browserClients) ? browserClients : 'unknown'}).`
+        );
+      }
+
       console.log(`✅ Animation trigger sent successfully: ${trigger}`);
       const normalized = toAnimationMappingObject(data, filename);
       const keywords = Array.isArray(normalized.keywords) ? normalized.keywords : [];

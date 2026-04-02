@@ -849,13 +849,10 @@
                 }
               } else {
                 if (isSuggestionMode()) {
-                  const previewed = await (callbacks.previewSuggestedAnimation?.({
-                    trigger,
-                    filename: suggestion?.filename || ''
-                  }) ?? callbacks.triggerSuggestedAnimation?.({ trigger }));
-                  if (previewed !== false) {
-                    markSuggestionActive(suggestionId, { dismissOnStop: true, localPreview: true });
-                    setStatus(`Mic suggestion previewing animation: ${trigger}`, 'online');
+                  const triggered = await callbacks.triggerSuggestedAnimation?.({ trigger });
+                  if (triggered !== false) {
+                    markSuggestionActive(suggestionId, { dismissOnStop: true, localPreview: false });
+                    setStatus(`Mic suggestion triggered animation: ${trigger}`, 'online');
                   }
                 } else {
                   const triggered = await callbacks.triggerSuggestedAnimation?.({ trigger });

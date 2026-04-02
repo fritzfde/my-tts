@@ -826,7 +826,7 @@ test('mic trigger: only-my-voice gate blocks start without enrolled profile and 
   assert.match(matchesNode.innerHTML, /Voice mismatch: 41% \/ 74%/);
 });
 
-test('mic trigger: suggestion mode previews matches without auto-triggering', async () => {
+test('mic trigger: suggestion mode surfaces matches without auto-triggering, then triggers live on click', async () => {
   const { factory } = loadControllerFactory('mic-trigger.js', 'createMicTriggerController');
   const settingsStore = createSettingsStore({
     mic_asr_base_url: 'http://127.0.0.1:9001/',
@@ -967,10 +967,6 @@ test('mic trigger: suggestion mode previews matches without auto-triggering', as
         filename: 'alpha.mov'
       }),
       triggerSuggestedAnimation: ({ trigger }) => {
-        previewedAnimations.push(`trigger:${trigger}`);
-        return true;
-      },
-      previewSuggestedAnimation: ({ trigger }) => {
         previewedAnimations.push(trigger);
         return true;
       },

@@ -1151,7 +1151,14 @@ app.post('/api/animations/trigger', (req, res) => {
     }
   });
 
-  res.json({ success: true, clients: animationClients.length });
+  const obsClients = animationClients.filter(client => client.kind === 'obs').length;
+  const browserClients = animationClients.length - obsClients;
+  res.json({
+    success: true,
+    clients: animationClients.length,
+    obsClients,
+    browserClients
+  });
 });
 
 // Stop active animations endpoint
