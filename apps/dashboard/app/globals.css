@@ -406,7 +406,10 @@ code {
 }
 
 .sounds-toolbar-field input[type='search'],
-.sounds-editor-field textarea {
+.sounds-editor-field textarea,
+.sounds-editor-field input[type='text'],
+.sounds-editor-field input[type='number'],
+.sounds-editor-field select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -524,6 +527,134 @@ code {
   padding: 18px;
 }
 
+.sounds-rules-header {
+  align-items: flex-start;
+}
+
+.sounds-rules-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.sounds-rules-list {
+  display: grid;
+  gap: 14px;
+}
+
+.sound-rule-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(9, 17, 31, 0.68);
+}
+
+.sound-rule-card.is-disabled {
+  opacity: 0.8;
+}
+
+.sound-rule-top-row,
+.sound-rule-grid,
+.sound-rule-footer,
+.sound-rule-sound-row,
+.sound-rule-stay-row,
+.sound-rule-animation-badges {
+  display: grid;
+  gap: 12px;
+}
+
+.sound-rule-top-row,
+.sound-rule-footer,
+.sound-rule-sound-row,
+.sound-rule-stay-row {
+  align-items: end;
+}
+
+.sound-rule-top-row {
+  grid-template-columns: minmax(220px, 300px) auto;
+}
+
+.sound-rule-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.sound-rule-sound-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.sound-rule-lifecycle-fields {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(17, 28, 47, 0.74);
+}
+
+.sounds-toggle-inline {
+  display: inline-flex;
+  width: fit-content;
+}
+
+.sounds-empty-inline {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  padding: 0 2px;
+}
+
+.sound-rule-footer {
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 4px;
+}
+
+.sound-rule-animation-linkage {
+  display: grid;
+  gap: 8px;
+}
+
+.sound-rule-animation-linkage strong {
+  font-size: 0.95rem;
+}
+
+.sound-rule-animation-linkage small,
+.sound-rule-summary {
+  color: var(--muted);
+}
+
+.sound-rule-animation-badges {
+  grid-template-columns: repeat(auto-fit, minmax(120px, max-content));
+}
+
+.sound-rule-animation-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 161, 255, 0.24);
+  background: rgba(59, 161, 255, 0.12);
+  color: #cde9ff;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.sound-rule-footer-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.sound-rule-summary {
+  margin: 0;
+  font-size: 0.92rem;
+}
+
 .sounds-panel-header {
   display: flex;
   align-items: center;
@@ -613,34 +744,6 @@ code {
   background: rgba(9, 17, 31, 0.48);
 }
 
-.sounds-rules-table-wrapper {
-  overflow-x: auto;
-}
-
-.sounds-rules-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.sounds-rules-table th,
-.sounds-rules-table td {
-  padding: 12px 10px;
-  border-bottom: 1px solid var(--line);
-  text-align: left;
-  vertical-align: top;
-}
-
-.sounds-rules-table th {
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-}
-
-.sounds-rules-table td {
-  color: var(--text);
-}
-
 @media (max-width: 1180px) {
   .sounds-page-hero,
   .sounds-layout-grid,
@@ -649,6 +752,17 @@ code {
   }
 
   .sounds-toolbar-actions {
+    justify-content: flex-start;
+  }
+
+  .sound-rule-grid,
+  .sound-rule-footer,
+  .sound-rule-top-row {
+    grid-template-columns: 1fr;
+  }
+
+  .sounds-rules-actions,
+  .sound-rule-footer-actions {
     justify-content: flex-start;
   }
 }

@@ -27,7 +27,7 @@ type SoundsStoreState = SoundSettingsState & {
   setSounds: (value: SoundFile[]) => void;
   upsertSound: (value: SoundFile) => void;
   removeSound: (soundPath: string) => void;
-  commitSettingsState: (value: SoundSettingsState) => void;
+  commitSettingsState: (value: SoundSettingsState, rawSettings?: PersistedSettingsRecord) => void;
   setNotice: (value: string) => void;
   setError: (value: string) => void;
 };
@@ -120,10 +120,10 @@ export const useSoundsStore = create<SoundsStoreState>((set) => ({
         rawSettings: buildPersistedSettingsRecord(state.rawSettings, nextSettingsState)
       };
     }),
-  commitSettingsState: (value) =>
+  commitSettingsState: (value, rawSettings) =>
     set((state) => ({
       ...value,
-      rawSettings: buildPersistedSettingsRecord(state.rawSettings, value)
+      rawSettings: rawSettings || buildPersistedSettingsRecord(state.rawSettings, value)
     })),
   setNotice: (value) => set({ notice: value, error: '' }),
   setError: (value) => set({ error: value, notice: '' })

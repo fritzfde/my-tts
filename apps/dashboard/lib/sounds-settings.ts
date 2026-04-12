@@ -9,6 +9,9 @@ export const SOUND_VOLUMES_KEY = 'sound_volume_map';
 export const SOUND_LIBRARY_KEYWORD_FILTER_KEY = 'sound_library_keyword_filter';
 export const SOUND_ALERTS_VOLUME_KEY = 'sound_alerts_volume';
 export const GLOBAL_VIEWER_CHAT_SOUND_TRIGGERS_KEY = 'viewer_chat_sound_keyword_triggers_enabled';
+export const KNOWN_GIFT_NAMES_KEY = 'tiktok_known_gift_names';
+export const GIFT_MAPPINGS_KEY = 'gift_mappings';
+export const EVENT_ANIMATION_MAPPINGS_KEY = 'event_animation_mappings';
 
 export const SOUND_EVENT_LABELS: Record<SoundEventType, string> = {
   gift_any: 'Any gift',
@@ -22,6 +25,17 @@ export const SOUND_EVENT_LABELS: Record<SoundEventType, string> = {
 
 const SOUND_EVENT_TYPES = new Set<SoundEventType>(Object.keys(SOUND_EVENT_LABELS) as SoundEventType[]);
 const LIFECYCLE_TYPES = new Set<SoundEventType>(['join', 'leave']);
+
+type GiftAction = {
+  type: 'sound' | 'animation';
+  value: string | string[];
+};
+
+type GiftMappingsState = {
+  byName: Record<string, GiftAction>;
+  byValue: Record<string, GiftAction>;
+  defaultAnimation: GiftAction;
+};
 
 export function normalizeSoundPath(value = '') {
   const raw = String(value || '').trim();
@@ -105,10 +119,121 @@ function normalizeGiftValue(value: unknown) {
   return String(Math.floor(parsed));
 }
 
+function normalizeGiftNameKey(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
 function normalizeMinStaySeconds(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   return Math.min(86400, Math.floor(parsed));
+}
+
+function toAnimationTriggerList(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .filter((entry) => typeof entry === 'string' && entry.trim())
+      .map((entry) => entry.trim());
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return [value.trim()];
+  }
+  return [];
+}
+
+function normalizeGiftAction(action: unknown): GiftAction {
+  if (!action || typeof action !== 'object') {
+    return { type: 'sound', value: '' };
+  }
+
+  const raw = action as { type?: string; value?: unknown };
+  if (raw.type === 'animation') {
+    const unique = Array.from(new Set(toAnimationTriggerList(raw.value)));
+    if (unique.length > 1) {
+      return { type: 'animation', value: unique };
+    }
+    return { type: 'animation', value: unique[0] || '' };
+  }
+
+  return {
+    type: 'sound',
+    value: normalizeSoundPath(String(raw.value || ''))
+  };
+}
+
+function parseGiftMappings(settings: PersistedSettingsRecord): GiftMappingsState {
+  const raw = settings[GIFT_MAPPINGS_KEY];
+  if (!raw) {
+    return {
+      byName: {},
+      byValue: {},
+      defaultAnimation: { type: 'animation', value: '' }
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const byName: Record<string, GiftAction> = {};
+    const byValue: Record<string, GiftAction> = {};
+
+    Object.entries(parsed?.byName && typeof parsed.byName === 'object' ? parsed.byName : {}).forEach(([giftName, action]) => {
+      byName[giftName] = normalizeGiftAction(action);
+    });
+
+    Object.entries(parsed?.byValue && typeof parsed.byValue === 'object' ? parsed.byValue : {}).forEach(([diamondValue, action]) => {
+      byValue[diamondValue] = normalizeGiftAction(action);
+    });
+
+    const defaultAnimation = normalizeGiftAction(
+      parsed?.defaultAnimation || parsed?.default_animation || { type: 'animation', value: '' }
+    );
+
+    return {
+      byName,
+      byValue,
+      defaultAnimation: defaultAnimation.type === 'animation'
+        ? defaultAnimation
+        : { type: 'animation', value: '' }
+    };
+  } catch {
+    return {
+      byName: {},
+      byValue: {},
+      defaultAnimation: { type: 'animation', value: '' }
+    };
+  }
+}
+
+function parseEventAnimationMappings(settings: PersistedSettingsRecord) {
+  const raw = settings[EVENT_ANIMATION_MAPPINGS_KEY];
+  if (!raw) {
+    return {
+      follow: '',
+      share: '',
+      join: '',
+      leave: ''
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      follow: String(parsed?.follow || '').trim(),
+      share: String(parsed?.share || '').trim(),
+      join: String(parsed?.join || '').trim(),
+      leave: String(parsed?.leave || '').trim()
+    };
+  } catch {
+    return {
+      follow: '',
+      share: '',
+      join: '',
+      leave: ''
+    };
+  }
 }
 
 export function createSoundAlertRule(seed: Partial<SoundAlertRule> & Record<string, unknown> = {}): SoundAlertRule {
@@ -160,6 +285,30 @@ export function parseSoundSettings(settings: PersistedSettingsRecord): SoundSett
     soundVoiceKeywordEnabled: parseBooleanMap(settings[SOUND_VOICE_KEYWORDS_ENABLED_KEY]),
     soundVolumes: parseVolumeMap(settings[SOUND_VOLUMES_KEY]),
     rules: parseRules(settings[SOUND_ALERT_RULES_KEY])
+  };
+}
+
+export function parseKnownGiftNames(settings: PersistedSettingsRecord) {
+  const raw = settings[KNOWN_GIFT_NAMES_KEY];
+  if (!raw) return [] as string[];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [] as string[];
+    return Array.from(new Set(parsed.map((entry) => String(entry || '').trim()).filter(Boolean)))
+      .sort((left, right) => left.localeCompare(right));
+  } catch {
+    return [] as string[];
+  }
+}
+
+export function buildKnownGiftNamesRecord(rawSettings: PersistedSettingsRecord, names: string[]) {
+  return {
+    ...rawSettings,
+    [KNOWN_GIFT_NAMES_KEY]: JSON.stringify(
+      Array.from(new Set(names.map((entry) => String(entry || '').trim()).filter(Boolean)))
+        .sort((left, right) => left.localeCompare(right))
+    )
   };
 }
 
@@ -229,4 +378,37 @@ export function describeSoundRule(rule: SoundAlertRule) {
     return parts.length > 0 ? parts.join(' • ') : 'Lifecycle rule';
   }
   return SOUND_EVENT_LABELS[rule.eventType];
+}
+
+export function resolveLinkedAnimationsForRule(rule: SoundAlertRule, settings: PersistedSettingsRecord) {
+  const eventMappings = parseEventAnimationMappings(settings);
+  const giftMappings = parseGiftMappings(settings);
+
+  if (rule.eventType === 'gift_any') {
+    return toAnimationTriggerList(giftMappings.defaultAnimation.value);
+  }
+
+  if (rule.eventType === 'gift_name') {
+    const target = normalizeGiftNameKey(rule.eventValue);
+    if (!target) return [] as string[];
+    for (const [giftName, action] of Object.entries(giftMappings.byName)) {
+      if (normalizeGiftNameKey(giftName) !== target) continue;
+      const normalized = normalizeGiftAction(action);
+      return normalized.type === 'animation' ? toAnimationTriggerList(normalized.value) : [];
+    }
+    return [] as string[];
+  }
+
+  if (rule.eventType === 'gift_value') {
+    const action = giftMappings.byValue[normalizeGiftValue(rule.eventValue)];
+    const normalized = normalizeGiftAction(action);
+    return normalized.type === 'animation' ? toAnimationTriggerList(normalized.value) : [];
+  }
+
+  if (rule.eventType === 'follow' || rule.eventType === 'share' || rule.eventType === 'join' || rule.eventType === 'leave') {
+    const trigger = eventMappings[rule.eventType];
+    return trigger ? [trigger] : [];
+  }
+
+  return [] as string[];
 }

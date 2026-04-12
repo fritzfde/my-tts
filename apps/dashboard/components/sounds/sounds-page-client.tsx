@@ -1,27 +1,52 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { listKnownTikTokGiftNames } from '@/lib/api/platforms';
 import { deleteSound, generateSoundKeywords, listSounds, uploadSound } from '@/lib/api/sounds';
 import { saveSettings } from '@/lib/api/settings';
 import { legacyMediaUrl } from '@/lib/api/config';
 import {
   applySoundDraftToState,
+  buildKnownGiftNamesRecord,
   buildPersistedSettingsRecord,
+  buildSoundDraft,
+  createSoundAlertRule,
   describeSoundRule,
-  keywordListToText,
   normalizeSoundPath,
+  parseKnownGiftNames,
   parseKeywordList,
+  resolveLinkedAnimationsForRule,
   SOUND_EVENT_LABELS
 } from '@/lib/sounds-settings';
 import { useSoundsStore } from '@/lib/stores/sounds-store';
 import type { PersistedSettingsRecord } from '@/lib/types/settings';
-import type { SoundFile, SoundSettingsDraft } from '@/lib/types/sounds';
+import type { SoundAlertRule, SoundEventType, SoundFile, SoundSettingsDraft, SoundSettingsState } from '@/lib/types/sounds';
 
 type SoundsPageClientProps = {
   initialScope: string;
   initialSettings: PersistedSettingsRecord;
   initialSounds: SoundFile[];
 };
+
+const RULE_EVENT_OPTIONS: Array<{ value: SoundEventType; label: string }> = [
+  { value: 'gift_any', label: SOUND_EVENT_LABELS.gift_any },
+  { value: 'gift_name', label: SOUND_EVENT_LABELS.gift_name },
+  { value: 'gift_value', label: SOUND_EVENT_LABELS.gift_value },
+  { value: 'follow', label: SOUND_EVENT_LABELS.follow },
+  { value: 'share', label: SOUND_EVENT_LABELS.share },
+  { value: 'join', label: SOUND_EVENT_LABELS.join },
+  { value: 'leave', label: SOUND_EVENT_LABELS.leave }
+];
+
+function isLifecycleEventType(eventType: SoundEventType) {
+  return eventType === 'join' || eventType === 'leave';
+}
+
+function getRuleConditionType(eventType: SoundEventType) {
+  if (eventType === 'gift_name') return 'gift_name';
+  if (eventType === 'gift_value') return 'gift_value';
+  return '';
+}
 
 export function SoundsPageClient({ initialScope, initialSettings, initialSounds }: SoundsPageClientProps) {
   const hydrate = useSoundsStore((state) => state.hydrate);
@@ -58,10 +83,12 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
   const [isUploading, setIsUploading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRefreshingGifts, setIsRefreshingGifts] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const initializedRef = useRef(false);
   const filterPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const globalVolumePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewerGatePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (initializedRef.current) return;
@@ -78,19 +105,38 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
     [selectedSoundPath, sounds]
   );
 
+  const currentSettingsState = useMemo<SoundSettingsState>(
+    () => ({
+      keywordFilter,
+      globalVolume,
+      viewerChatTriggersEnabled,
+      soundKeywords,
+      soundKeywordEnabled,
+      soundVoiceKeywordEnabled,
+      soundVolumes,
+      rules
+    }),
+    [
+      globalVolume,
+      keywordFilter,
+      rules,
+      soundKeywordEnabled,
+      soundKeywords,
+      soundVoiceKeywordEnabled,
+      soundVolumes,
+      viewerChatTriggersEnabled
+    ]
+  );
+
+  const knownGiftNames = useMemo(() => parseKnownGiftNames(rawSettings), [rawSettings]);
+
   useEffect(() => {
     if (!selectedSound) {
       setDraft(null);
       return;
     }
-
-    setDraft({
-      keywordsText: keywordListToText(soundKeywords[selectedSound.path] || []),
-      viewerChatEnabled: soundKeywordEnabled[selectedSound.path] === true,
-      voiceEnabled: soundVoiceKeywordEnabled[selectedSound.path] === true,
-      volume: soundVolumes[selectedSound.path] ?? 100
-    });
-  }, [selectedSound, soundKeywordEnabled, soundKeywords, soundVoiceKeywordEnabled, soundVolumes]);
+    setDraft(buildSoundDraft(selectedSound.path, currentSettingsState));
+  }, [currentSettingsState, selectedSound]);
 
   useEffect(() => {
     return () => {
@@ -98,12 +144,9 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
         audioRef.current.pause();
         audioRef.current = null;
       }
-      if (filterPersistTimerRef.current) {
-        clearTimeout(filterPersistTimerRef.current);
-      }
-      if (globalVolumePersistTimerRef.current) {
-        clearTimeout(globalVolumePersistTimerRef.current);
-      }
+      if (filterPersistTimerRef.current) clearTimeout(filterPersistTimerRef.current);
+      if (globalVolumePersistTimerRef.current) clearTimeout(globalVolumePersistTimerRef.current);
+      if (viewerGatePersistTimerRef.current) clearTimeout(viewerGatePersistTimerRef.current);
     };
   }, []);
 
@@ -115,21 +158,17 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
     );
   }, [activeSoundPath, globalVolume, soundVolumes]);
 
+  async function persistSettingsState(nextState: SoundSettingsState, nextRawSettings?: PersistedSettingsRecord) {
+    const resolvedRawSettings = nextRawSettings || buildPersistedSettingsRecord(rawSettings, nextState);
+    await saveSettings(resolvedRawSettings, scope);
+    commitSettingsState(nextState, resolvedRawSettings);
+  }
+
   useEffect(() => {
     if (!hydrated) return;
     if (filterPersistTimerRef.current) clearTimeout(filterPersistTimerRef.current);
     filterPersistTimerRef.current = setTimeout(() => {
-      const nextSettings = buildPersistedSettingsRecord(rawSettings, {
-        keywordFilter,
-        globalVolume,
-        viewerChatTriggersEnabled,
-        soundKeywords,
-        soundKeywordEnabled,
-        soundVoiceKeywordEnabled,
-        soundVolumes,
-        rules
-      });
-      void saveSettings(nextSettings, scope).catch((err) => {
+      void persistSettingsState(currentSettingsState).catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to save filter');
       });
     }, 350);
@@ -143,17 +182,7 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
     if (!hydrated) return;
     if (globalVolumePersistTimerRef.current) clearTimeout(globalVolumePersistTimerRef.current);
     globalVolumePersistTimerRef.current = setTimeout(() => {
-      const nextSettings = buildPersistedSettingsRecord(rawSettings, {
-        keywordFilter,
-        globalVolume,
-        viewerChatTriggersEnabled,
-        soundKeywords,
-        soundKeywordEnabled,
-        soundVoiceKeywordEnabled,
-        soundVolumes,
-        rules
-      });
-      void saveSettings(nextSettings, scope).catch((err) => {
+      void persistSettingsState(currentSettingsState).catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to save global volume');
       });
     }, 250);
@@ -161,38 +190,26 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
     return () => {
       if (globalVolumePersistTimerRef.current) clearTimeout(globalVolumePersistTimerRef.current);
     };
-  }, [hydrated, globalVolume]);
+  }, [globalVolume, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
-    const nextSettings = buildPersistedSettingsRecord(rawSettings, {
-      keywordFilter,
-      globalVolume,
-      viewerChatTriggersEnabled,
-      soundKeywords,
-      soundKeywordEnabled,
-      soundVoiceKeywordEnabled,
-      soundVolumes,
-      rules
-    });
-    const timer = setTimeout(() => {
-      void saveSettings(nextSettings, scope).catch((err) => {
+    if (viewerGatePersistTimerRef.current) clearTimeout(viewerGatePersistTimerRef.current);
+    viewerGatePersistTimerRef.current = setTimeout(() => {
+      void persistSettingsState(currentSettingsState).catch((err) => {
         setError(err instanceof Error ? err.message : 'Failed to save global viewer chat gate');
       });
     }, 200);
-    return () => clearTimeout(timer);
+
+    return () => {
+      if (viewerGatePersistTimerRef.current) clearTimeout(viewerGatePersistTimerRef.current);
+    };
   }, [hydrated, viewerChatTriggersEnabled]);
 
   const filteredSounds = useMemo(() => {
     if (!keywordFilter) return sounds;
     return sounds.filter((sound) => {
-      const haystack = [
-        sound.name,
-        sound.path,
-        ...(soundKeywords[sound.path] || [])
-      ]
-        .join(' ')
-        .toLowerCase();
+      const haystack = [sound.name, sound.path, ...(soundKeywords[sound.path] || [])].join(' ').toLowerCase();
       return haystack.includes(keywordFilter);
     });
   }, [keywordFilter, soundKeywords, sounds]);
@@ -259,6 +276,23 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
     }
   }
 
+  async function handleRefreshGiftNames() {
+    setIsRefreshingGifts(true);
+    try {
+      const fetchedNames = await listKnownTikTokGiftNames();
+      const mergedNames = Array.from(new Set([...knownGiftNames, ...fetchedNames])).sort((left, right) =>
+        left.localeCompare(right)
+      );
+      const nextRawSettings = buildKnownGiftNamesRecord(rawSettings, mergedNames);
+      await persistSettingsState(currentSettingsState, nextRawSettings);
+      setNotice(mergedNames.length > 0 ? 'Gift names refreshed from TikTok.' : 'No TikTok gift names available right now.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to refresh TikTok gifts');
+    } finally {
+      setIsRefreshingGifts(false);
+    }
+  }
+
   async function handleUpload(fileList: FileList | null) {
     const file = fileList?.[0];
     if (!file) return;
@@ -275,10 +309,8 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
         const generatedKeywords = parseKeywordList(keywordResult.keywords);
         keywordWarning = keywordResult.warning;
         if (generatedKeywords.length > 0) {
-          const nextState = {
-            keywordFilter,
-            globalVolume,
-            viewerChatTriggersEnabled,
+          const nextState: SoundSettingsState = {
+            ...currentSettingsState,
             soundKeywords: {
               ...soundKeywords,
               [uploaded.path]: generatedKeywords
@@ -288,11 +320,9 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
               : { ...soundKeywordEnabled, [uploaded.path]: false },
             soundVoiceKeywordEnabled: Object.prototype.hasOwnProperty.call(soundVoiceKeywordEnabled, uploaded.path)
               ? soundVoiceKeywordEnabled
-              : { ...soundVoiceKeywordEnabled, [uploaded.path]: false },
-            soundVolumes: soundVolumes,
-            rules
+              : { ...soundVoiceKeywordEnabled, [uploaded.path]: false }
           };
-          await persistSettingsFromState(nextState);
+          await persistSettingsState(nextState);
         }
       } catch (keywordError) {
         keywordWarning = keywordError instanceof Error ? keywordError.message : 'Keyword generation failed';
@@ -326,27 +356,12 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
     }
   }
 
-  async function persistSettingsFromState(nextState: ReturnType<typeof applySoundDraftToState>) {
-    const nextRaw = buildPersistedSettingsRecord(rawSettings, nextState);
-    await saveSettings(nextRaw, scope);
-    commitSettingsState(nextState);
-  }
-
   async function handleSaveDraft() {
     if (!selectedSound || !draft) return;
     setIsSaving(true);
     try {
-      const nextState = applySoundDraftToState(selectedSound.path, {
-        keywordFilter,
-        globalVolume,
-        viewerChatTriggersEnabled,
-        soundKeywords,
-        soundKeywordEnabled,
-        soundVoiceKeywordEnabled,
-        soundVolumes,
-        rules
-      }, draft);
-      await persistSettingsFromState(nextState);
+      const nextState = applySoundDraftToState(selectedSound.path, currentSettingsState, draft);
+      await persistSettingsState(nextState);
       setNotice(`Saved settings for ${selectedSound.name}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save sound settings');
@@ -361,16 +376,113 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
     try {
       const result = await generateSoundKeywords(selectedSound.path);
       setDraft((current) => ({
-        keywordsText: keywordListToText(parseKeywordList(result.keywords)),
+        keywordsText: parseKeywordList(result.keywords).join('\n'),
         viewerChatEnabled: current?.viewerChatEnabled ?? false,
         voiceEnabled: current?.voiceEnabled ?? false,
         volume: current?.volume ?? 100
       }));
-      setNotice(result.warning ? `Keywords generated with warning: ${result.warning}` : `Keywords generated for ${selectedSound.name}.`);
+      setNotice(
+        result.warning ? `Keywords generated with warning: ${result.warning}` : `Keywords generated for ${selectedSound.name}.`
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate keywords');
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  async function persistRules(nextRules: SoundAlertRule[]) {
+    const nextState: SoundSettingsState = {
+      ...currentSettingsState,
+      rules: nextRules
+    };
+    await persistSettingsState(nextState);
+  }
+
+  async function handleAddRule() {
+    try {
+      await persistRules([...rules, createSoundAlertRule({ eventType: 'gift_any' })]);
+      setNotice('Added a new alert rule.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add alert rule');
+    }
+  }
+
+  async function updateRule(ruleId: string, updater: (rule: SoundAlertRule) => SoundAlertRule) {
+    const nextRules = rules.map((rule) => (rule.id === ruleId ? updater({ ...rule }) : rule));
+    await persistRules(nextRules);
+  }
+
+async function handleRuleEventTypeChange(ruleId: string, nextType: string) {
+    const normalizedType = RULE_EVENT_OPTIONS.some((option) => option.value === nextType)
+      ? (nextType as SoundEventType)
+      : 'gift_any';
+    try {
+      await updateRule(ruleId, (rule) => {
+        const updated = createSoundAlertRule({ ...rule, eventType: normalizedType });
+        if (getRuleConditionType(updated.eventType) === '') {
+          updated.eventValue = '';
+        }
+        if (!isLifecycleEventType(updated.eventType)) {
+          updated.recurringOnly = false;
+          updated.minStaySeconds = 0;
+        }
+        return updated;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update event type');
+    }
+  }
+
+  async function handleRuleValueChange(ruleId: string, value: string) {
+    try {
+      await updateRule(ruleId, (rule) => createSoundAlertRule({ ...rule, eventValue: value }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update rule value');
+    }
+  }
+
+  async function handleRuleSoundChange(ruleId: string, soundPath: string) {
+    try {
+      await updateRule(ruleId, (rule) => ({ ...rule, soundPath: normalizeSoundPath(soundPath) }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update sound selection');
+    }
+  }
+
+  async function handleRuleEnabledChange(ruleId: string, enabled: boolean) {
+    try {
+      await updateRule(ruleId, (rule) => ({ ...rule, enabled }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update rule status');
+    }
+  }
+
+  async function handleRuleRecurringChange(ruleId: string, recurringOnly: boolean) {
+    try {
+      await updateRule(ruleId, (rule) => ({ ...rule, recurringOnly }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update recurring setting');
+    }
+  }
+
+  async function handleRuleStayChange(ruleId: string, nextValue: string) {
+    try {
+      await updateRule(ruleId, (rule) => ({
+        ...rule,
+        minStaySeconds: Math.max(0, Math.floor(Number(nextValue) || 0))
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update minimum stay time');
+    }
+  }
+
+  async function handleDeleteRule(ruleId: string) {
+    try {
+      await persistRules(rules.filter((rule) => rule.id !== ruleId));
+      setNotice('Deleted alert rule.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete alert rule');
     }
   }
 
@@ -381,8 +493,9 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
           <p className="feature-page-eyebrow">First Real React Slice</p>
           <h2>Sound Alerts</h2>
           <p className="sounds-page-summary">
-            This page is now backed by the live legacy API. We are using it to establish typed wrappers, persisted
-            settings handling, reusable cards, and a practical React state shape before moving on to animations.
+            This page is backed by the live legacy API and persisted settings store. It now covers the core sound
+            library and sound rule editing, while animation linkage remains visible as external context until the
+            animation slice is migrated.
           </p>
         </div>
         <div className="sounds-page-stats" aria-label="Sound library stats">
@@ -518,7 +631,9 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
                 <textarea
                   rows={10}
                   value={draft.keywordsText}
-                  onChange={(event) => setDraft((current) => current ? { ...current, keywordsText: event.target.value } : current)}
+                  onChange={(event) =>
+                    setDraft((current) => (current ? { ...current, keywordsText: event.target.value } : current))
+                  }
                   placeholder="One keyword per line"
                 />
               </label>
@@ -528,7 +643,9 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
                   <input
                     type="checkbox"
                     checked={draft.viewerChatEnabled}
-                    onChange={(event) => setDraft((current) => current ? { ...current, viewerChatEnabled: event.target.checked } : current)}
+                    onChange={(event) =>
+                      setDraft((current) => (current ? { ...current, viewerChatEnabled: event.target.checked } : current))
+                    }
                   />
                   <span>Viewer chat can trigger this sound</span>
                 </label>
@@ -536,7 +653,9 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
                   <input
                     type="checkbox"
                     checked={draft.voiceEnabled}
-                    onChange={(event) => setDraft((current) => current ? { ...current, voiceEnabled: event.target.checked } : current)}
+                    onChange={(event) =>
+                      setDraft((current) => (current ? { ...current, voiceEnabled: event.target.checked } : current))
+                    }
                   />
                   <span>Voice trigger can activate this sound</span>
                 </label>
@@ -551,7 +670,9 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
                     max="100"
                     step="1"
                     value={draft.volume}
-                    onChange={(event) => setDraft((current) => current ? { ...current, volume: Number(event.target.value) } : current)}
+                    onChange={(event) =>
+                      setDraft((current) => (current ? { ...current, volume: Number(event.target.value) } : current))
+                    }
                   />
                   <strong>{draft.volume}%</strong>
                 </div>
@@ -570,34 +691,165 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
       </div>
 
       <section className="sounds-rules-panel">
-        <div className="sounds-panel-header">
-          <h3>Alert rules</h3>
-          <span>React editor is the next step</span>
+        <div className="sounds-panel-header sounds-rules-header">
+          <div>
+            <h3>Alert rules</h3>
+            <span>Sound rule editing is now live in React</span>
+          </div>
+          <div className="sounds-rules-actions">
+            <button type="button" className="sounds-secondary-button" onClick={() => void handleRefreshGiftNames()}>
+              {isRefreshingGifts ? 'Refreshing gifts…' : 'Refresh gift names'}
+            </button>
+            <button type="button" className="sounds-primary-button" onClick={() => void handleAddRule()}>
+              Add rule
+            </button>
+          </div>
         </div>
+
+        <datalist id="soundRuleGiftNames">
+          {knownGiftNames.map((giftName) => (
+            <option key={giftName} value={giftName} />
+          ))}
+        </datalist>
+
         {rules.length === 0 ? (
           <div className="sounds-empty-state">No alert rules are currently saved.</div>
         ) : (
-          <div className="sounds-rules-table-wrapper">
-            <table className="sounds-rules-table">
-              <thead>
-                <tr>
-                  <th>Event</th>
-                  <th>Status</th>
-                  <th>Condition</th>
-                  <th>Sound</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rules.map((rule) => (
-                  <tr key={rule.id}>
-                    <td>{SOUND_EVENT_LABELS[rule.eventType]}</td>
-                    <td>{rule.enabled ? 'Enabled' : 'Disabled'}</td>
-                    <td>{describeSoundRule(rule)}</td>
-                    <td>{sounds.find((entry) => entry.path === rule.soundPath)?.name || 'No sound selected'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="sounds-rules-list">
+            {rules.map((rule) => {
+              const conditionType = getRuleConditionType(rule.eventType);
+              const linkedAnimations = resolveLinkedAnimationsForRule(rule, rawSettings);
+              return (
+                <article key={rule.id} className={`sound-rule-card${rule.enabled ? '' : ' is-disabled'}`}>
+                  <div className="sound-rule-top-row">
+                    <label className="sounds-editor-field">
+                      <span>Event</span>
+                      <select
+                        value={rule.eventType}
+                        onChange={(event) => void handleRuleEventTypeChange(rule.id, event.target.value)}
+                      >
+                        {RULE_EVENT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="sounds-toggle sounds-toggle-inline">
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={(event) => void handleRuleEnabledChange(rule.id, event.target.checked)}
+                      />
+                      <span>{rule.enabled ? 'Enabled' : 'Disabled'}</span>
+                    </label>
+                  </div>
+
+                  <div className="sound-rule-grid">
+                    <label className="sounds-editor-field">
+                      <span>Condition</span>
+                      {conditionType === 'gift_name' ? (
+                        <input
+                          type="text"
+                          list="soundRuleGiftNames"
+                          value={rule.eventValue}
+                          onChange={(event) => void handleRuleValueChange(rule.id, event.target.value)}
+                          placeholder="Gift name"
+                        />
+                      ) : conditionType === 'gift_value' ? (
+                        <input
+                          type="number"
+                          min="1"
+                          step="1"
+                          value={rule.eventValue}
+                          onChange={(event) => void handleRuleValueChange(rule.id, event.target.value)}
+                          placeholder="Diamond value"
+                        />
+                      ) : isLifecycleEventType(rule.eventType) ? (
+                        <div className="sound-rule-lifecycle-fields">
+                          <label className="sounds-toggle sounds-toggle-inline">
+                            <input
+                              type="checkbox"
+                              checked={rule.recurringOnly}
+                              onChange={(event) => void handleRuleRecurringChange(rule.id, event.target.checked)}
+                            />
+                            <span>Recurring only</span>
+                          </label>
+                          <label className="sounds-editor-field">
+                            <span>Minimum stay</span>
+                            <div className="sound-rule-stay-row">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                value={rule.minStaySeconds > 0 ? String(rule.minStaySeconds) : ''}
+                                onChange={(event) => void handleRuleStayChange(rule.id, event.target.value)}
+                                placeholder="0"
+                              />
+                              <strong>s</strong>
+                            </div>
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="sounds-empty-inline">No extra condition for this event type.</div>
+                      )}
+                    </label>
+
+                    <label className="sounds-editor-field">
+                      <span>Sound</span>
+                      <div className="sound-rule-sound-row">
+                        <select
+                          value={rule.soundPath}
+                          onChange={(event) => void handleRuleSoundChange(rule.id, event.target.value)}
+                        >
+                          <option value="">No sound</option>
+                          {sounds.map((sound) => (
+                            <option key={sound.path} value={sound.path}>
+                              {sound.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="sounds-secondary-button"
+                          onClick={() => void handlePlaySound(rule.soundPath)}
+                          disabled={!rule.soundPath}
+                        >
+                          {activeSoundPath === rule.soundPath ? 'Stop' : 'Play'}
+                        </button>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="sound-rule-footer">
+                    <div className="sound-rule-animation-linkage">
+                      <span>Linked animation</span>
+                      {linkedAnimations.length > 0 ? (
+                        <div className="sound-rule-animation-badges">
+                          {linkedAnimations.map((trigger) => (
+                            <span key={trigger} className="sound-rule-animation-badge">
+                              {trigger}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <strong>None linked from animation mappings yet.</strong>
+                      )}
+                      <small>Animation mapping still lives in the animation slice and legacy dashboard for now.</small>
+                    </div>
+
+                    <div className="sound-rule-footer-actions">
+                      <button type="button" className="sounds-danger-button" onClick={() => void handleDeleteRule(rule.id)}>
+                        Delete rule
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="sound-rule-summary">{describeSoundRule(rule)}</p>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
