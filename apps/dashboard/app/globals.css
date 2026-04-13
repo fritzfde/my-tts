@@ -1538,7 +1538,8 @@ code {
 }
 
 .live-field input,
-.live-field textarea {
+.live-field textarea,
+.live-field select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -1707,6 +1708,142 @@ code {
   color: var(--muted);
 }
 
+.mic-page,
+.mic-runtime-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.mic-layout-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.mic-toggle-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mic-toggle-field input[type='checkbox'] {
+  width: auto;
+}
+
+.mic-profile-card,
+.mic-runtime-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(9, 17, 31, 0.62);
+}
+
+.mic-profile-card strong,
+.mic-runtime-card strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.mic-profile-card p,
+.mic-runtime-card span {
+  margin: 0;
+  color: var(--muted);
+}
+
+.mic-level-meter {
+  overflow: hidden;
+  height: 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(9, 17, 31, 0.76);
+}
+
+.mic-level-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(50, 210, 150, 0.9), rgba(59, 161, 255, 0.96));
+}
+
+.mic-runtime-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.live-activity-card small {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.settings-page,
+.settings-grid,
+.settings-detail-list,
+.settings-notes-list,
+.settings-link-group {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-detail-list {
+  gap: 14px;
+}
+
+.settings-detail-list > div {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.settings-detail-list > div:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.settings-detail-list span,
+.settings-code-card span {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.settings-detail-list strong {
+  font-size: 0.98rem;
+}
+
+.settings-link-group {
+  grid-auto-flow: column;
+  justify-content: end;
+}
+
+.settings-notes-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.settings-code-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(9, 17, 31, 0.62);
+}
+
+.settings-code-card code {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(6, 11, 19, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  color: #d7efff;
+  word-break: break-all;
+}
+
+.settings-panel-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 @media (max-width: 1280px) {
   .live-summary-grid,
   .live-layout-grid {
@@ -1718,8 +1855,14 @@ code {
   .live-summary-grid,
   .live-layout-grid,
   .live-form-grid,
-  .live-presence-grid {
+  .live-presence-grid,
+  .mic-runtime-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-link-group {
+    grid-auto-flow: row;
+    justify-content: stretch;
   }
 }
 

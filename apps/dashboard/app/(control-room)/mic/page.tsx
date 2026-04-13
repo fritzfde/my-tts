@@ -1,6 +1,21 @@
-import { FeaturePage } from '@/components/control-room/feature-page';
-import { routePlans } from '@/lib/control-room';
+import { MicPageClient } from '@/components/mic/mic-page-client';
+import { getSettings } from '@/lib/api/settings';
 
-export default function MicPage() {
-  return <FeaturePage plan={routePlans.mic} />;
+export const dynamic = 'force-dynamic';
+
+export default async function MicPage() {
+  let settingsPayload = { scope: 'local-dev', settings: {} as Record<string, string> };
+
+  try {
+    settingsPayload = await getSettings();
+  } catch (error) {
+    console.warn('Falling back to empty /mic data during dashboard render:', error);
+  }
+
+  return (
+    <MicPageClient
+      initialScope={settingsPayload.scope}
+      initialSettings={settingsPayload.settings}
+    />
+  );
 }
