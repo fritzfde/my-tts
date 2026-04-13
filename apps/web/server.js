@@ -254,6 +254,7 @@ let tiktokViewerCount = 0;
 let tiktokTopViewers = [];
 let tiktokActiveUsers = new Map(); // uniqueId -> { uniqueId, nickname, avatar, source, lastSeen }
 let tiktokAvailableGifts = []; // [{ id, name, diamondCount, image }]
+let tiktokConnectedUsername = '';
 
 function rememberTikTokUser({ uniqueId, nickname, avatar }, source = 'event') {
     if (!uniqueId) return;
@@ -281,6 +282,25 @@ function resetTikTokAudienceState() {
     tiktokTopViewers = [];
     tiktokActiveUsers.clear();
     tiktokAvailableGifts = [];
+}
+
+function disconnectTikTokConnection() {
+    if (!tiktokConnection) {
+        tiktokConnectedUsername = '';
+        resetTikTokAudienceState();
+        return;
+    }
+
+    try {
+        tiktokConnection.removeAllListeners?.();
+        tiktokConnection.disconnect?.();
+    } catch (err) {
+        console.warn('TikTok disconnect warning:', err?.message || err);
+    }
+
+    tiktokConnection = null;
+    tiktokConnectedUsername = '';
+    resetTikTokAudienceState();
 }
 
 function normalizeTikTokGiftCatalog(gifts) {
@@ -379,13 +399,7 @@ app.post('/api/tiktok/connect', (req, res) => {
     }
 
     if (tiktokConnection) {
-        try {
-            tiktokConnection.removeAllListeners();
-            tiktokConnection.disconnect();
-        } catch (err) {
-            console.warn('TikTok disconnect-before-reconnect warning:', err?.message || err);
-        }
-        tiktokConnection = null;
+        disconnectTikTokConnection();
     }
 
     // Reset leaderboard on new connection
@@ -402,6 +416,7 @@ app.post('/api/tiktok/connect', (req, res) => {
     tiktokConnection = new WebcastPushConnection(username, tiktokConnectOptions);
 
     tiktokConnection.connect().then(state => {
+        tiktokConnectedUsername = username;
         const statsViewerCount = Number(state?.roomInfo?.stats?.userCount || state?.roomInfo?.stats?.viewerCount || 0);
         if (Number.isFinite(statsViewerCount) && statsViewerCount > 0) {
             tiktokViewerCount = statsViewerCount;
@@ -416,14 +431,7 @@ app.post('/api/tiktok/connect', (req, res) => {
     }).catch(err => {
         const failure = classifyTikTokConnectError(err);
         console.error(`❌ FAILURE:`, err.message);
-        try {
-            tiktokConnection?.removeAllListeners?.();
-            tiktokConnection?.disconnect?.();
-        } catch (cleanupErr) {
-            console.warn('TikTok cleanup warning:', cleanupErr?.message || cleanupErr);
-        }
-        tiktokConnection = null;
-        resetTikTokAudienceState();
+        disconnectTikTokConnection();
 
         if (failure.code === 'sign-rate-limited') {
             return res.status(429).json({
@@ -719,6 +727,19 @@ app.post('/api/tiktok/connect', (req, res) => {
         // Broadcast updated leaderboard
         broadcastLeaderboard();
     });
+});
+
+app.get('/api/tiktok/status', (req, res) => {
+    res.json({
+        connected: Boolean(tiktokConnection && tiktokConnection.isConnected),
+        username: tiktokConnectedUsername,
+        signMode: TIKTOK_SIGN_API_KEY ? 'api-key' : 'anonymous'
+    });
+});
+
+app.post('/api/tiktok/disconnect', (req, res) => {
+    disconnectTikTokConnection();
+    res.json({ success: true, connected: false });
 });
 
 // Separate route for polling
