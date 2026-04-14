@@ -1,25 +1,23 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildMicWsUrl, extractMicVoiceProfile, getMicHealth } from '@/lib/api/mic';
+import { extractMicVoiceProfile, getMicHealth } from '@/lib/api/mic';
 import {
   buildMicSettingsRecord,
   DEFAULT_MIC_ASR_BASE_URL,
   DEFAULT_MIC_VOICE_MATCH_THRESHOLD,
   normalizeVoiceMatchThreshold
 } from '@/lib/mic-settings';
+import { pcm16ToWavDataUrl, recordEnrollmentSample } from '@/lib/mic-browser';
 import { saveSettings } from '@/lib/api/settings';
+import { startGlobalMicListening, stopGlobalMicListening } from '@/lib/runtime/mic-runtime';
 import { useMicStore } from '@/lib/stores/mic-store';
 import type { PersistedSettingsRecord } from '@/lib/types/settings';
-import type { MicSettingsState, MicTranscriptEvent, MicVoiceProfile } from '@/lib/types/mic';
+import type { MicSettingsState, MicVoiceProfile } from '@/lib/types/mic';
 
 type MicPageClientProps = {
   initialScope: string;
   initialSettings: PersistedSettingsRecord;
-};
-
-type WindowWithWebkitAudioContext = Window & typeof globalThis & {
-  webkitAudioContext?: typeof AudioContext;
 };
 
 function formatClock(timestamp: number) {
@@ -36,101 +34,6 @@ function formatClock(timestamp: number) {
 
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
-}
-
-function computeInputLevel(input: Float32Array) {
-  if (!input?.length) return 0;
-  let sum = 0;
-  for (let index = 0; index < input.length; index += 1) {
-    sum += input[index] * input[index];
-  }
-  return Math.sqrt(sum / input.length);
-}
-
-function downsampleToPcm16(input: Float32Array, inSampleRate: number, outSampleRate = 16000) {
-  if (!input || !input.length) return new ArrayBuffer(0);
-
-  if (inSampleRate === outSampleRate) {
-    const out = new Int16Array(input.length);
-    for (let index = 0; index < input.length; index += 1) {
-      const sample = Math.max(-1, Math.min(1, input[index]));
-      out[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-    }
-    return out.buffer;
-  }
-
-  const ratio = inSampleRate / outSampleRate;
-  const outLength = Math.max(1, Math.round(input.length / ratio));
-  const out = new Int16Array(outLength);
-  let inOffset = 0;
-
-  for (let index = 0; index < outLength; index += 1) {
-    const nextOffset = Math.min(input.length, Math.round((index + 1) * ratio));
-    let accum = 0;
-    let count = 0;
-    for (let inner = inOffset; inner < nextOffset; inner += 1) {
-      accum += input[inner];
-      count += 1;
-    }
-    const sample = count ? accum / count : 0;
-    const clamped = Math.max(-1, Math.min(1, sample));
-    out[index] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
-    inOffset = nextOffset;
-  }
-
-  return out.buffer;
-}
-
-function concatArrayBuffers(buffers: ArrayBuffer[]) {
-  const totalLength = buffers.reduce((sum, buffer) => sum + buffer.byteLength, 0);
-  const merged = new Uint8Array(totalLength);
-  let offset = 0;
-  buffers.forEach((buffer) => {
-    merged.set(new Uint8Array(buffer), offset);
-    offset += buffer.byteLength;
-  });
-  return merged.buffer;
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    const chunk = bytes.subarray(offset, offset + chunkSize);
-    binary += String.fromCharCode(...chunk);
-  }
-  return btoa(binary);
-}
-
-function pcm16ToWavDataUrl(pcmBuffer: ArrayBuffer, sampleRate = 16000) {
-  const pcmBytes = new Uint8Array(pcmBuffer);
-  const wavBuffer = new ArrayBuffer(44 + pcmBytes.byteLength);
-  const view = new DataView(wavBuffer);
-  const bytes = new Uint8Array(wavBuffer);
-
-  function writeAscii(offset: number, value: string) {
-    for (let index = 0; index < value.length; index += 1) {
-      bytes[offset + index] = value.charCodeAt(index);
-    }
-  }
-
-  writeAscii(0, 'RIFF');
-  view.setUint32(4, 36 + pcmBytes.byteLength, true);
-  writeAscii(8, 'WAVE');
-  writeAscii(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeAscii(36, 'data');
-  view.setUint32(40, pcmBytes.byteLength, true);
-  bytes.set(pcmBytes, 44);
-
-  return `data:audio/wav;base64,${arrayBufferToBase64(wavBuffer)}`;
 }
 
 export function MicPageClient({ initialScope, initialSettings }: MicPageClientProps) {
@@ -165,20 +68,12 @@ export function MicPageClient({ initialScope, initialSettings }: MicPageClientPr
   const setVoiceMatchThreshold = useMicStore((state) => state.setVoiceMatchThreshold);
   const setHealth = useMicStore((state) => state.setHealth);
   const setListeningState = useMicStore((state) => state.setListeningState);
-  const setMicLevel = useMicStore((state) => state.setMicLevel);
-  const prependTranscript = useMicStore((state) => state.prependTranscript);
   const clearTranscripts = useMicStore((state) => state.clearTranscripts);
   const setNotice = useMicStore((state) => state.setNotice);
   const setError = useMicStore((state) => state.setError);
 
   const initializedRef = useRef(false);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
-  const sinkNodeRef = useRef<GainNode | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isPreviewingSample, setIsPreviewingSample] = useState(false);
 
@@ -211,9 +106,7 @@ export function MicPageClient({ initialScope, initialSettings }: MicPageClientPr
         previewAudioRef.current.pause();
         previewAudioRef.current = null;
       }
-      stopListening();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -236,45 +129,6 @@ export function MicPageClient({ initialScope, initialSettings }: MicPageClientPr
     };
   }, [commitSettingsState, currentSettingsState, hydrated, rawSettings, scope, setError]);
 
-  function teardownAudio() {
-    if (processorNodeRef.current) {
-      try {
-        processorNodeRef.current.disconnect();
-      } catch {}
-      processorNodeRef.current.onaudioprocess = null;
-      processorNodeRef.current = null;
-    }
-    if (sourceNodeRef.current) {
-      try {
-        sourceNodeRef.current.disconnect();
-      } catch {}
-      sourceNodeRef.current = null;
-    }
-    if (sinkNodeRef.current) {
-      try {
-        sinkNodeRef.current.disconnect();
-      } catch {}
-      sinkNodeRef.current = null;
-    }
-    if (audioContextRef.current) {
-      try {
-        void audioContextRef.current.close();
-      } catch {}
-      audioContextRef.current = null;
-    }
-    if (streamRef.current) {
-      try {
-        streamRef.current.getTracks().forEach((track) => track.stop());
-      } catch {}
-      streamRef.current = null;
-    }
-    setMicLevel(0);
-  }
-
-  function pushTranscript(event: MicTranscriptEvent) {
-    prependTranscript(event);
-  }
-
   async function refreshHealth() {
     try {
       const nextHealth = await getMicHealth(asrBaseUrl || DEFAULT_MIC_ASR_BASE_URL);
@@ -294,56 +148,6 @@ export function MicPageClient({ initialScope, initialSettings }: MicPageClientPr
       }
       return false;
     }
-  }
-
-  async function recordEnrollmentSample(durationMs = 5500) {
-    const AudioContextCtor = window.AudioContext || (window as WindowWithWebkitAudioContext).webkitAudioContext;
-    if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
-      throw new Error('Microphone capture is not supported in this browser');
-    }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
-    });
-
-    const audioContext = new AudioContextCtor();
-    const sourceNode = audioContext.createMediaStreamSource(stream);
-    const sinkNode = audioContext.createGain();
-    sinkNode.gain.value = 0;
-    const processorNode = audioContext.createScriptProcessor(2048, 1, 1);
-    const collected: ArrayBuffer[] = [];
-
-    processorNode.onaudioprocess = (event) => {
-      const input = event.inputBuffer.getChannelData(0);
-      setMicLevel(computeInputLevel(input));
-      const pcm = downsampleToPcm16(input, audioContext.sampleRate, 16000);
-      if (pcm.byteLength > 0) {
-        collected.push(pcm.slice(0));
-      }
-    };
-
-    sourceNode.connect(processorNode);
-    processorNode.connect(sinkNode);
-    sinkNode.connect(audioContext.destination);
-
-    await new Promise((resolve) => setTimeout(resolve, durationMs));
-
-    try {
-      processorNode.disconnect();
-      sourceNode.disconnect();
-      sinkNode.disconnect();
-    } catch {}
-    processorNode.onaudioprocess = null;
-    stream.getTracks().forEach((track) => track.stop());
-    await audioContext.close();
-    setMicLevel(0);
-
-    return concatArrayBuffers(collected);
   }
 
   async function handleEnrollVoice() {
@@ -418,216 +222,16 @@ export function MicPageClient({ initialScope, initialSettings }: MicPageClientPr
     setNotice('Voice profile cleared.');
   }
 
-  async function startListening() {
-    if (listening || connecting || enrolling) return;
-    if (voiceGateEnabled && !voiceProfile) {
-      setError('Only my voice is enabled, but no voice profile is enrolled yet.');
-      return;
-    }
-
-    const healthOk = await refreshHealth();
-    if (!healthOk) return;
-
-    const AudioContextCtor = window.AudioContext || (window as WindowWithWebkitAudioContext).webkitAudioContext;
-    if (!navigator.mediaDevices?.getUserMedia || !AudioContextCtor) {
-      setError('Microphone capture is not supported in this browser');
-      return;
-    }
-
-    setListeningState({ connecting: true, status: 'Connecting microphone to ASR...' });
-    clearTranscripts();
-
+  async function handleStartListening() {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: 1,
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true
-        }
-      });
-
-      const audioContext = new AudioContextCtor();
-      await audioContext.resume();
-      const sourceNode = audioContext.createMediaStreamSource(stream);
-      const sinkNode = audioContext.createGain();
-      sinkNode.gain.value = 0;
-      const processorNode = audioContext.createScriptProcessor(2048, 1, 1);
-      const socket = new WebSocket(buildMicWsUrl(asrBaseUrl, language));
-
-      streamRef.current = stream;
-      audioContextRef.current = audioContext;
-      sourceNodeRef.current = sourceNode;
-      sinkNodeRef.current = sinkNode;
-      processorNodeRef.current = processorNode;
-      socketRef.current = socket;
-      socket.binaryType = 'arraybuffer';
-
-      socket.onopen = () => {
-        if (voiceGateEnabled) {
-          socket.send(
-            JSON.stringify({
-              type: 'speaker_profile',
-              enabled: true,
-              threshold: voiceMatchThreshold,
-              profile: voiceProfile
-            })
-          );
-        } else {
-          socket.send(JSON.stringify({ type: 'speaker_profile', enabled: false }));
-        }
-
-        sourceNode.connect(processorNode);
-        processorNode.connect(sinkNode);
-        sinkNode.connect(audioContext.destination);
-
-        processorNode.onaudioprocess = (event) => {
-          if (!socketRef.current || socketRef.current.readyState !== WebSocket.OPEN) return;
-          const input = event.inputBuffer.getChannelData(0);
-          setMicLevel(computeInputLevel(input));
-          const pcm = downsampleToPcm16(input, audioContext.sampleRate, 16000);
-          if (pcm.byteLength > 0) {
-            socketRef.current.send(pcm);
-          }
-        };
-
-        setListeningState({
-          connecting: false,
-          listening: true,
-          status: triggerMode === 'suggest' ? 'Mic active • suggestion mode' : 'Mic active • listening'
-        });
-      };
-
-      socket.onmessage = (event) => {
-        try {
-          const message = JSON.parse(String(event.data || '{}'));
-          const timestamp = Date.now();
-
-          if (message.type === 'ready') {
-            setListeningState({
-              status: `Mic active • ${triggerMode === 'suggest' ? 'suggestion mode' : 'listening'} (vad=${Number(message.frame_ms || 0)}ms)`
-            });
-            return;
-          }
-
-          if (message.type === 'speaker_profile_status') {
-            setListeningState({
-              status: message.enabled
-                ? `Mic voice gate active at ${formatPercent(Number(message.speaker_threshold || voiceMatchThreshold))}`
-                : 'Mic active without voice gate'
-            });
-            return;
-          }
-
-          if (message.type === 'speaker_ignored') {
-            pushTranscript({
-              id: `speaker-ignored-${timestamp}`,
-              type: 'speaker_ignored',
-              text: 'Ignored non-matching voice',
-              detail: `${formatPercent(Number(message.speaker_similarity || 0))} < ${formatPercent(Number(message.speaker_threshold || voiceMatchThreshold))}`,
-              language,
-              confidence: 0,
-              durationMs: Number(message.segment_duration_ms || 0),
-              voiceSimilarity: Number(message.speaker_similarity || 0),
-              voiceThreshold: Number(message.speaker_threshold || voiceMatchThreshold),
-              timestamp
-            });
-            return;
-          }
-
-          if (message.type === 'ignored') {
-            pushTranscript({
-              id: `ignored-${timestamp}`,
-              type: 'ignored',
-              text: String(message.transcript_text || '').trim() || 'Ignored transcript',
-              detail: String(message.ignored_reason || 'ignored'),
-              language: String(message.language || language),
-              confidence: Number(message.asr_confidence || 0),
-              durationMs: Number(message.segment_duration_ms || 0),
-              voiceSimilarity: Number(message.speaker_similarity || 0),
-              voiceThreshold: Number(message.speaker_threshold || 0),
-              timestamp
-            });
-            return;
-          }
-
-          if (message.type === 'final') {
-            pushTranscript({
-              id: `final-${timestamp}`,
-              type: 'final',
-              text: String(message.transcript_text || '').trim(),
-              detail: `${String(message.language || language).toUpperCase()} • ${Math.round(Number(message.segment_duration_ms || 0))}ms`,
-              language: String(message.language || language),
-              confidence: Number(message.asr_confidence || 0),
-              durationMs: Number(message.segment_duration_ms || 0),
-              voiceSimilarity: Number(message.speaker_similarity || 0),
-              voiceThreshold: Number(message.speaker_threshold || 0),
-              timestamp
-            });
-            return;
-          }
-
-          if (message.type === 'error') {
-            pushTranscript({
-              id: `error-${timestamp}`,
-              type: 'error',
-              text: 'ASR error',
-              detail: String(message.detail || 'Unknown ASR error'),
-              language,
-              confidence: 0,
-              durationMs: 0,
-              voiceSimilarity: 0,
-              voiceThreshold: 0,
-              timestamp
-            });
-          }
-        } catch {
-          // ignore malformed payloads
-        }
-      };
-
-      socket.onerror = () => {
-        setError('Mic websocket error. Check the ASR URL and whether npm run start:asr is running.');
-      };
-
-      socket.onclose = () => {
-        teardownAudio();
-        setListeningState({
-          listening: false,
-          connecting: false,
-          status: 'Mic is inactive.'
-        });
-      };
+      await startGlobalMicListening();
     } catch (err) {
-      teardownAudio();
-      setListeningState({
-        listening: false,
-        connecting: false,
-        status: 'Mic failed to start.'
-      });
-      setError(err instanceof Error ? err.message : 'Mic failed to start');
+      setError(err instanceof Error ? err.message : 'Mic runtime is not available');
     }
   }
 
-  function stopListening() {
-    if (socketRef.current) {
-      try {
-        if (socketRef.current.readyState === WebSocket.OPEN) {
-          socketRef.current.send('flush');
-        }
-      } catch {}
-      try {
-        socketRef.current.close(1000, 'stop');
-      } catch {}
-      socketRef.current = null;
-    }
-
-    teardownAudio();
-    setListeningState({
-      listening: false,
-      connecting: false,
-      status: 'Mic is inactive.'
-    });
+  function handleStopListening() {
+    stopGlobalMicListening();
   }
 
   const voiceProfileSummary = voiceProfile
@@ -727,10 +331,10 @@ export function MicPageClient({ initialScope, initialSettings }: MicPageClientPr
               <button className="live-button" type="button" onClick={() => void refreshHealth()}>
                 Refresh health
               </button>
-              <button className="live-button is-primary" type="button" onClick={() => void startListening()} disabled={listening || connecting || enrolling}>
+              <button className="live-button is-primary" type="button" onClick={() => void handleStartListening()} disabled={listening || connecting || enrolling}>
                 {connecting ? 'Connecting…' : listening ? 'Listening…' : 'Start listening'}
               </button>
-              <button className="live-button is-ghost" type="button" onClick={stopListening} disabled={!listening && !connecting}>
+              <button className="live-button is-ghost" type="button" onClick={handleStopListening} disabled={!listening && !connecting}>
                 Stop
               </button>
             </div>

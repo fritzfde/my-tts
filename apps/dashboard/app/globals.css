@@ -1844,10 +1844,293 @@ code {
   line-height: 1.6;
 }
 
+.control-room-alert-rail {
+  position: fixed;
+  top: 28px;
+  right: 28px;
+  z-index: 80;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 48px));
+}
+
+.control-room-alert-card,
+.control-room-floating-widget,
+.control-room-mic-dock {
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(18px);
+}
+
+.control-room-alert-card {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(11, 19, 34, 0.88);
+}
+
+.control-room-alert-card span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.control-room-alert-card strong {
+  font-size: 0.96rem;
+}
+
+.control-room-alert-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.control-room-alert-card.is-error {
+  border-color: rgba(248, 113, 113, 0.32);
+  background: rgba(69, 19, 26, 0.86);
+}
+
+.control-room-floating-widget {
+  position: fixed;
+  right: 28px;
+  z-index: 70;
+  display: grid;
+  gap: 10px;
+  width: min(320px, calc(100vw - 48px));
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(11, 19, 34, 0.9);
+}
+
+.control-room-floating-widget-animation {
+  top: 188px;
+}
+
+.control-room-floating-widget-sound {
+  top: 480px;
+}
+
+.control-room-floating-badge {
+  display: inline-flex;
+  justify-self: flex-start;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(59, 161, 255, 0.18);
+  border: 1px solid rgba(59, 161, 255, 0.26);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d8ebff;
+}
+
+.control-room-floating-badge.is-live {
+  background: rgba(50, 210, 150, 0.16);
+  border-color: rgba(50, 210, 150, 0.26);
+  color: #cbf7e6;
+}
+
+.control-room-floating-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+}
+
+.control-room-floating-widget strong {
+  font-size: 1rem;
+}
+
+.control-room-floating-widget p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.control-room-floating-progress,
+.control-room-level-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.14);
+  overflow: hidden;
+}
+
+.control-room-floating-progress-fill,
+.control-room-level-bar-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #3ba1ff 0%, #32d296 100%);
+}
+
+.control-room-runtime-button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 161, 255, 0.24);
+  background: rgba(59, 161, 255, 0.14);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.control-room-runtime-button.is-ghost {
+  border-color: var(--line);
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--muted);
+}
+
+.control-room-runtime-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.control-room-mic-dock {
+  position: fixed;
+  left: 352px;
+  right: 28px;
+  bottom: 24px;
+  z-index: 75;
+  border-radius: 24px;
+  background: rgba(11, 19, 34, 0.94);
+  overflow: hidden;
+}
+
+.control-room-mic-dock-peek {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border: 0;
+  background: rgba(59, 161, 255, 0.12);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.control-room-mic-dock-peek span {
+  font-size: 0.74rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.control-room-mic-dock-body {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.control-room-mic-dock-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.control-room-mic-dock-kicker {
+  margin: 0 0 8px;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+
+.control-room-mic-dock-header strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.control-room-mic-dock-header small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.control-room-mic-dock-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.control-room-mic-dock-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.control-room-mic-dock-stat {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(17, 28, 47, 0.74);
+}
+
+.control-room-mic-dock-stat span {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.control-room-mic-transcripts {
+  display: grid;
+  gap: 10px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+.control-room-mic-transcript {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(17, 28, 47, 0.76);
+}
+
+.control-room-mic-transcript strong,
+.control-room-mic-transcript span,
+.control-room-mic-transcript time {
+  display: block;
+}
+
+.control-room-mic-transcript span,
+.control-room-mic-transcript time {
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.control-room-mic-transcript-final {
+  border-color: rgba(50, 210, 150, 0.26);
+}
+
+.control-room-mic-transcript-error {
+  border-color: rgba(248, 113, 113, 0.28);
+  background: rgba(61, 18, 24, 0.72);
+}
+
 @media (max-width: 1280px) {
   .live-summary-grid,
   .live-layout-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .control-room-mic-dock {
+    left: 20px;
   }
 }
 
@@ -1864,13 +2147,29 @@ code {
     grid-auto-flow: row;
     justify-content: stretch;
   }
+
+  .control-room-alert-rail,
+  .control-room-floating-widget,
+  .control-room-mic-dock {
+    position: static;
+    width: 100%;
+  }
+
+  .control-room-content {
+    gap: 16px;
+  }
+
+  .control-room-mic-dock-controls {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
   .live-panel-header,
   .live-actions-row,
   .live-activity-card header,
-  .live-viewer-row {
+  .live-viewer-row,
+  .control-room-mic-dock-header {
     flex-direction: column;
     align-items: flex-start;
   }

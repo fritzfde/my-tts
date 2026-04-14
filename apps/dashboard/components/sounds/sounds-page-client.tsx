@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { listKnownTikTokGiftNames } from '@/lib/api/platforms';
 import { deleteSound, generateSoundKeywords, listSounds, uploadSound } from '@/lib/api/sounds';
 import { saveSettings } from '@/lib/api/settings';
-import { legacyMediaUrl } from '@/lib/api/config';
+import { stopGlobalSoundPreview, toggleGlobalSoundPreview } from '@/lib/runtime/sound-runtime';
 import {
   applySoundDraftToState,
   buildKnownGiftNamesRecord,
@@ -70,7 +70,6 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
   const setGlobalVolume = useSoundsStore((state) => state.setGlobalVolume);
   const setViewerChatTriggersEnabled = useSoundsStore((state) => state.setViewerChatTriggersEnabled);
   const setSelectedSoundPath = useSoundsStore((state) => state.setSelectedSoundPath);
-  const setActiveSoundPath = useSoundsStore((state) => state.setActiveSoundPath);
   const setSounds = useSoundsStore((state) => state.setSounds);
   const upsertSound = useSoundsStore((state) => state.upsertSound);
   const removeSound = useSoundsStore((state) => state.removeSound);
@@ -84,7 +83,6 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isRefreshingGifts, setIsRefreshingGifts] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const initializedRef = useRef(false);
   const filterPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const globalVolumePersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -140,23 +138,11 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
 
   useEffect(() => {
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
       if (filterPersistTimerRef.current) clearTimeout(filterPersistTimerRef.current);
       if (globalVolumePersistTimerRef.current) clearTimeout(globalVolumePersistTimerRef.current);
       if (viewerGatePersistTimerRef.current) clearTimeout(viewerGatePersistTimerRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    if (!audioRef.current || !activeSoundPath) return;
-    audioRef.current.volume = Math.min(
-      1,
-      Math.max(0, (globalVolume / 100) * ((soundVolumes[activeSoundPath] ?? 100) / 100))
-    );
-  }, [activeSoundPath, globalVolume, soundVolumes]);
 
   async function persistSettingsState(nextState: SoundSettingsState, nextRawSettings?: PersistedSettingsRecord) {
     const resolvedRawSettings = nextRawSettings || buildPersistedSettingsRecord(rawSettings, nextState);
@@ -220,45 +206,15 @@ export function SoundsPageClient({ initialScope, initialSettings, initialSounds 
   );
 
   function stopPreview() {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
-    }
-    setActiveSoundPath('');
+    stopGlobalSoundPreview();
   }
 
   async function handlePlaySound(soundPath: string) {
     const normalizedPath = normalizeSoundPath(soundPath);
     if (!normalizedPath) return;
-    if (activeSoundPath === normalizedPath) {
-      stopPreview();
-      return;
-    }
-
-    stopPreview();
-
-    const audio = new Audio(legacyMediaUrl(normalizedPath));
-    audio.volume = Math.min(1, Math.max(0, (globalVolume / 100) * ((soundVolumes[normalizedPath] ?? 100) / 100)));
-    audio.addEventListener('ended', () => {
-      if (audioRef.current === audio) {
-        audioRef.current = null;
-        setActiveSoundPath('');
-      }
-    });
-    audio.addEventListener('pause', () => {
-      if (audioRef.current === audio && audio.currentTime === 0) {
-        audioRef.current = null;
-        setActiveSoundPath('');
-      }
-    });
-    audioRef.current = audio;
-    setActiveSoundPath(normalizedPath);
     try {
-      await audio.play();
+      await toggleGlobalSoundPreview(normalizedPath);
     } catch (err) {
-      audioRef.current = null;
-      setActiveSoundPath('');
       setError(err instanceof Error ? err.message : 'Failed to play sound');
     }
   }

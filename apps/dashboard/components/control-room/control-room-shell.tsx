@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { ControlRoomRuntime } from '@/components/control-room/control-room-runtime';
 import { migrationStatus, navigationGroups, shellRules } from '@/lib/control-room';
 
 type ControlRoomShellProps = {
@@ -81,6 +82,7 @@ export function ControlRoomShell({ children }: ControlRoomShellProps) {
         </header>
 
         <main className="control-room-content">{children}</main>
+        <ControlRoomRuntime />
       </div>
     </div>
   );
