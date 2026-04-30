@@ -11,6 +11,7 @@ import { useMicStore } from '@/lib/stores/mic-store';
 import { useSoundsStore } from '@/lib/stores/sounds-store';
 import { useVoicesStore } from '@/lib/stores/voices-store';
 import { normalizeSoundPath } from '@/lib/sounds-settings';
+import { ControlRoomLiveRuntime } from '@/components/control-room/control-room-live-runtime';
 import { ControlRoomMicRuntime } from '@/components/control-room/control-room-mic-runtime';
 
 type RuntimeAlertEntry = {
@@ -245,6 +246,7 @@ function ControlRoomAnimationWidget() {
 export function ControlRoomRuntime() {
   return (
     <>
+      <ControlRoomLiveRuntime />
       <ControlRoomSoundRuntime />
       <ControlRoomAnimationWidget />
       <ControlRoomAlertRail />

@@ -1775,7 +1775,8 @@ code {
 .settings-grid,
 .settings-detail-list,
 .settings-notes-list,
-.settings-link-group {
+.settings-link-group,
+.settings-actions-row {
   display: grid;
   gap: 18px;
 }
@@ -1811,6 +1812,37 @@ code {
 .settings-link-group {
   grid-auto-flow: column;
   justify-content: end;
+}
+
+.settings-actions-row {
+  justify-content: start;
+}
+
+.live-checkbox-field {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  background: rgba(9, 17, 31, 0.54);
+}
+
+.live-checkbox-field input {
+  margin-top: 4px;
+}
+
+.live-checkbox-field span {
+  display: block;
+  font-weight: 600;
+}
+
+.live-checkbox-field small {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  line-height: 1.5;
 }
 
 .settings-notes-list {
@@ -2081,6 +2113,80 @@ code {
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
+}
+
+.control-room-mic-suggestions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.control-room-mic-suggestion-card {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(17, 28, 47, 0.8);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, transform 0.18s ease, background 0.18s ease;
+}
+
+.control-room-mic-suggestion-card:hover {
+  border-color: rgba(59, 161, 255, 0.35);
+  transform: translateY(-1px);
+}
+
+.control-room-mic-suggestion-card.is-active {
+  border-color: rgba(50, 210, 150, 0.34);
+  background: rgba(16, 40, 36, 0.82);
+}
+
+.control-room-mic-suggestion-thumb,
+.control-room-mic-suggestion-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+}
+
+.control-room-mic-suggestion-thumb {
+  object-fit: cover;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.control-room-mic-suggestion-icon {
+  display: grid;
+  place-items: center;
+  background: rgba(59, 161, 255, 0.12);
+  border: 1px solid rgba(59, 161, 255, 0.18);
+}
+
+.control-room-mic-suggestion-icon span {
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.control-room-mic-suggestion-copy {
+  min-width: 0;
+}
+
+.control-room-mic-suggestion-copy strong,
+.control-room-mic-suggestion-copy span,
+.control-room-mic-suggestion-card small {
+  display: block;
+}
+
+.control-room-mic-suggestion-copy span,
+.control-room-mic-suggestion-card small {
+  color: var(--muted);
+  font-size: 0.86rem;
+  line-height: 1.45;
 }
 
 .control-room-mic-transcripts {
