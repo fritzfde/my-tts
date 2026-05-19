@@ -142,3 +142,12 @@ Additional high-value coverage to add during migration:
 - browser-level mic suggestion click -> live animation smoke
 - route-level Next.js smoke for page isolation once the first slices exist
 - typed API contract tests for wrapper functions around the current legacy routes
+
+## Current migration note
+
+The route-level Next.js smoke lane now exists:
+
+- `/Users/alex/Projects/my-tts/playwright.dashboard.config.js`
+- `/Users/alex/Projects/my-tts/tests/e2e/dashboard-smoke.spec.js`
+
+The biggest remaining gap against this baseline is still mic-trigger parity in the new shell runtime.

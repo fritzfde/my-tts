@@ -50,6 +50,28 @@ The shell owns:
 
 Each route should lazy-load only its own feature code.
 
+## Current status snapshot
+
+As of `2026-05-19`, the migration branch already has real routed pages for:
+
+- `/live`
+- `/sounds`
+- `/animations`
+- `/voices`
+- `/mic`
+- `/settings/integrations`
+- `/settings/overlays`
+
+The shell also already owns shared runtime surfaces for:
+
+- live platform runtime
+- sound preview runtime
+- floating animation live widget
+- global alert rail
+- mic dock runtime
+
+This means the migration is past scaffolding. The main unfinished parity area is the mic-trigger runtime and its test coverage, not the basic route structure.
+
 ## Migration rule
 
 Do not replace the working app in one step. Migrate feature slices under test coverage.
@@ -171,13 +193,13 @@ Rule:
 - keep popup form drafts local until save
 - do not port `app.js` into one giant React component
 
-## Immediate implementation target
+## Current implementation target
 
 The next practical coding milestone is:
 
-1. route-based app shell in `apps/dashboard`
-2. typed API wrappers around the current `/api/*` contract
-3. first real migrated slice: `/sounds`
+1. finish mic suggestion/auto-trigger parity in the shared shell runtime
+2. add stronger Next-side browser coverage for mic-trigger behavior
+3. run a final parity pass before deciding whether the Next app can become the primary dashboard
 
 ## Companion docs
 
@@ -185,3 +207,4 @@ Use these documents alongside this plan:
 
 - `/Users/alex/Projects/my-tts/docs/api-inventory.md`
 - `/Users/alex/Projects/my-tts/docs/migration-baseline.md`
+- `/Users/alex/Projects/my-tts/docs/agent-handoff.md`
